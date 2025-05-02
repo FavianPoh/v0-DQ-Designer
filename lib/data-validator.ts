@@ -1492,19 +1492,8 @@ function validateType(value: any, expectedType?: string): { isValid: boolean; me
 }
 
 function validateEnum(value: any, allowedValues?: any[]): { isValid: boolean; message: string } {
-  // If no allowed values are provided, or the value is null/undefined, validation passes
-  if (!allowedValues || allowedValues.length === 0) {
+  if (!allowedValues || value === null || value === undefined) {
     return { isValid: true, message: "" }
-  }
-
-  // For null/empty values, check if validation should pass
-  if (value === null || value === undefined || value === "") {
-    // Usually, null should not match any allowed value unless null is explicitly included
-    const includesNull = allowedValues.some((v) => v === null || v === undefined || v === "")
-    return {
-      isValid: includesNull,
-      message: includesNull ? "" : `Value must be one of: ${allowedValues.join(", ")}`,
-    }
   }
 
   // Improved type comparison - try both strict and loose comparison
@@ -1523,8 +1512,7 @@ function validateEnum(value: any, allowedValues?: any[]): { isValid: boolean; me
       return true
     }
 
-    // For extra safety, do a loose equality check
-    return value == allowedValue
+    return false
   })
 
   return {

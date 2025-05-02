@@ -218,7 +218,7 @@ const REGEX_EXAMPLES = [
   },
   {
     name: "URL",
-    pattern: "^(https?:\\/\\/)?([\\da-z.-]+)\\.([a-z.]{2,6})([/\\w .-]*)*/?$",
+    pattern: "^(https?:\\/\\/)?([\\da-z.-]+)\\.([a-z.]{2,6})([/\\w .-]*)*\\/?$",
     description: "Validates URLs",
   },
   { name: "Phone Number", pattern: "^\\+?[1-9]\\d{1,14}$", description: "Validates international phone numbers" },
@@ -1127,7 +1127,7 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
 
                 // Add common patterns
                 helpText += "Email: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$\n"
-                helpText += "URL: ^(https?:\\/\\/)?([\\da-z.-]+)\\.([a-z.]{2,6})([/\\w .-]*)*/?$\n"
+                helpText += "URL: ^(https?:\\/\\/)?([\\da-z.-]+)\\.([a-z.]{2,6})([/\\w .-]*)*\\/?$\n"
                 helpText += "Phone: ^\\+?[1-9]\\d{1,14}$\n"
                 helpText += "Date (YYYY-MM-DD): ^\\d{4}-\\d{2}-\\d{2}$\n"
                 helpText += "Password (min 8 chars, 1 letter, 1 number): ^(?=.*[A-Za-z])(?=.*\\d)[A-Za-z\\d]{8,}$\n"
@@ -1169,7 +1169,7 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
                       handleColumnConditionParameterChange(
                         index,
                         "pattern",
-                        "^(https?:\\/\\/)?([\\da-z.-]+)\\.([a-z.]{2,6})([/\\w .-]*)*/?$",
+                        "^(https?:\\/\\/)?([\\da-z.-]+)\\.([a-z.]{2,6})([/\\w .-]*)*\\/?$",
                       )
                       break
                     case "3":
@@ -1229,64 +1229,26 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
                 Array.isArray(condition.parameters.allowedValues) ? condition.parameters.allowedValues.join(", ") : ""
               }
               onChange={(e) => {
-                // Improved parsing of allowed values that handles commas and spaces properly
-                const inputValue = e.target.value;
-                
-                // Use regex to split by commas but handle quoted values
-                const rawValues = [];
-                let currentValue = "";
-                let inQuotes = false;
-                
-                // Parse the input character by character
-                for (let i = 0; i < inputValue.length; i++) {
-                  const char = inputValue[i];
-                  
-                  // Handle quotes
-                  if (char === '"' || char === "'") {
-                    inQuotes = !inQuotes;
-                    currentValue += char;
-                  } 
-                  // Handle commas (only split if not in quotes)
-                  else if (char === ',' && !inQuotes) {
-                    rawValues.push(currentValue.trim());
-                    currentValue = "";
-                  } 
-                  // Handle all other characters
-                  else {
-                    currentValue += char;
+                // Improved parsing of allowed values
+                const rawValues = e.target.value
+                  .split(",")
+                  .map((v) => v.trim())
+                  .filter((v) => v.length > 0);
+              
+                // Convert values to appropriate types (number if it looks like a number)
+                const processedValues = rawValues.map(val => {
+                  // Check if the value is a valid number
+                  const numVal = Number(val);
+                  if (!isNaN(numVal) && String(numVal) === val) {
+                    return numVal; // It's a valid number, store as number
                   }
-                }
-                
-                // Add the last value if there is one
-                if (currentValue.trim()) {
-                  rawValues.push(currentValue.trim());
-                }
-                
-                // Process the values (remove quotes and convert to appropriate types)
-                const processedValues = rawValues
-                  .filter(val => val !== "")
-                  .map(val => {
-                    // Remove surrounding quotes if present
-                    if ((val.startsWith('"') && val.endsWith('"')) || 
-                        (val.startsWith("'") && val.endsWith("'"))) {
-                      val = val.substring(1, val.length - 1);
-                    }
-                    
-                    // Convert to number if it looks like one
-                    const numVal = Number(val);
-                    if (!isNaN(numVal) && String(numVal) === val) {
-                      return numVal;
-                    }
-                    return val;
-                  });
+                  return val; // Keep as string
+                });
                 
                 handleColumnConditionParameterChange(index, "allowedValues", processedValues);
               }}
-              placeholder="e.g., active, pending, inactive, 'option, with comma'"
+              placeholder="e.g., active, pending, inactive"
             />
-            <p className="text-xs text-gray-500">
-              Use commas to separate values. Wrap values in quotes if they contain commas or leading/trailing spaces.
-            </p>
             {Array.isArray(condition.parameters.allowedValues) && condition.parameters.allowedValues.length > 0 && (
               <div className="mt-2 p-2 bg-muted rounded-md">
                 <p className="text-xs font-medium mb-1">Current allowed values:</p>
@@ -1297,7 +1259,7 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
                       className="inline-block px-2 py-1 bg-background rounded border text-xs"
                       title={`Type: ${typeof value}`}
                     >
-                      {JSON.stringify(value)}
+                      {String(value)}
                       <span className="text-xs text-muted-foreground ml-1">
                         ({typeof value})
                       </span>
@@ -1545,8 +1507,8 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
                   <SelectItem value="!=">Not equal to (!=)</SelectItem>
                   <SelectItem value="&gt;">Greater than (&gt;)</SelectItem>
                   <SelectItem value="&gt;=">Greater than or equal to (&gt;=)</SelectItem>
-                  <SelectItem value="<">Less than (&lt;)</SelectItem>
-                  <SelectItem value="<=">Less than or equal to (&lt;=)</SelectItem>
+                  <SelectItem value="&lt;">Less than (&lt;)</SelectItem>
+                  <SelectItem value="&lt;=">Less than or equal to (&lt;=)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1918,7 +1880,7 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
                   <SelectItem value="eu">European (DD/MM/YYYY)</SelectItem>
                   <SelectItem value="custom">Custom Format</SelectItem>
                 </SelectContent>
-              <p className="text-xs text-gray-500">
+                <p className="text-xs text-gray-500">
                   Select the expected format for date values.
                 </p>
               </div>
@@ -1949,7 +1911,7 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
     return (
       <div className="space-y-4">
         <div className="bg-muted p-4 rounded-md mb-4">
-          <h4 className="text-sm font-mediummmmmm mb-2">About Cross-Table Key Integrity</h4>
+          <h4 className="text-sm font-mediumm mb-2">About Cross-Table Key Integrity</h4>
           <p className="text-xs text-gray-700 mb-2">
             This rule validates that a value in one table exists in another table (foreign key check).
           </p>
@@ -1998,7 +1960,7 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
                     {column}
                   </SelectItem>
                 ))}
-            </SelectContent>
+              </SelectContent>
             </Select>
           </div>
         )}
@@ -2585,7 +2547,6 @@ Example: ${RULE_TYPE_EXAMPLES[columnConditions[0]?.ruleType]?.example}`,
                         <Checkbox
                           id={`col-${column}`}
                           checked={selectedSecondaryColumns.includes(column)}
-                          onChange={(e) => handleChange("enabled", e.target.checked)}
                           onCheckedChange={(checked) => handleSecondaryColumnToggle(column, checked)}
                         />
                         <Label htmlFor={`col-${column}`} className="text-sm font-normal">
