@@ -281,7 +281,7 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
   })
 
   // Add this with the other state variables
-  const [regexDialogOpen, setRegexDialogOpen] = useState(false);
+  const [regexDialogOpen, setRegexDialogOpen] = useState(false)
 
   // Initialize table columns for all tables
   useEffect(() => {
@@ -848,70 +848,80 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
         return (
           <div className="flex items-center justify-between">
             <Label htmlFor={`condition-${index}-pattern`}>Regex Pattern</Label>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="text-xs" 
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs"
               type="button"
               onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                
+                e.preventDefault()
+                e.stopPropagation()
+
                 // Create a simple text representation of regex examples
-                let helpText = "=== REGEX EXAMPLES ===\n\n";
-                
+                let helpText = "=== REGEX EXAMPLES ===\n\n"
+
                 // Add common patterns
-                helpText += "Email: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$\n";
-                helpText += "URL: ^(https?:\\/\\/)?([\\da-z.-]+)\\.([a-z.]{2,6})([/\\w .-]*)*\\/?$\n";
-                helpText += "Phone: ^\\+?[1-9]\\d{1,14}$\n";
-                helpText += "Date (YYYY-MM-DD): ^\\d{4}-\\d{2}-\\d{2}$\n";
-                helpText += "Password (min 8 chars, 1 letter, 1 number): ^(?=.*[A-Za-z])(?=.*\\d)[A-Za-z\\d]{8,}$\n";
-                helpText += "Alphanumeric: ^[a-zA-Z0-9]+$\n";
-                helpText += "ZIP Code: ^\\d{5}(-\\d{4})?$\n\n";
-                
+                helpText += "Email: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$\n"
+                helpText += "URL: ^(https?:\\/\\/)?([\\da-z.-]+)\\.([a-z.]{2,6})([/\\w .-]*)*\\/?$\n"
+                helpText += "Phone: ^\\+?[1-9]\\d{1,14}$\n"
+                helpText += "Date (YYYY-MM-DD): ^\\d{4}-\\d{2}-\\d{2}$\n"
+                helpText += "Password (min 8 chars, 1 letter, 1 number): ^(?=.*[A-Za-z])(?=.*\\d)[A-Za-z\\d]{8,}$\n"
+                helpText += "Alphanumeric: ^[a-zA-Z0-9]+$\n"
+                helpText += "ZIP Code: ^\\d{5}(-\\d{4})?$\n\n"
+
                 // Add syntax reference
-                helpText += "=== REGEX SYNTAX ===\n\n";
-                helpText += "^ - Start of string\n";
-                helpText += "$ - End of string\n";
-                helpText += ". - Any single character\n";
-                helpText += "\\d - Any digit (0-9)\n";
-                helpText += "\\w - Any word character (a-z, A-Z, 0-9, _)\n";
-                helpText += "\\s - Any whitespace character\n";
-                helpText += "[abc] - Any character in the brackets\n";
-                helpText += "[^abc] - Any character NOT in the brackets\n";
-                helpText += "a? - Zero or one of 'a'\n";
-                helpText += "a* - Zero or more of 'a'\n";
-                helpText += "a+ - One or more of 'a'\n";
-                
-                alert(helpText);
-                
+                helpText += "=== REGEX SYNTAX ===\n\n"
+                helpText += "^ - Start of string\n"
+                helpText += "$ - End of string\n"
+                helpText += ". - Any single character\n"
+                helpText += "\\d - Any digit (0-9)\n"
+                helpText += "\\w - Any word character (a-z, A-Z, 0-9, _)\n"
+                helpText += "\\s - Any whitespace character\n"
+                helpText += "[abc] - Any character in the brackets\n"
+                helpText += "[^abc] - Any character NOT in the brackets\n"
+                helpText += "a? - Zero or one of 'a'\n"
+                helpText += "a* - Zero or more of 'a'\n"
+                helpText += "a+ - One or more of 'a'\n"
+
+                alert(helpText)
+
                 // Ask if user wants to use a specific pattern
-                const usePattern = confirm("Would you like to use one of the example patterns?");
+                const usePattern = confirm("Would you like to use one of the example patterns?")
                 if (usePattern) {
-                  const pattern = prompt("Enter the pattern number to use:\n1. Email\n2. URL\n3. Phone\n4. Date\n5. Password\n6. Alphanumeric\n7. ZIP Code");
-                  
-                  switch(pattern) {
+                  const pattern = prompt(
+                    "Enter the pattern number to use:\n1. Email\n2. URL\n3. Phone\n4. Date\n5. Password\n6. Alphanumeric\n7. ZIP Code",
+                  )
+
+                  switch (pattern) {
                     case "1":
-                      handleColumnConditionParameterChange(index, "pattern", "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
-                      break;
+                      handleColumnConditionParameterChange(
+                        index,
+                        "pattern",
+                        "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+                      )
+                      break
                     case "2":
-                      handleColumnConditionParameterChange(index, "pattern", "^(https?:\\/\\/)?([\\da-z.-]+)\\.([a-z.]{2,6})([/\\w .-]*)*\\/?$");
-                      break;
+                      handleColumnConditionParameterChange(
+                        index,
+                        "pattern",
+                        "^(https?:\\/\\/)?([\\da-z.-]+)\\.([a-z.]{2,6})([/\\w .-]*)*\\/?$",
+                      )
+                      break
                     case "3":
-                      handleColumnConditionParameterChange(index, "pattern", "^\\+?[1-9]\\d{1,14}$");
-                      break;
+                      handleColumnConditionParameterChange(index, "pattern", "^\\+?[1-9]\\d{1,14}$")
+                      break
                     case "4":
-                      handleColumnConditionParameterChange(index, "pattern", "^\\d{4}-\\d{2}-\\d{2}$");
-                      break;
+                      handleColumnConditionParameterChange(index, "pattern", "^\\d{4}-\\d{2}-\\d{2}$")
+                      break
                     case "5":
-                      handleColumnConditionParameterChange(index, "pattern", "^(?=.*[A-Za-z])(?=.*\\d)[A-Za-z\\d]{8,}$");
-                      break;
+                      handleColumnConditionParameterChange(index, "pattern", "^(?=.*[A-Za-z])(?=.*\\d)[A-Za-z\\d]{8,}$")
+                      break
                     case "6":
-                      handleColumnConditionParameterChange(index, "pattern", "^[a-zA-Z0-9]+$");
-                      break;
+                      handleColumnConditionParameterChange(index, "pattern", "^[a-zA-Z0-9]+$")
+                      break
                     case "7":
-                      handleColumnConditionParameterChange(index, "pattern", "^\\d{5}(-\\d{4})?$");
-                      break;
+                      handleColumnConditionParameterChange(index, "pattern", "^\\d{5}(-\\d{4})?$")
+                      break
                   }
                 }
               }}
@@ -1141,17 +1151,17 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
               <div className="flex items-center gap-2">
                 <Label htmlFor={`condition-${index}-formula`}>Formula (JavaScript expression)</Label>
                 <Button
-                  variant="ghost" 
-                  size="icon" 
+                  variant="ghost"
+                  size="icon"
                   className="h-5 w-5 p-0"
                   type="button"
                   onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
+                    e.preventDefault()
+                    e.stopPropagation()
                     window.alert(
                       "Write a formula that returns true if valid, false if invalid. Use 'value' to refer to the primary column value and 'row' to access any column in the record.\n\n" +
-                      "Example: row.email ? true : row.phone && row.phone.length >= 10"
-                    );
+                        "Example: row.email ? true : row.phone && row.phone.length >= 10",
+                    )
                   }}
                 >
                   <HelpCircle className="h-3.5 w-3.5" />
@@ -1202,7 +1212,9 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
                 <p>
                   <strong>If email is blank, phone is required:</strong>
                 </p>
-                <pre className="bg-gray-100 p-1 rounded">row.email ? true : row.phone &amp;&amp; row.phone.length &gt; 0</pre>
+                <pre className="bg-gray-100 p-1 rounded">
+                  row.email ? true : row.phone &amp;&amp; row.phone.length &gt; 0
+                </pre>
 
                 <p>
                   <strong>Either email or phone must be provided:</strong>
@@ -1305,15 +1317,24 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
         <div className="bg-muted p-4 rounded-md mb-4">
           <h4 className="text-sm font-medium mb-2">About Cross-Table Composite Keys</h4>
           <p className="text-xs text-gray-700 mb-2">
-            This rule validates that a combination of columns (source columns) in the current table exists as a combination of columns (reference columns) in another table.
+            This rule validates that a combination of columns (source columns) in the current table exists as a
+            combination of columns (reference columns) in another table.
           </p>
           <div className="text-xs space-y-1">
-            <p><strong>Example:</strong> Validate that (firstName, lastName) in the current table exists as (firstName, lastName) in a contacts table.</p>
-            <p><strong>Source Columns:</strong> Columns from the current table that form the composite key.</p>
-            <p><strong>Reference Columns:</strong> Matching columns in the reference table that should contain the same combination of values.</p>
+            <p>
+              <strong>Example:</strong> Validate that (firstName, lastName) in the current table exists as (firstName,
+              lastName) in a contacts table.
+            </p>
+            <p>
+              <strong>Source Columns:</strong> Columns from the current table that form the composite key.
+            </p>
+            <p>
+              <strong>Reference Columns:</strong> Matching columns in the reference table that should contain the same
+              combination of values.
+            </p>
           </div>
         </div>
-        
+
         <div className="space-y-2">
           <Label htmlFor="referenceTable">Reference Table</Label>
           <Select
@@ -1340,14 +1361,16 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
             <div className="flex items-center gap-1">
               <Label>Source Columns</Label>
               <Button
-                variant="ghost" 
-                size="icon" 
+                variant="ghost"
+                size="icon"
                 className="h-5 w-5 p-0"
                 type="button"
                 onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  window.alert(`These columns from the source table (${getPrimaryTable()}) will be checked against the reference columns. The order matters - each source column will be matched with the corresponding reference column.`);
+                  e.preventDefault()
+                  e.stopPropagation()
+                  window.alert(
+                    `These columns from the source table (${getPrimaryTable()}) will be checked against the reference columns. The order matters - each source column will be matched with the corresponding reference column.`,
+                  )
                 }}
               >
                 <HelpCircle className="h-3.5 w-3.5" />
@@ -1411,6 +1434,7 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
                     <TooltipTrigger asChild>
                       <Button variant="ghost" size="icon" className="h-5 w-5 p-0">
                         <HelpCircle className="h-3.5 w-3.5" />
+                      </Button>
                     </TooltipTrigger>
                     <TooltipContent>
                       <p className="max-w-xs">
@@ -1469,9 +1493,7 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
               important.
             </p>
             {!formDebug.hasColumnsMatch && (
-              <p className="text-xs text-red-500">
-                The number of source columns and reference columns must match.
-              </p>
+              <p className="text-xs text-red-500">The number of source columns and reference columns must match.</p>
             )}
           </div>
         )}
@@ -1529,7 +1551,10 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
 
           <div className="space-y-2">
             <Label htmlFor="column">Column</Label>
-            <Select value={columnConditions[0]?.column || ""} onValueChange={(value) => handleColumnConditionChange(0, "column", value)}>
+            <Select
+              value={columnConditions[0]?.column || ""}
+              onValueChange={(value) => handleColumnConditionChange(0, "column", value)}
+            >
               <SelectTrigger id="column">
                 <SelectValue placeholder="Select column" />
               </SelectTrigger>
@@ -1548,51 +1573,54 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Label htmlFor="ruleType">Rule Type</Label>
-              <Button 
-                variant="ghost" 
-                size="icon" 
+              <Button
+                variant="ghost"
+                size="icon"
                 className="h-5 w-5 p-0"
                 type="button"
                 onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  window.alert("Select the type of validation rule to apply to this column.");
+                  e.preventDefault()
+                  e.stopPropagation()
+                  window.alert("Select the type of validation rule to apply to this column.")
                 }}
               >
                 <HelpCircle className="h-3.5 w-3.5" />
               </Button>
             </div>
-            
+
             {columnConditions[0]?.ruleType && (
               <>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="text-xs" 
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs"
                   type="button"
                   onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
+                    e.preventDefault()
+                    e.stopPropagation()
                     window.alert(
-                      `${RULE_TYPES.find(t => t.value === columnConditions[0]?.ruleType)?.label || "Rule Type"}\n\n` +
-                      `${RULE_TYPE_EXAMPLES[columnConditions[0]?.ruleType]?.explanation}\n\n` +
-                      `Example: ${RULE_TYPE_EXAMPLES[columnConditions[0]?.ruleType]?.example}`
-                    );
+                      `${RULE_TYPES.find((t) => t.value === columnConditions[0]?.ruleType)?.label || "Rule Type"}
+
+${RULE_TYPE_EXAMPLES[columnConditions[0]?.ruleType]?.explanation}
+
+Example: ${RULE_TYPE_EXAMPLES[columnConditions[0]?.ruleType]?.example}`,
+                    )
                   }}
                 >
                   View Example
                 </Button>
                 {/* Keep a hidden dialog for future implementation */}
                 <Dialog>
-                  <DialogContent style={{display: 'none'}}>
-            
-                  </DialogContent>
+                  <DialogContent style={{ display: "none" }}></DialogContent>
                 </Dialog>
               </>
             )}
           </div>
-          
-          <Select value={columnConditions[0]?.ruleType || ""} onValueChange={(value) => handleColumnConditionChange(0, "ruleType", value as RuleType)}>
+
+          <Select
+            value={columnConditions[0]?.ruleType || ""}
+            onValueChange={(value) => handleColumnConditionChange(0, "ruleType", value as RuleType)}
+          >
             <SelectTrigger id="ruleType">
               <SelectValue placeholder="Select rule type" />
             </SelectTrigger>
@@ -1627,7 +1655,10 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
             {columnConditions.length > 1 && (
               <div className="space-y-2">
                 <Label htmlFor={`condition-${index}-table`}>Table</Label>
-                <Select value={condition.table} onValueChange={(value) => handleColumnConditionChange(index, "table", value)}>
+                <Select
+                  value={condition.table}
+                  onValueChange={(value) => handleColumnConditionChange(index, "table", value)}
+                >
                   <SelectTrigger id={`condition-${index}-table`}>
                     <SelectValue placeholder="Select table" />
                   </SelectTrigger>
@@ -1645,7 +1676,10 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
             {columnConditions.length > 1 && (
               <div className="space-y-2">
                 <Label htmlFor={`condition-${index}-column`}>Column</Label>
-                <Select value={condition.column} onValueChange={(value) => handleColumnConditionChange(index, "column", value)}>
+                <Select
+                  value={condition.column}
+                  onValueChange={(value) => handleColumnConditionChange(index, "column", value)}
+                >
                   <SelectTrigger id={`condition-${index}-column`}>
                     <SelectValue placeholder="Select column" />
                   </SelectTrigger>
@@ -1663,7 +1697,10 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
             {columnConditions.length > 1 && (
               <div className="space-y-2">
                 <Label htmlFor={`condition-${index}-ruleType`}>Rule Type</Label>
-                <Select value={condition.ruleType} onValueChange={(value) => handleColumnConditionChange(index, "ruleType", value)}>
+                <Select
+                  value={condition.ruleType}
+                  onValueChange={(value) => handleColumnConditionChange(index, "ruleType", value)}
+                >
                   <SelectTrigger id={`condition-${index}-ruleType`}>
                     <SelectValue placeholder="Select rule type" />
                   </SelectTrigger>
@@ -1698,9 +1735,9 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
                 <div className="flex flex-col items-start">
                   <span>Secondary Columns</span>
                   <span className="text-xs text-gray-500 font-normal">
-                    {selectedSecondaryColumns.length > 0 
-                      ? `${selectedSecondaryColumns.length} column${selectedSecondaryColumns.length > 1 ? 's' : ''} selected` 
-                      : 'Optionally select additional columns to include in the validation'}
+                    {selectedSecondaryColumns.length > 0
+                      ? `${selectedSecondaryColumns.length} column${selectedSecondaryColumns.length > 1 ? "s" : ""} selected`
+                      : "Optionally select additional columns to include in the validation"}
                   </span>
                 </div>
               </AccordionTrigger>
@@ -1740,7 +1777,11 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
         </div>
 
         <div className="flex items-center space-x-2">
-          <Checkbox id="enabled" checked={rule.enabled} onCheckedChange={(checked) => handleChange("enabled", checked)} />
+          <Checkbox
+            id="enabled"
+            checked={rule.enabled}
+            onCheckedChange={(checked) => handleChange("enabled", checked)}
+          />
           <Label htmlFor="enabled" className="text-sm font-normal">
             Enabled
           </Label>
