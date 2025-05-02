@@ -218,7 +218,7 @@ const REGEX_EXAMPLES = [
   },
   {
     name: "URL",
-    pattern: "^(https?://)?([\\da-z.-]+)\\.([a-z.]{2,6})([/\\w .-]*)*/?$",
+    pattern: "^(https?:\\/\\/)?([\\da-z.-]+)\\.([a-z.]{2,6})([/\\w .-]*)*/?$",
     description: "Validates URLs",
   },
   { name: "Phone Number", pattern: "^\\+?[1-9]\\d{1,14}$", description: "Validates international phone numbers" },
@@ -1127,7 +1127,7 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
 
                 // Add common patterns
                 helpText += "Email: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$\n"
-                helpText += "URL: ^(https?:\\/\\/)?([\\da-z.-]+)\\.([a-z.]{2,6})([/\\w .-]*)*\\/?$\n"
+                helpText += "URL: ^(https?:\\/\\/)?([\\da-z.-]+)\\.([a-z.]{2,6})([/\\w .-]*)*/?$\n"
                 helpText += "Phone: ^\\+?[1-9]\\d{1,14}$\n"
                 helpText += "Date (YYYY-MM-DD): ^\\d{4}-\\d{2}-\\d{2}$\n"
                 helpText += "Password (min 8 chars, 1 letter, 1 number): ^(?=.*[A-Za-z])(?=.*\\d)[A-Za-z\\d]{8,}$\n"
@@ -1169,7 +1169,7 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
                       handleColumnConditionParameterChange(
                         index,
                         "pattern",
-                        "^(https?:\\/\\/)?([\\da-z.-]+)\\.([a-z.]{2,6})([/\\w .-]*)*\\/?$",
+                        "^(https?:\\/\\/)?([\\da-z.-]+)\\.([a-z.]{2,6})([/\\w .-]*)*/?$",
                       )
                       break
                     case "3":
@@ -1545,8 +1545,8 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
                   <SelectItem value="!=">Not equal to (!=)</SelectItem>
                   <SelectItem value="&gt;">Greater than (&gt;)</SelectItem>
                   <SelectItem value="&gt;=">Greater than or equal to (&gt;=)</SelectItem>
-                  <SelectItem value="&lt;">Less than (&lt;)</SelectItem>
-                  <SelectItem value="&lt;=">Less than or equal to (&lt;=)</SelectItem>
+                  <SelectItem value="<">Less than (&lt;)</SelectItem>
+                  <SelectItem value="<=">Less than or equal to (&lt;=)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1918,7 +1918,7 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
                   <SelectItem value="eu">European (DD/MM/YYYY)</SelectItem>
                   <SelectItem value="custom">Custom Format</SelectItem>
                 </SelectContent>
-                <p className="text-xs text-gray-500">
+              <p className="text-xs text-gray-500">
                   Select the expected format for date values.
                 </p>
               </div>
@@ -1949,7 +1949,7 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
     return (
       <div className="space-y-4">
         <div className="bg-muted p-4 rounded-md mb-4">
-          <h4 className="text-sm font-mediummmm mb-2">About Cross-Table Key Integrity</h4>
+          <h4 className="text-sm font-mediummmmmm mb-2">About Cross-Table Key Integrity</h4>
           <p className="text-xs text-gray-700 mb-2">
             This rule validates that a value in one table exists in another table (foreign key check).
           </p>
@@ -1998,7 +1998,7 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
                     {column}
                   </SelectItem>
                 ))}
-              </SelectContent>
+            </SelectContent>
             </Select>
           </div>
         )}
