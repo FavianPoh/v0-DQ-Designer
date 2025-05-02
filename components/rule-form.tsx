@@ -218,7 +218,7 @@ const REGEX_EXAMPLES = [
   },
   {
     name: "URL",
-    pattern: "^(https?:\\/\\/)?([\\da-z.-]+)\\.([a-z.]{2,6})([/\\w .-]*)*\\/?$",
+    pattern: "^(https?://)?([\\da-z.-]+)\\.([a-z.]{2,6})([/\\w .-]*)*/?$",
     description: "Validates URLs",
   },
   { name: "Phone Number", pattern: "^\\+?[1-9]\\d{1,14}$", description: "Validates international phone numbers" },
@@ -551,10 +551,19 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
     // If changing the rule type, update the first column condition
     if (field === "ruleType" && columnConditions.length > 0) {
       const updatedConditions = [...columnConditions]
+      
+      // For enum rule type, preserve the allowedValues parameter if it exists
+      let newParameters = {};
+      if (value === "enum" && updatedConditions[0].ruleType === "enum") {
+        newParameters = {
+          allowedValues: updatedConditions[0].parameters.allowedValues || []
+        };
+      }
+      
       updatedConditions[0] = {
         ...updatedConditions[0],
         ruleType: value,
-        parameters: {}, // Reset parameters when rule type changes
+        parameters: newParameters, // Use preserved parameters or empty object
       }
       setColumnConditions(updatedConditions)
 
@@ -699,14 +708,27 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
   // Handle column condition field change
   const handleColumnConditionChange = (index: number, field: keyof ColumnCondition, value: any) => {
     const updatedConditions = [...columnConditions]
-    updatedConditions[index] = {
-      ...updatedConditions[index],
-      [field]: value,
-    }
-
-    // If changing rule type, reset parameters
+    
+    // Special handling for rule type changes
     if (field === "ruleType") {
-      updatedConditions[index].parameters = {}
+      // Preserve parameters for enum rule type
+      let newParameters = {};
+      if (value === "enum" && updatedConditions[index].ruleType === "enum") {
+        newParameters = {
+          allowedValues: updatedConditions[index].parameters.allowedValues || []
+        };
+      }
+      
+      updatedConditions[index] = {
+        ...updatedConditions[index],
+        [field]: value,
+        parameters: newParameters,
+      }
+    } else {
+      updatedConditions[index] = {
+        ...updatedConditions[index],
+        [field]: value,
+      }
     }
 
     // If changing table, reset column
@@ -740,10 +762,18 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
           }))
         }
       } else if (field === "ruleType") {
+        // Preserve parameters for enum rule type
+        let newParameters = {};
+        if (value === "enum" && rule.ruleType === "enum") {
+          newParameters = {
+            allowedValues: rule.parameters.allowedValues || []
+          };
+        }
+        
         setRule((prev) => ({
           ...prev,
           ruleType: value,
-          parameters: {},
+          parameters: newParameters,
         }))
       } else if (field === "table") {
         setRule((prev) => ({
@@ -1198,18 +1228,84 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
               value={
                 Array.isArray(condition.parameters.allowedValues) ? condition.parameters.allowedValues.join(", ") : ""
               }
-              onChange={(e) =>
-                handleColumnConditionParameterChange(
-                  index,
-                  "allowedValues",
-                  e.target.value
-                    .split(",")
-                    .map((v) => v.trim())
-                    .filter((v) => v.length > 0),
-                )
-              }
-              placeholder="e.g., active, pending, inactive"
+              onChange={(e) => {
+                // Improved parsing of allowed values that handles commas and spaces properly
+                const inputValue = e.target.value;
+                
+                // Use regex to split by commas but handle quoted values
+                const rawValues = [];
+                let currentValue = "";
+                let inQuotes = false;
+                
+                // Parse the input character by character
+                for (let i = 0; i < inputValue.length; i++) {
+                  const char = inputValue[i];
+                  
+                  // Handle quotes
+                  if (char === '"' || char === "'") {
+                    inQuotes = !inQuotes;
+                    currentValue += char;
+                  } 
+                  // Handle commas (only split if not in quotes)
+                  else if (char === ',' && !inQuotes) {
+                    rawValues.push(currentValue.trim());
+                    currentValue = "";
+                  } 
+                  // Handle all other characters
+                  else {
+                    currentValue += char;
+                  }
+                }
+                
+                // Add the last value if there is one
+                if (currentValue.trim()) {
+                  rawValues.push(currentValue.trim());
+                }
+                
+                // Process the values (remove quotes and convert to appropriate types)
+                const processedValues = rawValues
+                  .filter(val => val !== "")
+                  .map(val => {
+                    // Remove surrounding quotes if present
+                    if ((val.startsWith('"') && val.endsWith('"')) || 
+                        (val.startsWith("'") && val.endsWith("'"))) {
+                      val = val.substring(1, val.length - 1);
+                    }
+                    
+                    // Convert to number if it looks like one
+                    const numVal = Number(val);
+                    if (!isNaN(numVal) && String(numVal) === val) {
+                      return numVal;
+                    }
+                    return val;
+                  });
+                
+                handleColumnConditionParameterChange(index, "allowedValues", processedValues);
+              }}
+              placeholder="e.g., active, pending, inactive, 'option, with comma'"
             />
+            <p className="text-xs text-gray-500">
+              Use commas to separate values. Wrap values in quotes if they contain commas or leading/trailing spaces.
+            </p>
+            {Array.isArray(condition.parameters.allowedValues) && condition.parameters.allowedValues.length > 0 && (
+              <div className="mt-2 p-2 bg-muted rounded-md">
+                <p className="text-xs font-medium mb-1">Current allowed values:</p>
+                <div className="flex flex-wrap gap-1">
+                  {condition.parameters.allowedValues.map((value, i) => (
+                    <span
+                      key={i}
+                      className="inline-block px-2 py-1 bg-background rounded border text-xs"
+                      title={`Type: ${typeof value}`}
+                    >
+                      {JSON.stringify(value)}
+                      <span className="text-xs text-muted-foreground ml-1">
+                        ({typeof value})
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )
 
@@ -1645,15 +1741,226 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
           </div>
         )
 
+      case "contains":
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor={`condition-${index}-searchString`}>Search String</Label>
+              <Input
+                id={`condition-${index}-searchString`}
+                value={condition.parameters.searchString || ""}
+                onChange={(e) => handleColumnConditionParameterChange(index, "searchString", e.target.value)}
+                placeholder="Enter text to search for"
+              />
+              <p className="text-xs text-gray-500">
+                The validation will check if the field value contains this string.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor={`condition-${index}-caseSensitive`} className="flex items-center gap-2">
+                <Checkbox
+                  id={`condition-${index}-caseSensitive`}
+                  checked={condition.parameters.caseSensitive || false}
+                  onCheckedChange={(checked) =>
+                    handleColumnConditionParameterChange(index, "caseSensitive", checked === true)
+                  }
+                />
+                <span>Case Sensitive</span>
+              </Label>
+              <p className="text-xs text-gray-500">If checked, the search will be case sensitive.</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor={`condition-${index}-matchType`}>Match Type</Label>
+              <Select
+                value={condition.parameters.matchType || "contains"}
+                onValueChange={(value) => handleColumnConditionParameterChange(index, "matchType", value)}
+              >
+                <SelectTrigger id={`condition-${index}-matchType`}>
+                  <SelectValue placeholder="Select match type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="contains">Contains</SelectItem>
+                  <SelectItem value="not-contains">Does Not Contain</SelectItem>
+                  <SelectItem value="starts-with">Starts With</SelectItem>
+                  <SelectItem value="ends-with">Ends With</SelectItem>
+                  <SelectItem value="exact">Exact Match</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-500">
+                Determines how the string should be matched against the field value.
+              </p>
+            </div>
+          </div>
+        )
+
+      case "date-before":
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor={`condition-${index}-compareDate`}>Before Date</Label>
+              <Input
+                id={`condition-${index}-compareDate`}
+                type="date"
+                value={condition.parameters.compareDate || ""}
+                onChange={(e) => handleColumnConditionParameterChange(index, "compareDate", e.target.value)}
+                placeholder="YYYY-MM-DD"
+              />
+              <p className="text-xs text-gray-500">The date value must be before this date.</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor={`condition-${index}-inclusive`} className="flex items-center gap-2">
+                <Checkbox
+                  id={`condition-${index}-inclusive`}
+                  checked={condition.parameters.inclusive || false}
+                  onCheckedChange={(checked) =>
+                    handleColumnConditionParameterChange(index, "inclusive", checked === true)
+                  }
+                />
+                <span>Inclusive (include the specified date)</span>
+              </Label>
+              <p className="text-xs text-gray-500">If checked, the date can be equal to the specified date.</p>
+            </div>
+          </div>
+        )
+
+      case "date-after":
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor={`condition-${index}-compareDate`}>After Date</Label>
+              <Input
+                id={`condition-${index}-compareDate`}
+                type="date"
+                value={condition.parameters.compareDate || ""}
+                onChange={(e) => handleColumnConditionParameterChange(index, "compareDate", e.target.value)}
+                placeholder="YYYY-MM-DD"
+              />
+              <p className="text-xs text-gray-500">The date value must be after this date.</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor={`condition-${index}-inclusive`} className="flex items-center gap-2">
+                <Checkbox
+                  id={`condition-${index}-inclusive`}
+                  checked={condition.parameters.inclusive || false}
+                  onCheckedChange={(checked) =>
+                    handleColumnConditionParameterChange(index, "inclusive", checked === true)
+                  }
+                />
+                <span>Inclusive (include the specified date)</span>
+              </Label>
+              <p className="text-xs text-gray-500">If checked, the date can be equal to the specified date.</p>
+            </div>
+          </div>
+        )
+
+      case "date-between":
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor={`condition-${index}-startDate`}>Start Date</Label>
+              <Input
+                id={`condition-${index}-startDate`}
+                type="date"
+                value={condition.parameters.startDate || ""}
+                onChange={(e) => handleColumnConditionParameterChange(index, "startDate", e.target.value)}
+                placeholder="YYYY-MM-DD"
+              />
+              <p className="text-xs text-gray-500">The date value must be after this start date.</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor={`condition-${index}-endDate`}>End Date</Label>
+              <Input
+                id={`condition-${index}-endDate`}
+                type="date"
+                value={condition.parameters.endDate || ""}
+                onChange={(e) => handleColumnConditionParameterChange(index, "endDate", e.target.value)}
+                placeholder="YYYY-MM-DD"
+              />
+              <p className="text-xs text-gray-500">The date value must be before this end date.</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor={`condition-${index}-inclusive`} className="flex items-center gap-2">
+                <Checkbox
+                  id={`condition-${index}-inclusive`}
+                  checked={condition.parameters.inclusive || false}
+                  onCheckedChange={(checked) =>
+                    handleColumnConditionParameterChange(index, "inclusive", checked === true)
+                  }
+                />
+                <span>Inclusive (include the specified dates)</span>
+              </Label>
+              <p className="text-xs text-gray-500">If checked, the date can be equal to the start or end date.</p>
+            </div>
+          </div>
+        )
+
+      case "date-format":
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor={`condition-${index}-format`}>Date Format</Label>
+              <Select
+                value={condition.parameters.format || "iso"}
+                onValueChange={(value) => handleColumnConditionParameterChange(index, "format", value)}
+              >
+                <SelectTrigger id={`condition-${index}-format`}>
+                  <SelectValue placeholder="Select date format" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="iso">ISO (YYYY-MM-DD)</SelectItem>
+                  <SelectItem value="us">US (MM/DD/YYYY)</SelectItem>
+                  <SelectItem value="eu">European (DD/MM/YYYY)</SelectItem>
+                  <SelectItem value="custom">Custom Format</SelectItem>
+                </SelectContent>
+                <p className="text-xs text-gray-500">
+                  Select the expected format for date values.
+                </p>
+              </div>
+
+              {condition.parameters.format === "custom" && (
+                <div className="space-y-2">
+                  <Label htmlFor={`condition-${index}-customFormat`}>Custom Format Pattern</Label>
+                  <Input
+                    id={`condition-${index}-customFormat`}
+                    value={condition.parameters.customFormat || ""}
+                    onChange={(e) => handleColumnConditionParameterChange(index, "customFormat", e.target.value)}
+                    placeholder="e.g., YYYY-MM-DD HH:mm:ss"
+                  />
+                  <p className="text-xs text-gray-500">
+                    Use YYYY for year, MM for month, DD for day, HH for hour, mm for minute, ss for second.
+                  </p>
+                </div>
+              )}
+            </div>
+          )
+
       default:
         return null
     }
   }
 
-  // Render parameters for the reference integrity rule type
   const renderReferenceIntegrityParameters = () => {
     return (
       <div className="space-y-4">
+        <div className="bg-muted p-4 rounded-md mb-4">
+          <h4 className="text-sm font-mediummmm mb-2">About Cross-Table Key Integrity</h4>
+          <p className="text-xs text-gray-700 mb-2">
+            This rule validates that a value in one table exists in another table (foreign key check).
+          </p>
+          <div className="text-xs space-y-1">
+            <p>
+              <strong>Example:</strong> Validate that userId in the orders table exists in the id column of the users
+              table.
+            </p>
+          </div>
+        </div>
+
         <div className="space-y-2">
           <Label htmlFor="referenceTable">Reference Table</Label>
           <Select
@@ -1910,8 +2217,7 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
                             {col}
                           </SelectItem>
                         ))}
-                    </SelectContent>
-                  </Select>
+                  </SelectContent>
                   <Button
                     type="button"
                     variant="ghost"
@@ -2279,6 +2585,7 @@ Example: ${RULE_TYPE_EXAMPLES[columnConditions[0]?.ruleType]?.example}`,
                         <Checkbox
                           id={`col-${column}`}
                           checked={selectedSecondaryColumns.includes(column)}
+                          onChange={(e) => handleChange("enabled", e.target.checked)}
                           onCheckedChange={(checked) => handleSecondaryColumnToggle(column, checked)}
                         />
                         <Label htmlFor={`col-${column}`} className="text-sm font-normal">

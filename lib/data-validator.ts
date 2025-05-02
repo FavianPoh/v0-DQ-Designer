@@ -831,7 +831,7 @@ function validateSingleColumnCondition(
     case "contains":
       return validateContains(
         value,
-        condition.parameters.searchStrings,
+        condition.parameters.searchString,
         condition.parameters.matchType,
         condition.parameters.caseSensitive,
       )
@@ -934,7 +934,7 @@ function validateRule(
     case "contains":
       ;({ isValid, message } = validateContains(
         value,
-        rule.parameters.searchStrings,
+        rule.parameters.searchString,
         rule.parameters.matchType,
         rule.parameters.caseSensitive,
       ))
@@ -1492,11 +1492,41 @@ function validateType(value: any, expectedType?: string): { isValid: boolean; me
 }
 
 function validateEnum(value: any, allowedValues?: any[]): { isValid: boolean; message: string } {
-  if (!allowedValues || value === null || value === undefined) {
+  // If no allowed values are provided, or the value is null/undefined, validation passes
+  if (!allowedValues || allowedValues.length === 0) {
     return { isValid: true, message: "" }
   }
 
-  const isValid = allowedValues.includes(value)
+  // For null/empty values, check if validation should pass
+  if (value === null || value === undefined || value === "") {
+    // Usually, null should not match any allowed value unless null is explicitly included
+    const includesNull = allowedValues.some((v) => v === null || v === undefined || v === "")
+    return {
+      isValid: includesNull,
+      message: includesNull ? "" : `Value must be one of: ${allowedValues.join(", ")}`,
+    }
+  }
+
+  // Improved type comparison - try both strict and loose comparison
+  // This handles cases where the value might be a number but allowed values are strings
+  const isValid = allowedValues.some((allowedValue) => {
+    // Try strict equality first
+    if (value === allowedValue) return true
+
+    // If value is a number, try comparing with numeric conversion of allowed value
+    if (typeof value === "number" && !isNaN(Number(allowedValue)) && value === Number(allowedValue)) {
+      return true
+    }
+
+    // If value is a string, try comparing with string conversion of allowed value
+    if (typeof value === "string" && String(allowedValue) === value) {
+      return true
+    }
+
+    // For extra safety, do a loose equality check
+    return value == allowedValue
+  })
+
   return {
     isValid,
     message: isValid ? "" : `Value must be one of: ${allowedValues.join(", ")}`,
@@ -1639,13 +1669,15 @@ function validateCustom(
   }
 }
 
+// Add or modify the validateContains function to handle the new searchString parameter
+
 function validateContains(
   value: any,
-  searchStrings?: string[],
-  matchType: "any" | "all" = "any",
+  searchString?: string,
+  matchType: "contains" | "not-contains" | "starts-with" | "ends-with" | "exact" = "contains",
   caseSensitive = false,
 ): { isValid: boolean; message: string } {
-  if (!searchStrings || searchStrings.length === 0 || value === null || value === undefined) {
+  if (!searchString || value === null || value === undefined) {
     return { isValid: true, message: "" }
   }
 
@@ -1658,29 +1690,44 @@ function validateContains(
 
   const stringValue = String(value)
   let valueToCheck = stringValue
-  let searchTerms = [...searchStrings]
+  let searchTerm = searchString
 
   // Handle case sensitivity
   if (!caseSensitive) {
     valueToCheck = stringValue.toLowerCase()
-    searchTerms = searchTerms.map((term) => term.toLowerCase())
+    searchTerm = searchString.toLowerCase()
   }
 
-  if (matchType === "all") {
-    // Check if ALL search strings are present
-    const isValid = searchTerms.every((term) => valueToCheck.includes(term))
-    return {
-      isValid,
-      message: isValid ? "" : `Value must contain all of: ${searchStrings.join(", ")}`,
-    }
-  } else {
-    // Check if ANY search string is present (default)
-    const isValid = searchTerms.some((term) => valueToCheck.includes(term))
-    return {
-      isValid,
-      message: isValid ? "" : `Value must contain at least one of: ${searchStrings.join(", ")}`,
-    }
+  let isValid = false
+  let message = ""
+
+  switch (matchType) {
+    case "contains":
+      isValid = valueToCheck.includes(searchTerm)
+      message = isValid ? "" : `Value must contain: "${searchString}"`
+      break
+    case "not-contains":
+      isValid = !valueToCheck.includes(searchTerm)
+      message = isValid ? "" : `Value must not contain: "${searchString}"`
+      break
+    case "starts-with":
+      isValid = valueToCheck.startsWith(searchTerm)
+      message = isValid ? "" : `Value must start with: "${searchString}"`
+      break
+    case "ends-with":
+      isValid = valueToCheck.endsWith(searchTerm)
+      message = isValid ? "" : `Value must end with: "${searchString}"`
+      break
+    case "exact":
+      isValid = valueToCheck === searchTerm
+      message = isValid ? "" : `Value must exactly match: "${searchString}"`
+      break
+    default:
+      isValid = valueToCheck.includes(searchTerm)
+      message = isValid ? "" : `Value must contain: "${searchString}"`
   }
+
+  return { isValid, message }
 }
 
 // Simple and direct formula validation function
@@ -2091,7 +2138,10 @@ function validateDateFormat(value: any, format?: string, customFormat?: string):
     }
 
     // Date objects are always valid for format checking
-    return { isValid: true, message: "" }
+    return {
+      isValid: true,
+      message: "",
+    }
   }
 
   // If it's not a Date object, check if it's a string in the right format
