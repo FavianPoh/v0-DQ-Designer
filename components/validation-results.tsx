@@ -1,12 +1,10 @@
 "use client"
 
-import type React from "react"
-
 import { useState, useMemo, useEffect, useRef } from "react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import type { DataTables, DataRecord } from "@/lib/types"
+import type { DataTables, DataRecord, DataQualityRule, ValueList, ValidationResult } from "@/lib/types"
 import {
   AlertTriangle,
   CheckCircle,
@@ -15,10 +13,8 @@ import {
   AlertOctagon,
   RefreshCw,
   Edit,
-  Eye,
   Info,
   TableIcon,
-  Calendar,
   XCircle,
   ChevronDown,
   ChevronUp,
@@ -32,7 +28,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { RuleForm } from "@/components/rule-form"
-import type { DataQualityRule, ValueList, ValidationResult } from "@/lib/types"
 import { Input } from "@/components/ui/input"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
@@ -47,6 +42,8 @@ interface ValidationResultsProps {
   showPassingRules?: boolean
   onTogglePassingRules?: () => void
   onRowClick?: (result: ValidationResult) => void
+  onViewData?: (result: ValidationResult) => void
+  onEditRule?: (rule: DataQualityRule) => void
 }
 
 export function ValidationResults({
@@ -60,13 +57,15 @@ export function ValidationResults({
   showPassingRules = false,
   onTogglePassingRules,
   onRowClick,
+  onViewData,
+  onEditRule,
 }: ValidationResultsProps) {
   // Filter states
   const [filterTable, setFilterTable] = useState<string>("all")
   const [filterColumn, setFilterColumn] = useState<string>("all")
   const [filterRule, setFilterRule] = useState<string>("all")
   const [filterSeverity, setFilterSeverity] = useState<string>("all")
-  const [showPassingRows, setShowPassingRows] = useState<boolean>(showPassingRules)
+  const [showPassingValidations, setShowPassingValidations] = useState<boolean>(showPassingRules)
   const [activeTab, setActiveTab] = useState<string>("issues")
   const [filterRuleType, setFilterRuleType] = useState<string>("all")
 
@@ -82,7 +81,6 @@ export function ValidationResults({
   const [editRuleDialogOpen, setEditRuleDialogOpen] = useState<boolean>(false)
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null)
 
-  const [displayResults, setDisplayResults] = useState<ValidationResult[]>([])
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" } | null>(null)
   const [filters, setFilters] = useState<Record<string, string>>({})
@@ -99,13 +97,97 @@ export function ValidationResults({
     { key: "severity", label: "Severity" },
   ]
 
+  // Sync the showPassingValidations state with the prop
+  useEffect(() => {
+    setShowPassingValidations(showPassingRules)
+    console.log("showPassingRules prop changed:", showPassingRules)
+  }, [showPassingRules])
+
+  // Log the current state of showPassingValidations
+  useEffect(() => {
+    console.log("showPassingValidations state:", showPassingValidations)
+  }, [showPassingValidations])
+
+  // Filter results based on current filters and showPassingValidations
+  const filteredResults = useMemo(() => {
+    console.log(
+      "Filtering results. Show passing:",
+      showPassingValidations,
+      "Initial results count:",
+      initialResults.length,
+      "Success results:",
+      initialResults.filter((r) => r.severity === "success").length,
+    )
+    console.log("Initial results:", initialResults)
+
+    // Count results by severity
+    const countBySeverity = initialResults.reduce(
+      (acc, result) => {
+        acc[result.severity] = (acc[result.severity] || 0) + 1
+        return acc
+      },
+      {} as Record<string, number>,
+    )
+
+    console.log("Results by severity:", countBySeverity)
+
+    return initialResults.filter((result) => {
+      // Apply table filter
+      if (filterTable !== "all" && result.table !== filterTable) {
+        return false
+      }
+
+      // Apply column filter
+      if (filterColumn !== "all" && result.column !== filterColumn) {
+        return false
+      }
+
+      // Apply rule filter
+      if (filterRule !== "all" && result.ruleName !== filterRule) {
+        return false
+      }
+
+      // Apply severity filter
+      if (filterSeverity !== "all" && result.severity !== filterSeverity) {
+        return false
+      }
+
+      // Apply rule type filter
+      if (filterRuleType !== "all") {
+        const ruleDefinition = rules.find(
+          (r) => r.id === result.ruleId || r.name === result.ruleName || result.ruleName.includes(`[ID: ${r.id}]`),
+        )
+        if (!ruleDefinition || ruleDefinition.ruleType !== filterRuleType) {
+          return false
+        }
+      }
+
+      // Filter out success results if showPassingValidations is false
+      if (!showPassingValidations && result.severity === "success") {
+        return false
+      }
+
+      return true
+    })
+  }, [
+    initialResults,
+    filterTable,
+    filterColumn,
+    filterRule,
+    filterSeverity,
+    filterRuleType,
+    showPassingValidations,
+    rules,
+  ])
+
   // Compute derived data using useMemo to avoid recalculations on every render
+  /*
   const {
     allColumns,
     availableColumns,
     uniqueRules,
     availableRules,
-    filteredResults,
+    filteredResults: computedFilteredResults,
     passingResults,
     totalIssues,
     totalFailures,
@@ -397,6 +479,7 @@ export function ValidationResults({
     rules,
     activeTab,
   ])
+  */
 
   // Calculate optimal column widths based on content
   useEffect(() => {
@@ -415,7 +498,10 @@ export function ValidationResults({
       })
 
       // Add padding and cap maximum width
-      return Math.min(Math.max(maxWidth + 24, 100), 300)
+      if (column === "message") {
+        return Math.min(Math.max(maxWidth + 24, 100), 400) // Allow message column to be wider
+      }
+      return Math.min(Math.max(maxWidth + 24, 100), 200)
     }
 
     const widths: Record<string, number> = {}
@@ -432,6 +518,7 @@ export function ValidationResults({
   }, [initialResults])
 
   // Apply sorting and filtering to data
+  /*
   useEffect(() => {
     let filteredResults = [...initialResults]
 
@@ -470,6 +557,35 @@ export function ValidationResults({
 
     setDisplayResults(filteredResults)
   }, [initialResults, sortConfig, filters])
+  */
+
+  // Apply sorting to filtered results
+  const sortedResults = useMemo(() => {
+    const results = [...filteredResults]
+
+    if (sortConfig !== null) {
+      results.sort((a, b) => {
+        const aValue = (a as any)[sortConfig.key]
+        const bValue = (b as any)[sortConfig.key]
+
+        // Handle null/undefined values
+        if (aValue === null || aValue === undefined) return sortConfig.direction === "asc" ? -1 : 1
+        if (bValue === null || bValue === undefined) return sortConfig.direction === "asc" ? 1 : -1
+
+        // Special handling for rowIndex which should be sorted numerically
+        if (sortConfig.key === "rowIndex") {
+          return sortConfig.direction === "asc" ? aValue - bValue : bValue - aValue
+        }
+
+        // Default string comparison
+        const aString = String(aValue).toLowerCase()
+        const bString = String(bValue).toLowerCase()
+        return sortConfig.direction === "asc" ? aString.localeCompare(bString) : bString.localeCompare(aString)
+      })
+    }
+
+    return results
+  }, [filteredResults, sortConfig])
 
   // Add this useEffect to reset the rule filter when rule type changes
   useEffect(() => {
@@ -600,13 +716,15 @@ export function ValidationResults({
 
           // Add the table data if it exists and isn't the main table
           if (tableName && tableName !== result.table.toLowerCase() && initialDatasets[tableName]) {
-            relatedData[tableName] = initialDatasets[tableName]
+            const tableData = initialDatasets[tableName]
+            relatedData[tableName] = tableData
           } else if (
             tableName &&
             tableName !== result.table.toLowerCase() &&
             initialDatasets[tableName.toLowerCase()]
           ) {
             // Try case-insensitive match
+            const tableData = initialDatasets[tableName.toLowerCase()]
             relatedData[tableName.toLowerCase()] = initialDatasets[tableName.toLowerCase()]
           }
         })
@@ -634,6 +752,11 @@ export function ValidationResults({
     })
 
     setRowDataDialogOpen(true)
+
+    // Call the onViewData prop if provided
+    if (onViewData) {
+      onViewData(result)
+    }
   }
 
   const handleRuleClick = (ruleId: string) => {
@@ -655,6 +778,15 @@ export function ValidationResults({
     }
   }, [initialResults])
 
+  const handleTogglePassingValidations = (checked: boolean) => {
+    console.log("Toggle passing validations:", checked)
+    setShowPassingValidations(checked)
+    if (onTogglePassingRules) {
+      onTogglePassingRules()
+    }
+  }
+
+  /*
   const handleTogglePassingRows = (checked: boolean) => {
     setShowPassingRows(checked)
     if (onTogglePassingRules) {
@@ -665,6 +797,77 @@ export function ValidationResults({
   useEffect(() => {
     setShowPassingRows(showPassingRules)
   }, [showPassingRules])
+  */
+
+  const [selectedTable, setSelectedTable] = useState<string | null>(null)
+  const [selectedRule, setSelectedRule] = useState<string | null>(null)
+  const [selectedSeverity, setSelectedSeverity] = useState<string | null>(null)
+
+  /*
+  const filteredResults = useMemo(() => {
+    let filtered = initialResults
+
+    // Apply table filter if selected
+    if (filterTable !== "all") {
+      filtered = filtered.filter((result) => result.table === filterTable)
+    }
+
+    // Apply rule filter if selected
+    if (filterRule !== "all") {
+      filtered = filtered.filter((result) => result.ruleName === filterRule)
+    }
+
+    // Apply severity filter if selected
+    if (filterSeverity !== "all") {
+      filtered = filtered.filter((result) => result.severity === filterSeverity)
+    }
+
+    // Filter out passing validations unless showPassingValidations is true
+    if (!showPassingValidations) {
+      filtered = filtered.filter((result) => result.severity !== "success")
+    }
+
+    return filtered
+  }, [initialResults, filterTable, filterRule, filterSeverity, showPassingValidations])
+  */
+
+  // Calculate statistics
+  const stats = useMemo(() => {
+    const totalIssues = initialResults.filter((r) => r.severity !== "success").length
+    const totalFailures = initialResults.filter((r) => r.severity === "failure").length
+    const totalWarnings = initialResults.filter((r) => r.severity === "warning").length
+    const totalSuccess = initialResults.filter((r) => r.severity === "success").length
+
+    // Calculate total records across all tables or for the filtered table
+    const totalRecords =
+      filterTable !== "all"
+        ? initialDatasets[filterTable]?.length || 0
+        : Object.values(initialDatasets).reduce((sum, tableData) => sum + tableData.length, 0)
+
+    // Calculate failure records
+    const failureRecordsByTable = new Map<string, Set<number>>()
+    initialResults
+      .filter((r) => r.severity === "failure")
+      .forEach((r) => {
+        if (!failureRecordsByTable.has(r.table)) {
+          failureRecordsByTable.set(r.table, new Set())
+        }
+        failureRecordsByTable.get(r.table)?.add(r.rowIndex)
+      })
+
+    const failureRecords = Array.from(failureRecordsByTable.values()).reduce((sum, set) => sum + set.size, 0)
+    const passRate = totalRecords > 0 ? ((totalRecords - failureRecords) / totalRecords) * 100 : 100
+
+    return {
+      totalIssues,
+      totalFailures,
+      totalWarnings,
+      totalSuccess,
+      totalRecords,
+      failureRecords,
+      passRate,
+    }
+  }, [initialResults, initialDatasets, filterTable])
 
   return (
     <div className="space-y-6">
@@ -683,9 +886,9 @@ export function ValidationResults({
             <CardDescription>All validation issues</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{totalIssues}</div>
+            <div className="text-3xl font-bold">{stats.totalIssues}</div>
             <div className="text-sm text-muted-foreground mt-1">
-              {totalFailures} failures, {totalWarnings} warnings
+              {stats.totalFailures} failures, {stats.totalWarnings} warnings
             </div>
           </CardContent>
         </Card>
@@ -697,7 +900,7 @@ export function ValidationResults({
           </CardHeader>
           <CardContent>
             <div className="flex items-center">
-              <div className="text-3xl font-bold text-red-500">{totalFailures}</div>
+              <div className="text-3xl font-bold text-red-500">{stats.totalFailures}</div>
               <AlertOctagon className="ml-2 h-5 w-5 text-red-500" />
             </div>
           </CardContent>
@@ -710,7 +913,7 @@ export function ValidationResults({
           </CardHeader>
           <CardContent>
             <div className="flex items-center">
-              <div className="text-3xl font-bold text-amber-500">{totalWarnings}</div>
+              <div className="text-3xl font-bold text-amber-500">{stats.totalWarnings}</div>
               <AlertTriangle className="ml-2 h-5 w-5 text-amber-500" />
             </div>
           </CardContent>
@@ -723,8 +926,8 @@ export function ValidationResults({
           </CardHeader>
           <CardContent>
             <div className="flex items-center">
-              <div className="text-3xl font-bold">{passRate.toFixed(1)}%</div>
-              {passRate >= 90 ? (
+              <div className="text-3xl font-bold">{stats.passRate.toFixed(1)}%</div>
+              {stats.passRate >= 90 ? (
                 <CheckCircle className="ml-2 h-5 w-5 text-green-500" />
               ) : (
                 <AlertCircle className="ml-2 h-5 w-5 text-amber-500" />
@@ -771,11 +974,18 @@ export function ValidationResults({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Columns</SelectItem>
-                {availableColumns.map((column) => (
-                  <SelectItem key={column} value={column}>
-                    {column}
-                  </SelectItem>
-                ))}
+                {Object.keys(initialDatasets)
+                  .flatMap((tableName) => {
+                    const tableData = initialDatasets[tableName]
+                    return tableData.length > 0 ? Object.keys(tableData[0]) : []
+                  })
+                  .filter((value, index, self) => self.indexOf(value) === index)
+                  .sort()
+                  .map((column) => (
+                    <SelectItem key={column} value={column}>
+                      {column}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
 
@@ -785,12 +995,13 @@ export function ValidationResults({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Rule Types</SelectItem>
-                {/* Show only the distinct rule types that exist in the rules */}
-                {ruleTypes.map((type) => (
-                  <SelectItem key={type} value={type}>
-                    {type.charAt(0).toUpperCase() + type.slice(1).replace(/-/g, " ")}
-                  </SelectItem>
-                ))}
+                {Array.from(new Set(rules.map((r) => r.ruleType)))
+                  .sort()
+                  .map((type) => (
+                    <SelectItem key={type} value={type}>
+                      {type.charAt(0).toUpperCase() + type.slice(1).replace(/-/g, " ")}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
 
@@ -800,11 +1011,13 @@ export function ValidationResults({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Rules</SelectItem>
-                {availableRules.map((rule) => (
-                  <SelectItem key={rule} value={rule}>
-                    {rule.replace(/ \[ID: [a-zA-Z0-9-]+\]$/, "")}
-                  </SelectItem>
-                ))}
+                {Array.from(new Set(initialResults.map((r) => r.ruleName)))
+                  .sort()
+                  .map((rule) => (
+                    <SelectItem key={rule} value={rule}>
+                      {rule.replace(/ \[ID: [a-zA-Z0-9-]+\]$/, "")}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
 
@@ -824,68 +1037,12 @@ export function ValidationResults({
       </div>
 
       <div className="flex items-center space-x-2">
-        <Switch
-          id="show-passing"
-          checked={showPassingRows}
-          onCheckedChange={(checked) => {
-            setShowPassingRows(checked)
-            if (onTogglePassingRules) {
-              onTogglePassingRules()
-            }
-          }}
-        />
+        <Switch id="show-passing" checked={showPassingValidations} onCheckedChange={handleTogglePassingValidations} />
         <Label htmlFor="show-passing" className="text-sm">
-          Show passing validations
+          Show passing validations {showPassingValidations ? "(on)" : "(off)"} - {stats.totalSuccess} passing
+          validations
         </Label>
       </div>
-
-      {/*
-      {showPassingRows ? (
-        <Tabs value={activeTab} onValueChange={handleTabChange}>
-          <TabsList>
-            <TabsTrigger value="issues">Issues ({filteredResults.length})</TabsTrigger>
-            <TabsTrigger value="passing">Passing ({passingResults.length})</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="issues">
-            {renderResultsTable(
-              filteredResults,
-              initialDatasets,
-              onRuleClick,
-              false,
-              handleViewRowData,
-              setEditingRuleId,
-              setEditRuleDialogOpen,
-              rules,
-            )}
-          </TabsContent>
-
-          <TabsContent value="passing">
-            {renderResultsTable(
-              passingResults,
-              initialDatasets,
-              onRuleClick,
-              true,
-              handleViewRowData,
-              setEditingRuleId,
-              setEditRuleDialogOpen,
-              rules,
-            )}
-          </TabsContent>
-        </Tabs>
-      ) : (
-        renderResultsTable(
-          filteredResults,
-          initialDatasets,
-          onRuleClick,
-          false,
-          handleViewRowData,
-          setEditingRuleId,
-          setEditRuleDialogOpen,
-          rules,
-        )
-      )}
-      */}
 
       <div className="rounded-md border">
         <ScrollArea className="h-[600px] w-full">
@@ -946,32 +1103,96 @@ export function ValidationResults({
                     )}
                   </TableHead>
                 ))}
+                <TableHead className="w-[100px]">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {displayResults.length > 0 ? (
-                displayResults.map((result, index) => (
+              {sortedResults.length > 0 ? (
+                sortedResults.map((result, index) => (
                   <TableRow
                     key={index}
                     className={onRowClick ? "cursor-pointer hover:bg-gray-50" : ""}
                     onClick={() => onRowClick && onRowClick(result)}
                   >
                     <TableCell>{result.table}</TableCell>
-                    <TableCell>{result.ruleName}</TableCell>
+                    <TableCell>{result.ruleName.replace(/ \[ID: [a-zA-Z0-9-]+\]$/, "")}</TableCell>
                     <TableCell>{result.rowIndex}</TableCell>
                     <TableCell>{result.column}</TableCell>
                     <TableCell>{result.message}</TableCell>
                     <TableCell>
-                      <Badge variant={result.severity === "failure" ? "destructive" : "warning"}>
-                        {result.severity}
-                      </Badge>
+                      {result.severity === "success" ? (
+                        <Badge className="bg-green-100 text-green-800 hover:bg-green-200 border-green-300">
+                          Passed
+                        </Badge>
+                      ) : result.severity === "warning" ? (
+                        <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-200 border-amber-300">
+                          Warning
+                        </Badge>
+                      ) : (
+                        <Badge variant="destructive">Failure</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            e.preventDefault()
+                            handleViewRowData(result)
+                          }}
+                          className="h-8 w-8 p-0"
+                          title="View row data"
+                        >
+                          <Info className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            e.preventDefault()
+                            const ruleId = result.ruleId || result.ruleName.match(/\[ID: ([a-zA-Z0-9-]+)\]$/)?.[1] || ""
+                            if (ruleId) {
+                              setEditingRuleId(ruleId)
+                              setEditRuleDialogOpen(true)
+
+                              // Call onEditRule if provided
+                              if (onEditRule) {
+                                const rule = rules.find((r) => r.id === ruleId)
+                                if (rule) {
+                                  onEditRule(rule)
+                                }
+                              }
+                            }
+                          }}
+                          className="h-8 w-8 p-0"
+                          title="Edit rule"
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={columns.length} className="text-center py-4">
-                    No validation issues found
+                  <TableCell colSpan={columns.length + 1} className="text-center py-4">
+                    {showPassingValidations ? (
+                      <div className="flex flex-col items-center py-6">
+                        <AlertCircle className="h-8 w-8 text-amber-500 mb-2" />
+                        <p className="text-gray-500">No validation results found with current filters</p>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center py-6">
+                        <CheckCircle className="h-8 w-8 text-green-500 mb-2" />
+                        <p className="text-gray-500">No validation issues found</p>
+                        <p className="text-sm text-gray-400 mt-1">
+                          Toggle "Show passing validations" to see passing rules
+                        </p>
+                      </div>
+                    )}
                   </TableCell>
                 </TableRow>
               )}
@@ -1106,10 +1327,7 @@ export function ValidationResults({
                 datasets={initialDatasets}
                 valueLists={valueLists}
                 onSubmit={(updatedRule) => {
-                  // Replace this line:
-                  // onRuleClick(updatedRule.id)
-
-                  // With this to update directly:
+                  // Update directly:
                   onRuleClick(updatedRule)
                   setEditRuleDialogOpen(false)
                 }}
@@ -1121,172 +1339,6 @@ export function ValidationResults({
       </Dialog>
     </div>
   )
-}
-
-function renderResultsTable(
-  results: any[],
-  datasets: DataTables,
-  onRuleClick: (ruleId: string) => void,
-  isPassing: boolean,
-  onViewRowData: (result: any) => void,
-  setEditingRuleId: (ruleId: string | null) => void,
-  setEditRuleDialogOpen: (open: boolean) => void,
-  rules: DataQualityRule[],
-) {
-  if (results.length > 0) {
-    return (
-      <div className="border rounded-md overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Table</TableHead>
-              <TableHead>Row</TableHead>
-              <TableHead>Column</TableHead>
-              <TableHead>Rule</TableHead>
-              <TableHead>Value</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="w-[120px]">Action</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {results.map((result, index) => {
-              // Extract rule name without the ID part
-              const ruleName = result.ruleName.replace(/ \[ID: [a-zA-Z0-9-]+\]$/, "")
-              const ruleId = result.ruleId || result.ruleName.match(/\[ID: ([a-zA-Z0-9-]+)\]$/)?.[1] || ""
-
-              // Find the rule definition to get its type
-              const ruleDefinition = rules.find(
-                (r) => r.id === ruleId || r.name === result.ruleName || result.ruleName.includes(`[ID: ${r.id}]`),
-              )
-
-              const isDateRule = ruleDefinition?.ruleType?.startsWith("date-") || false
-
-              return (
-                <TableRow
-                  key={index}
-                  className={
-                    isPassing || result.severity === "success"
-                      ? "bg-green-50 dark:bg-green-900/10"
-                      : result.severity === "failure"
-                        ? "bg-red-50 dark:bg-red-900/10"
-                        : "bg-yellow-50 dark:bg-yellow-900/10"
-                  }
-                >
-                  <TableCell>{result.table}</TableCell>
-                  <TableCell>{result.rowIndex + 1}</TableCell>
-                  <TableCell>
-                    {isDateRule ? (
-                      <div className="flex items-center gap-1">
-                        <Calendar className="h-4 w-4 text-blue-500" />
-                        {getColumnDisplay(result, datasets[result.table]?.[result.rowIndex])}
-                      </div>
-                    ) : (
-                      getColumnDisplay(result, datasets[result.table]?.[result.rowIndex])
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={isDateRule ? "outline" : "outline"} className={isDateRule ? "bg-blue-50" : ""}>
-                      {ruleName}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="font-mono text-sm">
-                    {getValueDisplay(result, datasets[result.table]?.[result.rowIndex])}
-                  </TableCell>
-                  <TableCell>
-                    {isPassing || result.severity === "success" ? (
-                      <Badge variant="outline" className="bg-green-100 mr-2">
-                        Passed
-                      </Badge>
-                    ) : result.severity === "failure" ? (
-                      <Badge variant="destructive" className="mr-2">
-                        Failure
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="bg-yellow-100 mr-2">
-                        Warning
-                      </Badge>
-                    )}
-                    {/* Simplify formula messages */}
-                    {result.message ? (
-                      result.message.includes("Formula evaluated to false:") ? (
-                        // Simplify formula failure messages
-                        <span>
-                          Formula failed
-                          {result.message.includes("Result:")
-                            ? " (" + result.message.split("Result:")[1].trim() + ")"
-                            : ""}
-                        </span>
-                      ) : (
-                        // For other types of messages, keep them as is
-                        result.message
-                      )
-                    ) : (
-                      "Validation issue"
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => onViewRowData(result)}
-                        className="flex items-center gap-1"
-                        title="View row data"
-                      >
-                        <Info className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={(e) => {
-                          e.preventDefault()
-                          e.stopPropagation()
-                          if (ruleId) {
-                            // Replace this line:
-                            // onRuleClick(ruleId)
-
-                            // With these lines to edit in place:
-                            setEditingRuleId(ruleId)
-                            setEditRuleDialogOpen(true)
-                          }
-                        }}
-                        disabled={!ruleId}
-                        className="flex items-center gap-1"
-                        title={isPassing ? "View rule" : "Edit rule"}
-                      >
-                        {isPassing ? <Eye className="h-4 w-4" /> : <Edit className="h-4 w-4" />}
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              )
-            })}
-          </TableBody>
-        </Table>
-      </div>
-    )
-  } else {
-    return (
-      <div className="text-center py-8 border rounded-md bg-gray-50 dark:bg-gray-800">
-        {isPassing ? (
-          <div>
-            <AlertCircle className="mx-auto h-8 w-8 text-amber-500 mb-2" />
-            <p className="text-gray-500 dark:text-gray-400">No passing validations found with current filters</p>
-          </div>
-        ) : results.length === 0 ? (
-          <div>
-            <CheckCircle className="mx-auto h-8 w-8 text-green-500 mb-2" />
-            <p className="text-gray-500 dark:text-gray-400">All data passed validation!</p>
-          </div>
-        ) : (
-          <div>
-            <CheckCircle className="mx-auto h-8 w-8 text-green-500 mb-2" />
-            <p className="text-gray-500 dark:text-gray-400">No issues found with current filters</p>
-          </div>
-        )}
-      </div>
-    )
-  }
 }
 
 function formatValue(value: any): string {
@@ -1305,104 +1357,7 @@ function formatValue(value: any): string {
   return String(value)
 }
 
-// Helper function to get a better column display for multi-column rules
-function getColumnDisplay(result: any, row: any): React.ReactNode {
-  // If no row data or it's a passing result with a specific column already set, use the default
-  if (!row || (result.severity === "success" && result.column)) {
-    return result.column
-  }
-
-  // Check if this is a formula rule by looking at the message
-  if (result.message && result.message.includes("Formula")) {
-    // Extract formula from the message if possible
-    const formulaMatch = result.message.match(/Formula evaluated to false: (.*?) \(Result:/)
-    if (formulaMatch && formulaMatch[1]) {
-      return <span className="text-xs bg-gray-100 dark:bg-gray-800 p-1 rounded">Formula: {formulaMatch[1]}</span>
-    }
-  }
-
-  // For other multi-column rules, we could try to extract column names from the message
-  // This is a simple approach - could be enhanced with more specific rule type handling
-  if (result.message && (result.message.includes(" and ") || result.message.includes(" or "))) {
-    const columns = result.message.match(/\b([a-zA-Z]+)\b should/g)
-    if (columns && columns.length > 1) {
-      return (
-        <span className="text-xs bg-gray-100 dark:bg-gray-800 p-1 rounded">
-          Multiple: {columns.map((c: string) => c.replace(" should", "")).join(", ")}
-        </span>
-      )
-    }
-  }
-
-  // Default fallback
-  return result.column
-}
-
-// Helper function to get a better value display for multi-column rules
-function getValueDisplay(result: any, row: any): React.ReactNode {
-  if (!row) {
-    return formatValue(null)
-  }
-
-  // Check if this is a formula rule by looking at the rule name or message
-  const isFormulaRule =
-    (result.ruleName && result.ruleName.toLowerCase().includes("formula")) ||
-    (result.message && result.message.includes("Formula"))
-
-  if (isFormulaRule) {
-    // Try to extract the formula from the message
-    let formula = ""
-    if (result.message && result.message.includes("Formula evaluated to false:")) {
-      const formulaMatch = result.message.match(/Formula evaluated to false: (.*?) \(Result:/)
-      if (formulaMatch && formulaMatch[1]) {
-        formula = formulaMatch[1]
-      }
-    }
-
-    // Simplified formula display - just show the column value and simplified formula
-    if (formula) {
-      return (
-        <div>
-          <div className="font-bold">{formatValue(row[result.column])}</div>
-          <div className="text-xs text-gray-500">
-            Formula failed: {formula.length > 30 ? formula.substring(0, 30) + "..." : formula}
-          </div>
-        </div>
-      )
-    }
-  }
-
-  // For date values, format them nicely
-  if (row[result.column] instanceof Date) {
-    return (
-      <div className="flex items-center gap-2">
-        <span>{formatValue(row[result.column])}</span>
-      </div>
-    )
-  }
-
-  // For multi-column conditions, try to show relevant values
-  if (result.message && (result.message.includes(" and ") || result.message.includes(" or "))) {
-    const relevantColumns = Object.keys(row).filter((col) => result.message.toLowerCase().includes(col.toLowerCase()))
-
-    if (relevantColumns.length > 1) {
-      return (
-        <div className="space-y-1">
-          {relevantColumns.map((col) => (
-            <div key={col} className="text-xs">
-              <span className="font-semibold">{col}:</span> {formatValue(row[col])}
-            </div>
-          ))}
-        </div>
-      )
-    }
-  }
-
-  // Default fallback to just showing the column value
-  return formatValue(row[result.column])
-}
-
-// Add this helper function to highlight potentially related rows
+// Helper function to highlight potentially related rows
 function findRelatedRowMatch(mainRow: DataRecord | null, relatedRow: DataRecord): boolean {
   if (!mainRow) return false
 

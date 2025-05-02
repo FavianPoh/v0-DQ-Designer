@@ -180,7 +180,7 @@ export function DataQualityDashboard() {
       // Save datasets to localStorage
       localStorage.setItem("dataQualityDatasets", JSON.stringify(datasets))
     }
-  }, [datasets, rules, valueLists, loading, showPassingRules])
+  }, [datasets, rules, valueLists, loading])
 
   // Handle tab changes
   useEffect(() => {
@@ -722,7 +722,10 @@ export function DataQualityDashboard() {
   }
 
   const toggleShowPassingRules = () => {
+    console.log("Toggling show passing rules from", showPassingRules, "to", !showPassingRules)
     setShowPassingRules(!showPassingRules)
+    // Refresh validation results to include/exclude passing rules
+    refreshValidationResults()
   }
 
   if (loading) {
@@ -737,6 +740,16 @@ export function DataQualityDashboard() {
   // Add this right before the return statement, after the loading check
   const handleDirectRuleUpdate = (updatedRule: DataQualityRule) => {
     handleUpdateRule(updatedRule)
+  }
+
+  const handleViewRowData = (row: any) => {
+    console.log("View row data:", row)
+    // Implement your logic to display the row data, e.g., open a modal
+  }
+
+  const handleEditRule = (rule: DataQualityRule) => {
+    console.log("Edit rule:", rule)
+    handleRuleClick(rule)
   }
 
   return (
@@ -842,6 +855,8 @@ export function DataQualityDashboard() {
             valueLists={valueLists}
             showPassingRules={showPassingRules}
             onTogglePassingRules={toggleShowPassingRules}
+            onViewData={handleViewRowData}
+            onEditRule={handleEditRule}
           />
         </TabsContent>
       </Tabs>

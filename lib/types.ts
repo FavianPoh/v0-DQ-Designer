@@ -26,7 +26,7 @@ export type RuleType =
   | "date-between"
   | "date-format"
 
-export type RuleSeverity = "warning" | "failure"
+export type RuleSeverity = "warning" | "failure" | "success"
 
 export type LogicalOperator = "AND" | "OR"
 

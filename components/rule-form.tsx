@@ -142,7 +142,8 @@ const RULE_TYPE_EXAMPLES: Record<RuleType, { example: string; explanation: strin
   },
   unique: {
     example: "email must be unique across all rows",
-    explanation: "Validates that the field value is unique across all rows in the table.",
+    explanation:
+      "Validates that the field value or combination of field values is unique across all rows in the table.",
   },
   "cross-column": {
     example: "endDate > startDate",
@@ -263,6 +264,11 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
     ],
   )
 
+  // New state for unique columns
+  const [uniqueColumns, setUniqueColumns] = useState<string[]>(
+    initialRule?.parameters?.uniqueColumns || [initialRule?.column || ""],
+  )
+
   // Debug state to track form validation
   const [formDebug, setFormDebug] = useState<{
     hasName: boolean
@@ -320,6 +326,19 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
           parameters: {
             ...prev.parameters,
             sourceColumns: validSourceColumns.length > 0 ? validSourceColumns : [],
+          },
+        }))
+      }
+
+      // Update unique columns
+      if (rule.parameters.uniqueColumns) {
+        const validUniqueColumns = rule.parameters.uniqueColumns.filter((col) => columns.includes(col))
+        setUniqueColumns(validUniqueColumns.length > 0 ? validUniqueColumns : [rule.column || ""])
+        setRule((prev) => ({
+          ...prev,
+          parameters: {
+            ...prev.parameters,
+            uniqueColumns: validUniqueColumns.length > 0 ? validUniqueColumns : [prev.column || ""],
           },
         }))
       }
@@ -413,6 +432,7 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
       if (initialRule.ruleType === "composite-reference") {
         const sourceColumnsFromRule = initialRule.parameters.sourceColumns || [initialRule.column || ""]
         const referenceColumnsFromRule = initialRule.parameters.referenceColumns || []
+        const sourceTableFromRule = initialRule.parameters.sourceTable || initialRule.table || ""
 
         setSourceColumns(sourceColumnsFromRule)
         setReferenceColumns(referenceColumnsFromRule)
@@ -422,8 +442,24 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
           ...prev,
           parameters: {
             ...prev.parameters,
+            sourceTable: sourceTableFromRule,
             sourceColumns: sourceColumnsFromRule,
             referenceColumns: referenceColumnsFromRule,
+          },
+        }))
+      }
+
+      // Initialize unique columns
+      if (initialRule.ruleType === "unique") {
+        const uniqueColumnsFromRule = initialRule.parameters.uniqueColumns || [initialRule.column || ""]
+        setUniqueColumns(uniqueColumnsFromRule)
+
+        // Ensure these are also in the rule parameters
+        setRule((prev) => ({
+          ...prev,
+          parameters: {
+            ...prev.parameters,
+            uniqueColumns: uniqueColumnsFromRule,
           },
         }))
       }
@@ -464,11 +500,43 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
           },
         }))
       }
+
+      // Initialize unique columns for unique rule type
+      if (value === "unique") {
+        const initialUniqueColumn = columnConditions[0].column || ""
+        setUniqueColumns(initialUniqueColumn ? [initialUniqueColumn] : [""])
+
+        // Also update the rule parameters
+        setRule((prev) => ({
+          ...prev,
+          parameters: {
+            ...prev.parameters,
+            uniqueColumns: initialUniqueColumn ? [initialUniqueColumn] : [""],
+          },
+        }))
+      }
     }
 
     // Reset conditions when changing rule type from multi-column
     if (field === "ruleType" && rule.ruleType === "multi-column" && value !== "multi-column") {
       setConditions([])
+    }
+
+    // If changing the column, update unique columns if this is a unique rule
+    if (field === "column" && rule.ruleType === "unique") {
+      // Replace the first column in uniqueColumns with the new column
+      const updatedUniqueColumns = [...uniqueColumns]
+      updatedUniqueColumns[0] = value
+      setUniqueColumns(updatedUniqueColumns)
+
+      // Also update the rule parameters
+      setRule((prev) => ({
+        ...prev,
+        parameters: {
+          ...prev.parameters,
+          uniqueColumns: updatedUniqueColumns,
+        },
+      }))
     }
   }
 
@@ -578,6 +646,22 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
           ...prev,
           column: value,
         }))
+
+        // If this is a unique rule, update the first unique column
+        if (rule.ruleType === "unique") {
+          const updatedUniqueColumns = [...uniqueColumns]
+          updatedUniqueColumns[0] = value
+          setUniqueColumns(updatedUniqueColumns)
+
+          // Also update the rule parameters
+          setRule((prev) => ({
+            ...prev,
+            parameters: {
+              ...prev.parameters,
+              uniqueColumns: updatedUniqueColumns,
+            },
+          }))
+        }
       } else if (field === "ruleType") {
         setRule((prev) => ({
           ...prev,
@@ -731,6 +815,61 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
     }))
   }
 
+  // Add a unique column for unique values rule
+  const addUniqueColumn = () => {
+    const newUniqueColumns = [...uniqueColumns, ""]
+    setUniqueColumns(newUniqueColumns)
+
+    // Update rule parameters
+    setRule((prev) => ({
+      ...prev,
+      parameters: {
+        ...prev.parameters,
+        uniqueColumns: newUniqueColumns,
+      },
+    }))
+  }
+
+  // Remove a unique column
+  const removeUniqueColumn = (index: number) => {
+    if (uniqueColumns.length <= 1) return
+    const newColumns = [...uniqueColumns]
+    newColumns.splice(index, 1)
+    setUniqueColumns(newColumns)
+
+    // Update rule parameters
+    setRule((prev) => ({
+      ...prev,
+      parameters: {
+        ...prev.parameters,
+        uniqueColumns: newColumns,
+      },
+    }))
+  }
+
+  // Update a unique column
+  const updateUniqueColumn = (index: number, value: string) => {
+    // Check if this column is already selected elsewhere
+    if (value && uniqueColumns.findIndex((col, i) => col === value && i !== index) !== -1) {
+      // If already selected, show a toast or alert
+      alert(`Column "${value}" is already selected. Please choose a different column.`)
+      return
+    }
+
+    const newColumns = [...uniqueColumns]
+    newColumns[index] = value
+    setUniqueColumns(newColumns)
+
+    // Update rule parameters
+    setRule((prev) => ({
+      ...prev,
+      parameters: {
+        ...prev.parameters,
+        uniqueColumns: newColumns,
+      },
+    }))
+  }
+
   // Get the primary table from the first column condition
   const getPrimaryTable = () => {
     return columnConditions.length > 0 ? columnConditions[0].table : ""
@@ -763,9 +902,21 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
     if (rule.ruleType === "composite-reference") {
       finalParameters = {
         ...finalParameters,
+        sourceTable: rule.parameters.sourceTable || rule.table,
         sourceColumns: sourceColumns.filter(Boolean),
         referenceColumns: referenceColumns.filter(Boolean),
         orderIndependent: true, // Always set this flag for composite references
+      }
+
+      // For composite reference, use the sourceTable as the primary table
+      const primaryTable = rule.parameters.sourceTable || rule.table
+    }
+
+    // For unique values, ensure the parameters include the unique columns
+    if (rule.ruleType === "unique") {
+      finalParameters = {
+        ...finalParameters,
+        uniqueColumns: uniqueColumns.filter(Boolean),
       }
     }
 
@@ -1233,6 +1384,76 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
           </div>
         )
 
+      case "unique":
+        return (
+          <div className="space-y-4">
+            <div className="bg-muted p-3 rounded-md">
+              <h4 className="text-sm font-medium mb-2">About Unique Values</h4>
+              <p className="text-xs text-gray-700">
+                This rule validates that values in the selected column(s) are unique across all rows in the table. You
+                can select multiple columns to check for composite uniqueness.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex justify-between items-center mb-2">
+                <Label>Columns to Check for Uniqueness</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={addUniqueColumn}
+                  className="flex items-center gap-1"
+                >
+                  <Plus className="h-4 w-4" /> Add Column
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                {uniqueColumns.map((column, index) => (
+                  <div key={`unique-${index}`} className="flex items-center gap-2">
+                    <Select value={column} onValueChange={(value) => updateUniqueColumn(index, value)}>
+                      <SelectTrigger className="flex-1">
+                        <SelectValue placeholder="Select column" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {getColumnsForTable(getPrimaryTable())
+                          .filter((col) => !uniqueColumns.includes(col) || col === column)
+                          .map((col) => (
+                            <SelectItem key={col} value={col}>
+                              {col}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                    {uniqueColumns.length > 1 && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeUniqueColumn(index)}
+                        className="h-8 w-8 p-0"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {uniqueColumns.length > 1 && (
+                <div className="mt-2">
+                  <p className="text-xs text-gray-500">
+                    The combination of values across these columns must be unique. For example, if you select
+                    "firstName" and "lastName", the combination (firstName + lastName) must be unique, but individual
+                    first or last names can repeat.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        )
+
       default:
         return null
     }
@@ -1315,43 +1536,70 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
         <div className="bg-muted p-4 rounded-md mb-4">
           <h4 className="text-sm font-medium mb-2">About Cross-Table Composite Keys</h4>
           <p className="text-xs text-gray-700 mb-2">
-            This rule validates that a combination of columns (source columns) in the current table exists as a
-            combination of columns (reference columns) in another table.
+            This rule validates that a combination of columns (source columns) in one table exists as a combination of
+            columns (reference columns) in another table.
           </p>
           <div className="text-xs space-y-1">
             <p>
-              <strong>Example:</strong> Validate that (firstName, lastName) in the current table exists as (firstName,
-              lastName) in a contacts table.
-            </p>
-            <p>
-              <strong>Source Columns:</strong> Columns from the current table that form the composite key.
-            </p>
-            <p>
-              <strong>Reference Columns:</strong> Matching columns in the reference table that should contain the same
-              combination of values.
+              <strong>Example:</strong> Validate that (firstName, lastName) in the source table exists as (firstName,
+              lastName) in the reference table.
             </p>
           </div>
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="referenceTable">Reference Table</Label>
-          <Select
-            value={rule.parameters.referenceTable || ""}
-            onValueChange={(value) => handleParameterChange("referenceTable", value)}
-          >
-            <SelectTrigger id="referenceTable">
-              <SelectValue placeholder="Select reference table" />
-            </SelectTrigger>
-            <SelectContent>
-              {tables
-                .filter((table) => table !== getPrimaryTable()) // Don't allow referencing the same table
-                .map((table) => (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="sourceTable">Source Table</Label>
+            <Select
+              value={rule.parameters.sourceTable || rule.table || ""}
+              onValueChange={(value) => {
+                handleParameterChange("sourceTable", value)
+                // Also update the main rule table to keep them in sync
+                handleChange("table", value)
+                // Reset source columns when table changes
+                setSourceColumns([""])
+                setRule((prev) => ({
+                  ...prev,
+                  parameters: {
+                    ...prev.parameters,
+                    sourceColumns: [""],
+                  },
+                }))
+              }}
+            >
+              <SelectTrigger id="sourceTable">
+                <SelectValue placeholder="Select source table" />
+              </SelectTrigger>
+              <SelectContent>
+                {tables.map((table) => (
                   <SelectItem key={table} value={table}>
                     {table.charAt(0).toUpperCase() + table.slice(1)}
                   </SelectItem>
                 ))}
-            </SelectContent>
-          </Select>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="referenceTable">Reference Table</Label>
+            <Select
+              value={rule.parameters.referenceTable || ""}
+              onValueChange={(value) => handleParameterChange("referenceTable", value)}
+            >
+              <SelectTrigger id="referenceTable">
+                <SelectValue placeholder="Select reference table" />
+              </SelectTrigger>
+              <SelectContent>
+                {tables
+                  .filter((table) => table !== (rule.parameters.sourceTable || rule.table)) // Don't allow referencing the same table
+                  .map((table) => (
+                    <SelectItem key={table} value={table}>
+                      {table.charAt(0).toUpperCase() + table.slice(1)}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         <div className="space-y-2">
@@ -1367,7 +1615,7 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
                   e.preventDefault()
                   e.stopPropagation()
                   window.alert(
-                    `These columns from the source table (${getPrimaryTable()}) will be checked against the reference columns. The order matters - each source column will be matched with the corresponding reference column.`,
+                    `These columns from the source table (${rule.parameters.sourceTable || rule.table}) will be checked against the reference columns. The order matters - each source column will be matched with the corresponding reference column.`,
                   )
                 }}
               >
@@ -1393,7 +1641,7 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
                     <SelectValue placeholder="Select column" />
                   </SelectTrigger>
                   <SelectContent>
-                    {getColumnsForTable(getPrimaryTable())
+                    {getColumnsForTable(rule.parameters.sourceTable || rule.table || "")
                       .filter((col) => !sourceColumns.includes(col) || col === column)
                       .map((col) => (
                         <SelectItem key={col} value={col}>
@@ -1524,44 +1772,6 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
               <SelectContent>
                 <SelectItem value="failure">Failure</SelectItem>
                 <SelectItem value="warning">Warning</SelectItem>
-                <SelectItem value="info">Info</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="table">Table</Label>
-            <Select value={rule.table} onValueChange={(value) => handleChange("table", value)}>
-              <SelectTrigger id="table">
-                <SelectValue placeholder="Select table" />
-              </SelectTrigger>
-              <SelectContent>
-                {tables.map((table) => (
-                  <SelectItem key={table} value={table}>
-                    {table.charAt(0).toUpperCase() + table.slice(1)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="column">Column</Label>
-            <Select
-              value={columnConditions[0]?.column || ""}
-              onValueChange={(value) => handleColumnConditionChange(0, "column", value)}
-            >
-              <SelectTrigger id="column">
-                <SelectValue placeholder="Select column" />
-              </SelectTrigger>
-              <SelectContent>
-                {tableColumns[rule.table]?.map((column) => (
-                  <SelectItem key={column} value={column}>
-                    {column}
-                  </SelectItem>
-                ))}
               </SelectContent>
             </Select>
           </div>
@@ -1631,6 +1841,45 @@ Example: ${RULE_TYPE_EXAMPLES[columnConditions[0]?.ruleType]?.example}`,
             </SelectContent>
           </Select>
         </div>
+
+        {rule.ruleType !== "composite-reference" && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="table">Table</Label>
+              <Select value={rule.table} onValueChange={(value) => handleChange("table", value)}>
+                <SelectTrigger id="table">
+                  <SelectValue placeholder="Select table" />
+                </SelectTrigger>
+                <SelectContent>
+                  {tables.map((table) => (
+                    <SelectItem key={table} value={table}>
+                      {table.charAt(0).toUpperCase() + table.slice(1)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="column">Column</Label>
+              <Select
+                value={columnConditions[0]?.column || ""}
+                onValueChange={(value) => handleColumnConditionChange(0, "column", value)}
+              >
+                <SelectTrigger id="column">
+                  <SelectValue placeholder="Select column" />
+                </SelectTrigger>
+                <SelectContent>
+                  {tableColumns[rule.table]?.map((column) => (
+                    <SelectItem key={column} value={column}>
+                      {column}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        )}
 
         {/* Render parameters based on rule type */}
         {columnConditions.map((condition, index) => (
@@ -1725,6 +1974,74 @@ Example: ${RULE_TYPE_EXAMPLES[columnConditions[0]?.ruleType]?.example}`,
 
         {rule.ruleType === "reference-integrity" && renderReferenceIntegrityParameters()}
         {rule.ruleType === "composite-reference" && renderCompositeReferenceParameters()}
+        {rule.ruleType === "unique" && (
+          <div className="space-y-4 border rounded-md p-4">
+            <div className="bg-muted p-3 rounded-md">
+              <h4 className="text-sm font-medium mb-2">About Unique Values</h4>
+              <p className="text-xs text-gray-700">
+                This rule validates that values in the selected column(s) are unique across all rows in the table. You
+                can select multiple columns to check for composite uniqueness.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex justify-between items-center mb-2">
+                <Label>Columns to Check for Uniqueness</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={addUniqueColumn}
+                  className="flex items-center gap-1"
+                >
+                  <Plus className="h-4 w-4" /> Add Column
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                {uniqueColumns.map((column, index) => (
+                  <div key={`unique-${index}`} className="flex items-center gap-2">
+                    <Select value={column} onValueChange={(value) => updateUniqueColumn(index, value)}>
+                      <SelectTrigger className="flex-1">
+                        <SelectValue placeholder="Select column" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {getColumnsForTable(getPrimaryTable())
+                          .filter((col) => !uniqueColumns.includes(col) || col === column)
+                          .map((col) => (
+                            <SelectItem key={col} value={col}>
+                              {col}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                    {uniqueColumns.length > 1 && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeUniqueColumn(index)}
+                        className="h-8 w-8 p-0"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {uniqueColumns.length > 1 && (
+                <div className="mt-2">
+                  <p className="text-xs text-gray-500">
+                    The combination of values across these columns must be unique. For example, if you select
+                    "firstName" and "lastName", the combination (firstName + lastName) must be unique, but individual
+                    first or last names can repeat.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {rule.table && tableColumns[rule.table] && tableColumns[rule.table].length > 0 && (
           <Accordion type="single" collapsible className="border rounded-md">

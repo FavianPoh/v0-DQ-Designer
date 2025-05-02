@@ -44,6 +44,41 @@ export function validateDataset(
       return
     }
 
+    // Generate passing validations for all enabled rules and all rows
+    // This ensures we have a complete set of validation results
+    Object.entries(datasets).forEach(([tableName, tableData]) => {
+      // Get all rules that apply to this table
+      const tableRules = rules.filter((r) => r.table === tableName && r.enabled !== false)
+
+      // For each row in the table
+      tableData.forEach((row, rowIndex) => {
+        // For each applicable rule
+        tableRules.forEach((rule) => {
+          // Check if we already have a validation result for this rule and row
+          const hasResult = results.some(
+            (r) =>
+              r.table === tableName &&
+              r.rowIndex === rowIndex &&
+              (r.ruleName === rule.name || r.ruleName.includes(`[ID: ${rule.id}]`) || r.ruleId === rule.id),
+          )
+
+          // If we don't have a result, it means the validation passed
+          if (!hasResult) {
+            // Add a passing validation result
+            results.push({
+              rowIndex,
+              table: tableName,
+              column: rule.column,
+              ruleName: rule.name,
+              message: "Passed validation",
+              severity: "success",
+              ruleId: rule.id,
+            })
+          }
+        })
+      })
+    })
+
     const tableData = datasets[rule.table]
     if (!tableData) {
       console.log(`Table ${rule.table} not found for rule ${rule.name}`)
