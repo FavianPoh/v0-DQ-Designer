@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Input } from "@/components/ui/input"
 import { ChevronDown, ChevronUp, Filter, X, Plus } from "lucide-react"
@@ -33,7 +33,6 @@ export function DatasetViewer({
   valueLists = [],
   datasets = {},
 }: DatasetViewerProps) {
-  const [displayData, setDisplayData] = useState<any[]>([])
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" } | null>(null)
   const [filters, setFilters] = useState<Record<string, string>>({})
@@ -79,8 +78,8 @@ export function DatasetViewer({
     setColumnWidths(widths)
   }, [data, columns])
 
-  // Apply sorting and filtering to data
-  useEffect(() => {
+  // Use useMemo for filtered and sorted data instead of useEffect
+  const displayData = useMemo(() => {
     let result = [...data]
 
     // Apply filters
@@ -116,7 +115,7 @@ export function DatasetViewer({
       })
     }
 
-    setDisplayData(result)
+    return result
   }, [data, sortConfig, filters])
 
   const handleSort = (column: string) => {
@@ -166,13 +165,21 @@ export function DatasetViewer({
     return validationResults.filter((result) => result.rowIndex === rowIndex && result.column === column)
   }
 
-  const filteredData = data.filter((row) =>
-    Object.values(row).some((value) => String(value).toLowerCase().includes(searchTerm.toLowerCase())),
-  )
+  // Memoize the filtered data to prevent recalculation on every render
+  const filteredData = useMemo(() => {
+    return displayData.filter((row) =>
+      Object.values(row).some(
+        (value) =>
+          value !== null && value !== undefined && String(value).toLowerCase().includes(searchTerm.toLowerCase()),
+      ),
+    )
+  }, [displayData, searchTerm])
 
   const totalPages = Math.ceil(filteredData.length / rowsPerPage)
   const startIndex = (currentPage - 1) * rowsPerPage
-  const paginatedData = filteredData.slice(startIndex, startIndex + rowsPerPage)
+  const paginatedData = useMemo(() => {
+    return filteredData.slice(startIndex, startIndex + rowsPerPage)
+  }, [filteredData, startIndex, rowsPerPage])
 
   const handleEditClick = (rowIndex: number) => {
     setEditingRow(rowIndex)
@@ -701,8 +708,8 @@ export function DatasetViewer({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {displayData.length > 0 ? (
-                  displayData.map((row, rowIndex) => (
+                {paginatedData.length > 0 ? (
+                  paginatedData.map((row, rowIndex) => (
                     <TableRow key={rowIndex}>
                       {onDataChange && (
                         <TableCell>
@@ -739,13 +746,15 @@ export function DatasetViewer({
                         </TableCell>
                       )}
                       {columns.map((column) => {
-                        const cellResults = getCellValidationResults(rowIndex, column)
+                        // Use the actual index in the original data for validation results
+                        const actualRowIndex = data.findIndex((item) => item.id === row.id)
+                        const cellResults = getCellValidationResults(actualRowIndex, column)
                         const hasErrors = cellResults.length > 0
 
                         return (
                           <TableCell key={`${rowIndex}-${column}`} className={hasErrors ? "relative bg-red-50" : ""}>
                             {onDataChange ? (
-                              renderEditableCell(column, row[column], rowIndex)
+                              renderEditableCell(column, row[column], actualRowIndex)
                             ) : (
                               <div className="flex items-center gap-2">
                                 <span>
@@ -780,7 +789,7 @@ export function DatasetViewer({
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={columns.length} className="text-center py-4">
+                    <TableCell colSpan={columns.length + (onDataChange ? 1 : 0)} className="text-center py-4">
                       No data available
                     </TableCell>
                   </TableRow>
