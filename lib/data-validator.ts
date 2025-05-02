@@ -53,7 +53,7 @@ export function validateDataset(
       }
       // Special handling for math operation rules
       else if (rule.ruleType === "math-operation") {
-        validationResult = validateMathOperation(row, rowIndex, rule, datasets)
+        validationResult = validateMathOperation(row, rowIndex, rule)
         if (validationResult) {
           results.push(validationResult)
         } else {
@@ -254,12 +254,7 @@ function validateColumnComparison(row: DataRecord, rowIndex: number, rule: DataQ
 }
 
 // Function to validate math operation rules
-function validateMathOperation(
-  row: DataRecord,
-  rowIndex: number,
-  rule: DataQualityRule,
-  datasets: DataTables,
-): ValidationResult | null {
+function validateMathOperation(row: DataRecord, rowIndex: number, rule: DataQualityRule): ValidationResult | null {
   const { parameters, table, column } = rule
   const { operation, operands, comparisonOperator, comparisonValue } = parameters as any
 
@@ -287,39 +282,16 @@ function validateMathOperation(
       // For constants, just use the value directly
       operandValues.push(Number(operand.value))
     } else if (operand.type === "column") {
-      // For columns, get the value from the appropriate table/row
+      // For columns, get the value from the row
       const columnName = operand.value as string
-      const tableName = operand.table || table // Use operand's table if specified, otherwise use rule's table
-
-      let columnValue: any
-
-      if (tableName === table) {
-        // If it's the same table as the current row, use the current row
-        columnValue = row[columnName]
-      } else if (datasets[tableName]) {
-        // If it's a different table, we need to find a matching row
-        // This is a simplified approach - in a real app, you'd need a more sophisticated join logic
-        // For now, we'll just use the first row from the other table
-        const otherTableData = datasets[tableName]
-        if (otherTableData && otherTableData.length > 0) {
-          columnValue = otherTableData[0][columnName]
-        } else {
-          invalidOperandFound = true
-          invalidOperandMessage = `No data found in table "${tableName}" for operand ${i + 1}`
-          break
-        }
-      } else {
-        invalidOperandFound = true
-        invalidOperandMessage = `Table "${tableName}" not found for operand ${i + 1}`
-        break
-      }
+      const columnValue = row[columnName]
 
       // Convert to number
       const numValue = typeof columnValue === "string" ? Number.parseFloat(columnValue) : columnValue
 
       if (typeof numValue !== "number" || isNaN(numValue)) {
         invalidOperandFound = true
-        invalidOperandMessage = `Invalid value for operand ${i + 1}: Column "${columnName}" in table "${tableName}" has non-numeric value "${columnValue}"`
+        invalidOperandMessage = `Invalid value for operand ${i + 1}: Column "${columnName}" has non-numeric value "${columnValue}"`
         break
       }
 
@@ -411,12 +383,7 @@ function validateMathOperation(
   // Create a human-readable representation of the operation
   const operationString = operands
     .map((op, index) => {
-      const tableName = op.table || table
-      const opValue =
-        op.type === "column"
-          ? `${tableName}.${op.value}(${op.type === "column" && tableName === table ? row[op.value as string] : "..."})`
-          : op.value
-
+      const opValue = op.type === "column" ? `${op.value}(${row[op.value as string]})` : op.value
       if (index === 0) return opValue
 
       switch (operation) {
@@ -957,16 +924,6 @@ function validateRule(
       break
 
     case "enum":
-      \
-      (
-      {
-        isValid, message
-      }
-      rule.parameters.dataType
-      ))
-      break
-
-    case "enum":
       ;({ isValid, message } = validateEnum(value, rule.parameters.allowedValues))
       break
 
@@ -1031,7 +988,7 @@ function validateRule(
     case "date-between":
     case "date-format":
       // Date rules are handled separately in validateDateRule
-      return null
+      return validateDateRule(row, rowIndex, rule)
 
     default:
       isValid = true
