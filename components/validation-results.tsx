@@ -118,20 +118,26 @@ export function ValidationResults({
       "Success results:",
       initialResults.filter((r) => r.severity === "success").length,
     )
-    console.log("Initial results:", initialResults)
 
-    // Count results by severity
-    const countBySeverity = initialResults.reduce(
-      (acc, result) => {
-        acc[result.severity] = (acc[result.severity] || 0) + 1
-        return acc
-      },
-      {} as Record<string, number>,
-    )
+    // First, apply the severity filter based on the showPassingValidations toggle
+    let results = initialResults
 
-    console.log("Results by severity:", countBySeverity)
+    // If filterSeverity is set, apply that filter first
+    if (filterSeverity !== "all") {
+      results = results.filter((result) => result.severity === filterSeverity)
+    }
+    // Otherwise, apply the showPassingValidations filter
+    else if (showPassingValidations === true && filterSeverity === "all") {
+      // When explicitly showing passing validations and no severity filter is set,
+      // only show success results
+      results = results.filter((result) => result.severity === "success")
+    } else if (!showPassingValidations) {
+      // When not showing passing validations, filter out success results
+      results = results.filter((result) => result.severity !== "success")
+    }
 
-    return initialResults.filter((result) => {
+    // Then apply the other filters
+    return results.filter((result) => {
       // Apply table filter
       if (filterTable !== "all" && result.table !== filterTable) {
         return false
@@ -147,11 +153,6 @@ export function ValidationResults({
         return false
       }
 
-      // Apply severity filter
-      if (filterSeverity !== "all" && result.severity !== filterSeverity) {
-        return false
-      }
-
       // Apply rule type filter
       if (filterRuleType !== "all") {
         const ruleDefinition = rules.find(
@@ -160,11 +161,6 @@ export function ValidationResults({
         if (!ruleDefinition || ruleDefinition.ruleType !== filterRuleType) {
           return false
         }
-      }
-
-      // Filter out success results if showPassingValidations is false
-      if (!showPassingValidations && result.severity === "success") {
-        return false
       }
 
       return true
@@ -781,6 +777,8 @@ export function ValidationResults({
   const handleTogglePassingValidations = (checked: boolean) => {
     console.log("Toggle passing validations:", checked)
     setShowPassingValidations(checked)
+    // Reset the severity filter when toggling passing validations
+    setFilterSeverity("all")
     if (onTogglePassingRules) {
       onTogglePassingRules()
     }

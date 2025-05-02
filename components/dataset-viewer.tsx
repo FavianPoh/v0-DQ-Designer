@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useMemo } from "react"
+import { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Input } from "@/components/ui/input"
 import { ChevronDown, ChevronUp, Filter, X, Plus } from "lucide-react"
@@ -33,11 +33,11 @@ export function DatasetViewer({
   valueLists = [],
   datasets = {},
 }: DatasetViewerProps) {
+  // State variables
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" } | null>(null)
   const [filters, setFilters] = useState<Record<string, string>>({})
   const [showFilters, setShowFilters] = useState<Record<string, boolean>>({})
-  const tableRef = useRef<HTMLTableElement>(null)
   const [searchTerm, setSearchTerm] = useState("")
   const [currentPage, setCurrentPage] = useState(1)
   const [editingRow, setEditingRow] = useState<number | null>(null)
@@ -45,28 +45,27 @@ export function DatasetViewer({
   const [createRuleDialogOpen, setCreateRuleDialogOpen] = useState(false)
   const [selectedColumn, setSelectedColumn] = useState<string | null>(null)
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null)
+
+  // Refs
+  const tableRef = useRef<HTMLTableElement>(null)
+  const initialRenderRef = useRef(true)
+
+  // Constants
   const rowsPerPage = 10
+  const columns = useMemo(() => (data.length > 0 ? Object.keys(data[0]) : []), [data])
 
-  // Get all column names from the first row of data
-  const columns = data.length > 0 ? Object.keys(data[0]) : []
-
-  // Calculate optimal column widths based on content
+  // Calculate column widths only once on initial render or when data/columns change
   useEffect(() => {
-    if (data.length === 0) return
+    if (data.length === 0 || !initialRenderRef.current) return
 
     const calculateColumnWidth = (column: string) => {
-      // Start with the column name length (minimum width)
       let maxWidth = column.length * 10
-
-      // Check each row's value length
       data.forEach((row) => {
         const value = row[column]
         const valueStr = value !== null && value !== undefined ? String(value) : ""
-        const valueWidth = valueStr.length * 8 // Approximate width based on character count
+        const valueWidth = valueStr.length * 8
         maxWidth = Math.max(maxWidth, valueWidth)
       })
-
-      // Add padding and cap maximum width
       return Math.min(Math.max(maxWidth + 24, 100), 300)
     }
 
@@ -76,10 +75,11 @@ export function DatasetViewer({
     })
 
     setColumnWidths(widths)
+    initialRenderRef.current = false
   }, [data, columns])
 
-  // Use useMemo for filtered and sorted data instead of useEffect
-  const displayData = useMemo(() => {
+  // Memoized filtered and sorted data
+  const processedData = useMemo(() => {
     let result = [...data]
 
     // Apply filters
@@ -99,16 +99,13 @@ export function DatasetViewer({
         const aValue = a[sortConfig.key]
         const bValue = b[sortConfig.key]
 
-        // Handle null/undefined values
         if (aValue === null || aValue === undefined) return sortConfig.direction === "asc" ? -1 : 1
         if (bValue === null || bValue === undefined) return sortConfig.direction === "asc" ? 1 : -1
 
-        // Compare based on type
         if (typeof aValue === "number" && typeof bValue === "number") {
           return sortConfig.direction === "asc" ? aValue - bValue : bValue - aValue
         }
 
-        // Default string comparison
         const aString = String(aValue).toLowerCase()
         const bString = String(bValue).toLowerCase()
         return sortConfig.direction === "asc" ? aString.localeCompare(bString) : bString.localeCompare(aString)
@@ -116,37 +113,66 @@ export function DatasetViewer({
     }
 
     return result
-  }, [data, sortConfig, filters])
+  }, [data, filters, sortConfig])
 
-  const handleSort = (column: string) => {
-    let direction: "asc" | "desc" = "asc"
+  // Apply search filter
+  const filteredData = useMemo(() => {
+    if (!searchTerm) return processedData
 
-    if (sortConfig && sortConfig.key === column && sortConfig.direction === "asc") {
-      direction = "desc"
-    } else if (sortConfig && sortConfig.key === column && sortConfig.direction === "desc") {
-      // Clear sort if clicking the same column that's already sorted desc
-      setSortConfig(null)
-      return
+    return processedData.filter((row) =>
+      Object.values(row).some(
+        (value) =>
+          value !== null && value !== undefined && String(value).toLowerCase().includes(searchTerm.toLowerCase()),
+      ),
+    )
+  }, [processedData, searchTerm])
+
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(filteredData.length / rowsPerPage))
+  const safeCurrentPage = Math.min(currentPage, totalPages)
+
+  // If current page is out of bounds, reset it
+  useEffect(() => {
+    if (currentPage > totalPages && totalPages > 0) {
+      setCurrentPage(totalPages)
     }
+  }, [currentPage, totalPages])
 
-    setSortConfig({ key: column, direction })
-  }
+  const startIndex = (safeCurrentPage - 1) * rowsPerPage
 
-  const handleFilterChange = (column: string, value: string) => {
+  // Get paginated data
+  const paginatedData = useMemo(() => {
+    return filteredData.slice(startIndex, startIndex + rowsPerPage)
+  }, [filteredData, startIndex, rowsPerPage])
+
+  // Event handlers - using useCallback to prevent unnecessary re-renders
+  const handleSort = useCallback((column: string) => {
+    setSortConfig((prevConfig) => {
+      if (prevConfig && prevConfig.key === column) {
+        if (prevConfig.direction === "asc") {
+          return { key: column, direction: "desc" as const }
+        }
+        return null
+      }
+      return { key: column, direction: "asc" as const }
+    })
+  }, [])
+
+  const handleFilterChange = useCallback((column: string, value: string) => {
     setFilters((prev) => ({
       ...prev,
       [column]: value,
     }))
-  }
+  }, [])
 
-  const toggleFilter = (column: string) => {
+  const toggleFilter = useCallback((column: string) => {
     setShowFilters((prev) => ({
       ...prev,
       [column]: !prev[column],
     }))
-  }
+  }, [])
 
-  const clearFilter = (column: string) => {
+  const clearFilter = useCallback((column: string) => {
     setFilters((prev) => {
       const newFilters = { ...prev }
       delete newFilters[column]
@@ -156,42 +182,22 @@ export function DatasetViewer({
       ...prev,
       [column]: false,
     }))
-  }
+  }, [])
 
-  // Function to check if a cell has validation errors
-  const getCellValidationResults = (rowIndex: number, column: string) => {
-    if (!validationResults) return []
+  const handleEditClick = useCallback(
+    (rowIndex: number) => {
+      setEditingRow(rowIndex)
+      setEditedData({ ...filteredData[rowIndex] })
+    },
+    [filteredData],
+  )
 
-    return validationResults.filter((result) => result.rowIndex === rowIndex && result.column === column)
-  }
-
-  // Memoize the filtered data to prevent recalculation on every render
-  const filteredData = useMemo(() => {
-    return displayData.filter((row) =>
-      Object.values(row).some(
-        (value) =>
-          value !== null && value !== undefined && String(value).toLowerCase().includes(searchTerm.toLowerCase()),
-      ),
-    )
-  }, [displayData, searchTerm])
-
-  const totalPages = Math.ceil(filteredData.length / rowsPerPage)
-  const startIndex = (currentPage - 1) * rowsPerPage
-  const paginatedData = useMemo(() => {
-    return filteredData.slice(startIndex, startIndex + rowsPerPage)
-  }, [filteredData, startIndex, rowsPerPage])
-
-  const handleEditClick = (rowIndex: number) => {
-    setEditingRow(rowIndex)
-    setEditedData({ ...filteredData[rowIndex] })
-  }
-
-  const handleCancelEdit = () => {
+  const handleCancelEdit = useCallback(() => {
     setEditingRow(null)
     setEditedData(null)
-  }
+  }, [])
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = useCallback(() => {
     if (editingRow !== null && editedData) {
       const newData = [...data]
       const actualIndex = data.findIndex((item) => item.id === filteredData[editingRow].id)
@@ -206,21 +212,22 @@ export function DatasetViewer({
       setEditingRow(null)
       setEditedData(null)
     }
-  }
+  }, [data, editingRow, editedData, filteredData, onDataChange])
 
-  const handleInputChange = (column: string, value: any) => {
-    if (editedData) {
-      setEditedData({
-        ...editedData,
-        [column]: value,
-      })
-    }
-  }
+  const handleInputChange = useCallback(
+    (column: string, value: any) => {
+      if (editedData) {
+        setEditedData((prev) => ({
+          ...prev!,
+          [column]: value,
+        }))
+      }
+    },
+    [editedData],
+  )
 
-  const handleAddRow = () => {
+  const handleAddRow = useCallback(() => {
     const newId = Math.max(...data.map((item) => item.id), 0) + 1
-
-    // Create a new row with default values based on the first row's structure
     const newRow: DataRecord = { id: newId }
 
     if (data.length > 0) {
@@ -249,103 +256,287 @@ export function DatasetViewer({
     if (onDataChange) {
       onDataChange(newData)
     }
-  }
+  }, [data, onDataChange])
 
-  const handleDeleteRow = (rowIndex: number) => {
-    const actualIndex = data.findIndex((item) => item.id === filteredData[rowIndex].id)
+  const handleDeleteRow = useCallback(
+    (rowIndex: number) => {
+      const actualIndex = data.findIndex((item) => item.id === filteredData[rowIndex].id)
 
-    if (actualIndex !== -1) {
-      const newData = [...data]
-      newData.splice(actualIndex, 1)
-      if (onDataChange) {
-        onDataChange(newData)
+      if (actualIndex !== -1) {
+        const newData = [...data]
+        newData.splice(actualIndex, 1)
+        if (onDataChange) {
+          onDataChange(newData)
+        }
       }
-    }
-  }
+    },
+    [data, filteredData, onDataChange],
+  )
 
-  const handleCreateRule = (column: string, rowIndex: number) => {
+  const handleCreateRule = useCallback((column: string, rowIndex: number) => {
     setSelectedColumn(column)
     setSelectedRowIndex(rowIndex)
     setCreateRuleDialogOpen(true)
-  }
+  }, [])
 
-  const handleRuleSubmit = (rule: DataQualityRule) => {
-    if (onAddRule) {
-      onAddRule(rule)
-      setCreateRuleDialogOpen(false)
-    }
-  }
+  const handleRuleSubmit = useCallback(
+    (rule: DataQualityRule) => {
+      if (onAddRule) {
+        onAddRule(rule)
+        setCreateRuleDialogOpen(false)
+      }
+    },
+    [onAddRule],
+  )
 
-  // Add a function to determine the validation status of a cell
-  const getCellValidationStatus = (rowIndex: number, column: string) => {
-    if (!validationResults) return null
-    // Filter validation results for this specific cell
-    const cellResults = validationResults.filter(
-      (result) => result.table === tableName && result.rowIndex === rowIndex && result.column === column,
+  // Helper functions
+  const getCellValidationResults = useCallback(
+    (rowIndex: number, column: string) => {
+      if (!validationResults) return []
+      return validationResults.filter((result) => result.rowIndex === rowIndex && result.column === column)
+    },
+    [validationResults],
+  )
+
+  const getCellValidationStatus = useCallback(
+    (rowIndex: number, column: string) => {
+      if (!validationResults) return null
+      const cellResults = validationResults.filter(
+        (result) => result.table === tableName && result.rowIndex === rowIndex && result.column === column,
+      )
+
+      if (cellResults.length === 0) return null
+      if (cellResults.some((result) => result.severity === "failure")) return "failure"
+      if (cellResults.some((result) => result.severity === "warning")) return "warning"
+      return "success"
+    },
+    [validationResults, tableName],
+  )
+
+  const getCellHighlightClass = useCallback(
+    (rowIndex: number, column: string) => {
+      const status = getCellValidationStatus(rowIndex, column)
+
+      switch (status) {
+        case "failure":
+          return "bg-red-100 dark:bg-red-900/20"
+        case "warning":
+          return "bg-yellow-100 dark:bg-yellow-900/20"
+        case "success":
+          return ""
+        default:
+          return ""
+      }
+    },
+    [getCellValidationStatus],
+  )
+
+  const getCellValidationMessages = useCallback(
+    (rowIndex: number, column: string) => {
+      if (!validationResults) return null
+      const cellResults = validationResults.filter(
+        (result) => result.table === tableName && result.rowIndex === rowIndex && result.column === column,
+      )
+
+      if (cellResults.length === 0) return null
+
+      const failures = cellResults.filter((r) => r.severity === "failure")
+      const warnings = cellResults.filter((r) => r.severity === "warning")
+
+      return {
+        failures,
+        warnings,
+        count: cellResults.length,
+      }
+    },
+    [validationResults, tableName],
+  )
+
+  const hasValidationIssues = useCallback(() => {
+    if (!validationResults) return false
+    return validationResults.some(
+      (result) => result.table === tableName && (result.severity === "failure" || result.severity === "warning"),
     )
+  }, [validationResults, tableName])
 
-    // If no results, return null (no highlighting)
-    if (cellResults.length === 0) return null
+  // Create initial rule based on selected column and value
+  const createInitialRule = useCallback((): DataQualityRule | undefined => {
+    if (!selectedColumn) return undefined
 
-    // Check for failures first (highest priority)
-    if (cellResults.some((result) => result.severity === "failure")) {
-      return "failure"
+    const ruleId = crypto.randomUUID()
+    let value = undefined
+
+    if (selectedRowIndex !== null && selectedRowIndex < filteredData.length) {
+      value = filteredData[selectedRowIndex][selectedColumn]
+    } else if (data.length > 0) {
+      for (const row of data) {
+        if (row[selectedColumn] !== null && row[selectedColumn] !== undefined) {
+          value = row[selectedColumn]
+          break
+        }
+      }
     }
 
-    // Then check for warnings
-    if (cellResults.some((result) => result.severity === "warning")) {
-      return "warning"
+    const valueType = typeof value
+    let ruleType = "required" as const
+    let parameters: Record<string, any> = {}
+    let ruleName = `${selectedColumn} Validation`
+
+    if (value !== undefined) {
+      if (valueType === "number") {
+        ruleType = "range"
+        const buffer = Math.abs(value) * 0.1
+        parameters = {
+          min: value - buffer,
+          max: value + buffer,
+        }
+        ruleName = `${selectedColumn} Range Check`
+      } else if (valueType === "string") {
+        if (value === "") {
+          ruleType = "required"
+          ruleName = `${selectedColumn} Required`
+        } else if (selectedColumn.toLowerCase().includes("email")) {
+          ruleType = "regex"
+          parameters = {
+            pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+          }
+          ruleName = `${selectedColumn} Email Format`
+        } else {
+          ruleType = "enum"
+          parameters = {
+            allowedValues: [value],
+          }
+          ruleName = `${selectedColumn} Allowed Values`
+        }
+      } else if (valueType === "boolean") {
+        ruleType = "enum"
+        parameters = {
+          allowedValues: [true, false],
+        }
+        ruleName = `${selectedColumn} Boolean Check`
+      } else if (value instanceof Date) {
+        ruleType = "custom"
+        parameters = {
+          functionBody: "return value instanceof Date && !isNaN(value.getTime());",
+        }
+        ruleName = `${selectedColumn} Valid Date`
+      }
+    } else {
+      ruleType = "required"
+      ruleName = `${selectedColumn} Required`
     }
-
-    // If no failures or warnings, but we have results, they must be successes
-    return "success"
-  }
-
-  // Add a function to get the appropriate CSS class based on validation status
-  const getCellHighlightClass = (rowIndex: number, column: string) => {
-    const status = getCellValidationStatus(rowIndex, column)
-
-    switch (status) {
-      case "failure":
-        return "bg-red-100 dark:bg-red-900/20"
-      case "warning":
-        return "bg-yellow-100 dark:bg-yellow-900/20"
-      case "success":
-        return "" // No highlighting for success
-      default:
-        return "" // No highlighting if no validation results
-    }
-  }
-
-  // Add this function to get validation messages for a cell
-  const getCellValidationMessages = (rowIndex: number, column: string) => {
-    if (!validationResults) return null
-    // Filter validation results for this specific cell
-    const cellResults = validationResults.filter(
-      (result) => result.table === tableName && result.rowIndex === rowIndex && result.column === column,
-    )
-
-    if (cellResults.length === 0) return null
-
-    // Group by severity
-    const failures = cellResults.filter((r) => r.severity === "failure")
-    const warnings = cellResults.filter((r) => r.severity === "warning")
 
     return {
-      failures,
-      warnings,
-      count: cellResults.length,
+      id: ruleId,
+      name: ruleName,
+      table: tableName,
+      column: selectedColumn,
+      ruleType,
+      parameters,
+      description: `Validates the ${selectedColumn} field`,
+      severity: "failure",
     }
-  }
+  }, [selectedColumn, selectedRowIndex, filteredData, data, tableName])
 
-  // Update the renderEditableCell function to handle the case when editing
-  const renderEditableCell = (column: string, value: any, rowIndex: number) => {
-    // Get the highlight class for this cell
-    const highlightClass = getCellHighlightClass(rowIndex, column)
-    const validationMessages = getCellValidationMessages(rowIndex, column)
+  // Render cell content
+  const renderEditableCell = useCallback(
+    (column: string, value: any, rowIndex: number) => {
+      const highlightClass = getCellHighlightClass(rowIndex, column)
+      const validationMessages = getCellValidationMessages(rowIndex, column)
 
-    if (editingRow !== rowIndex) {
-      // If there are validation messages, wrap in tooltip
+      if (editingRow !== null && editingRow === rowIndex) {
+        if (editedData === null) return formatCellValue(value)
+
+        if (typeof value === "boolean") {
+          return (
+            <Checkbox checked={editedData[column]} onCheckedChange={(checked) => handleInputChange(column, checked)} />
+          )
+        } else if (typeof value === "number") {
+          return (
+            <Input
+              type="number"
+              value={editedData[column]}
+              onChange={(e) => handleInputChange(column, Number(e.target.value))}
+              className={`w-full h-8 ${highlightClass}`}
+            />
+          )
+        } else if (value instanceof Date) {
+          return (
+            <Input
+              type="date"
+              value={value ? new Date(editedData[column]).toISOString().split("T")[0] : ""}
+              onChange={(e) => handleInputChange(column, new Date(e.target.value))}
+              className={`w-full h-8 ${highlightClass}`}
+            />
+          )
+        } else if (column === "status" && tableName === "users") {
+          return (
+            <Select value={editedData[column]} onValueChange={(value) => handleInputChange(column, value)}>
+              <SelectTrigger className={`h-8 ${highlightClass}`}>
+                <SelectValue placeholder="Select status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="active">active</SelectItem>
+                <SelectItem value="pending">pending</SelectItem>
+                <SelectItem value="inactive">inactive</SelectItem>
+              </SelectContent>
+            </Select>
+          )
+        } else if (column === "status" && tableName === "transactions") {
+          return (
+            <Select value={editedData[column]} onValueChange={(value) => handleInputChange(column, value)}>
+              <SelectTrigger className={`h-8 ${highlightClass}`}>
+                <SelectValue placeholder="Select status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="completed">completed</SelectItem>
+                <SelectItem value="pending">pending</SelectItem>
+                <SelectItem value="failed">failed</SelectItem>
+                <SelectItem value="disputed">disputed</SelectItem>
+              </SelectContent>
+            </Select>
+          )
+        } else if (column === "transactionType" && tableName === "transactions") {
+          return (
+            <Select value={editedData[column]} onValueChange={(value) => handleInputChange(column, value)}>
+              <SelectTrigger className={`h-8 ${highlightClass}`}>
+                <SelectValue placeholder="Select type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="purchase">purchase</SelectItem>
+                <SelectItem value="refund">refund</SelectItem>
+                <SelectItem value="subscription">subscription</SelectItem>
+                <SelectItem value="cancellation">cancellation</SelectItem>
+              </SelectContent>
+            </Select>
+          )
+        } else if (column === "paymentMethod" && tableName === "transactions") {
+          return (
+            <Select value={editedData[column]} onValueChange={(value) => handleInputChange(column, value)}>
+              <SelectTrigger className={`h-8 ${highlightClass}`}>
+                <SelectValue placeholder="Select method" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="credit_card">credit_card</SelectItem>
+                <SelectItem value="paypal">paypal</SelectItem>
+                <SelectItem value="bank_transfer">bank_transfer</SelectItem>
+                <SelectItem value="crypto">crypto</SelectItem>
+              </SelectContent>
+            </Select>
+          )
+        } else {
+          return (
+            <Input
+              type="text"
+              value={editedData[column] || ""}
+              onChange={(e) => handleInputChange(column, e.target.value)}
+              className={`w-full h-8 ${highlightClass}`}
+            />
+          )
+        }
+      }
+
+      // Non-editing mode
       if (validationMessages && (validationMessages.failures.length > 0 || validationMessages.warnings.length > 0)) {
         return (
           <TooltipProvider>
@@ -412,194 +603,20 @@ export function DatasetViewer({
           )}
         </div>
       )
-    }
+    },
+    [
+      editingRow,
+      editedData,
+      getCellHighlightClass,
+      getCellValidationMessages,
+      handleInputChange,
+      handleCreateRule,
+      onAddRule,
+      tableName,
+    ],
+  )
 
-    // Rest of the function for editing mode remains the same...
-    if (editedData === null) return formatCellValue(value)
-
-    // Render different input types based on the data type
-    if (typeof value === "boolean") {
-      return <Checkbox checked={editedData[column]} onCheckedChange={(checked) => handleInputChange(column, checked)} />
-    } else if (typeof value === "number") {
-      return (
-        <Input
-          type="number"
-          value={editedData[column]}
-          onChange={(e) => handleInputChange(column, Number(e.target.value))}
-          className={`w-full h-8 ${highlightClass}`}
-        />
-      )
-    } else if (value instanceof Date) {
-      return (
-        <Input
-          type="date"
-          value={value ? new Date(editedData[column]).toISOString().split("T")[0] : ""}
-          onChange={(e) => handleInputChange(column, new Date(e.target.value))}
-          className={`w-full h-8 ${highlightClass}`}
-        />
-      )
-    } else if (column === "status" && tableName === "users") {
-      return (
-        <Select value={editedData[column]} onValueChange={(value) => handleInputChange(column, value)}>
-          <SelectTrigger className={`h-8 ${highlightClass}`}>
-            <SelectValue placeholder="Select status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="active">active</SelectItem>
-            <SelectItem value="pending">pending</SelectItem>
-            <SelectItem value="inactive">inactive</SelectItem>
-          </SelectContent>
-        </Select>
-      )
-    } else if (column === "status" && tableName === "transactions") {
-      return (
-        <Select value={editedData[column]} onValueChange={(value) => handleInputChange(column, value)}>
-          <SelectTrigger className={`h-8 ${highlightClass}`}>
-            <SelectValue placeholder="Select status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="completed">completed</SelectItem>
-            <SelectItem value="pending">pending</SelectItem>
-            <SelectItem value="failed">failed</SelectItem>
-            <SelectItem value="disputed">disputed</SelectItem>
-          </SelectContent>
-        </Select>
-      )
-    } else if (column === "transactionType" && tableName === "transactions") {
-      return (
-        <Select value={editedData[column]} onValueChange={(value) => handleInputChange(column, value)}>
-          <SelectTrigger className={`h-8 ${highlightClass}`}>
-            <SelectValue placeholder="Select type" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="purchase">purchase</SelectItem>
-            <SelectItem value="refund">refund</SelectItem>
-            <SelectItem value="subscription">subscription</SelectItem>
-            <SelectItem value="cancellation">cancellation</SelectItem>
-          </SelectContent>
-        </Select>
-      )
-    } else if (column === "paymentMethod" && tableName === "transactions") {
-      return (
-        <Select value={editedData[column]} onValueChange={(value) => handleInputChange(column, value)}>
-          <SelectTrigger className={`h-8 ${highlightClass}`}>
-            <SelectValue placeholder="Select method" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="credit_card">credit_card</SelectItem>
-            <SelectItem value="paypal">paypal</SelectItem>
-            <SelectItem value="bank_transfer">bank_transfer</SelectItem>
-            <SelectItem value="crypto">crypto</SelectItem>
-          </SelectContent>
-        </Select>
-      )
-    } else {
-      return (
-        <Input
-          type="text"
-          value={editedData[column] || ""}
-          onChange={(e) => handleInputChange(column, e.target.value)}
-          className={`w-full h-8 ${highlightClass}`}
-        />
-      )
-    }
-  }
-
-  // Function to create an initial rule based on the selected column and value
-  const createInitialRule = (): DataQualityRule | undefined => {
-    if (!selectedColumn) return undefined
-
-    // Create a rule ID
-    const ruleId = crypto.randomUUID()
-
-    // Get a sample value if we have a selected row, otherwise use a default approach
-    let value = undefined
-    if (selectedRowIndex !== null) {
-      value = filteredData[selectedRowIndex][selectedColumn]
-    } else if (data.length > 0) {
-      // If no specific row is selected, use the first non-null value from the column as a sample
-      for (const row of data) {
-        if (row[selectedColumn] !== null && row[selectedColumn] !== undefined) {
-          value = row[selectedColumn]
-          break
-        }
-      }
-    }
-
-    const valueType = typeof value
-
-    // Determine the best rule type based on the column and value
-    let ruleType = "required" as const
-    let parameters: Record<string, any> = {}
-    let ruleName = `${selectedColumn} Validation`
-
-    if (value !== undefined) {
-      if (valueType === "number") {
-        ruleType = "range"
-        // For numeric values, create a range rule with some buffer
-        const buffer = Math.abs(value) * 0.1 // 10% buffer
-        parameters = {
-          min: value - buffer,
-          max: value + buffer,
-        }
-        ruleName = `${selectedColumn} Range Check`
-      } else if (valueType === "string") {
-        if (value === "") {
-          ruleType = "required"
-          ruleName = `${selectedColumn} Required`
-        } else if (selectedColumn.toLowerCase().includes("email")) {
-          ruleType = "regex"
-          parameters = {
-            pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
-          }
-          ruleName = `${selectedColumn} Email Format`
-        } else {
-          ruleType = "enum"
-          parameters = {
-            allowedValues: [value],
-          }
-          ruleName = `${selectedColumn} Allowed Values`
-        }
-      } else if (valueType === "boolean") {
-        ruleType = "enum"
-        parameters = {
-          allowedValues: [true, false],
-        }
-        ruleName = `${selectedColumn} Boolean Check`
-      } else if (value instanceof Date) {
-        ruleType = "custom"
-        parameters = {
-          functionBody: "return value instanceof Date && !isNaN(value.getTime());",
-        }
-        ruleName = `${selectedColumn} Valid Date`
-      }
-    } else {
-      // Default to required rule if we don't have a sample value
-      ruleType = "required"
-      ruleName = `${selectedColumn} Required`
-    }
-
-    return {
-      id: ruleId,
-      name: ruleName,
-      table: tableName,
-      column: selectedColumn,
-      ruleType,
-      parameters,
-      description: `Validates the ${selectedColumn} field`,
-      severity: "failure",
-    }
-  }
-
-  // Add a function to check if there are any validation issues
-  const hasValidationIssues = () => {
-    if (!validationResults) return false
-    return validationResults.some(
-      (result) => result.table === tableName && (result.severity === "failure" || result.severity === "warning"),
-    )
-  }
-
-  // Then in the return statement, add the legend above the table
+  // Render the component
   return (
     <div className="space-y-4">
       <TooltipProvider>
@@ -617,7 +634,6 @@ export function DatasetViewer({
           </div>
         </div>
 
-        {/* Add validation legend if there are issues */}
         {hasValidationIssues() && (
           <div className="flex items-center gap-4 text-sm p-2 bg-gray-50 dark:bg-gray-800 rounded-md">
             <span className="font-medium">Data Validation:</span>
@@ -642,7 +658,10 @@ export function DatasetViewer({
                   {columns.map((column) => (
                     <TableHead
                       key={column}
-                      style={{ width: `${columnWidths[column]}px`, minWidth: `${columnWidths[column]}px` }}
+                      style={{
+                        width: `${columnWidths[column] || 150}px`,
+                        minWidth: `${columnWidths[column] || 150}px`,
+                      }}
                       className="relative"
                     >
                       <div className="flex items-center justify-between gap-2">
@@ -709,84 +728,90 @@ export function DatasetViewer({
               </TableHeader>
               <TableBody>
                 {paginatedData.length > 0 ? (
-                  paginatedData.map((row, rowIndex) => (
-                    <TableRow key={rowIndex}>
-                      {onDataChange && (
-                        <TableCell>
-                          {editingRow === rowIndex ? (
-                            <div className="flex space-x-1">
-                              <Button variant="outline" size="icon" onClick={handleSaveEdit} title="Save">
-                                <Save className="h-4 w-4" />
-                              </Button>
-                              <Button variant="outline" size="icon" onClick={handleCancelEdit} title="Cancel">
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          ) : (
-                            <div className="flex space-x-1">
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                onClick={() => handleEditClick(rowIndex)}
-                                title="Edit"
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                onClick={() => handleDeleteRow(rowIndex)}
-                                title="Delete"
-                                className="text-red-500 hover:text-red-700"
-                              >
-                                <Trash className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          )}
-                        </TableCell>
-                      )}
-                      {columns.map((column) => {
-                        // Use the actual index in the original data for validation results
-                        const actualRowIndex = data.findIndex((item) => item.id === row.id)
-                        const cellResults = getCellValidationResults(actualRowIndex, column)
-                        const hasErrors = cellResults.length > 0
+                  paginatedData.map((row, rowIndex) => {
+                    // Find the actual index in the original data for validation results
+                    const actualRowIndex = data.findIndex((item) => item.id === row.id)
 
-                        return (
-                          <TableCell key={`${rowIndex}-${column}`} className={hasErrors ? "relative bg-red-50" : ""}>
-                            {onDataChange ? (
-                              renderEditableCell(column, row[column], actualRowIndex)
+                    return (
+                      <TableRow key={row.id || rowIndex}>
+                        {onDataChange && (
+                          <TableCell>
+                            {editingRow === rowIndex ? (
+                              <div className="flex space-x-1">
+                                <Button variant="outline" size="icon" onClick={handleSaveEdit} title="Save">
+                                  <Save className="h-4 w-4" />
+                                </Button>
+                                <Button variant="outline" size="icon" onClick={handleCancelEdit} title="Cancel">
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
                             ) : (
-                              <div className="flex items-center gap-2">
-                                <span>
-                                  {row[column] !== null && row[column] !== undefined ? String(row[column]) : ""}
-                                </span>
-                                {hasErrors && (
-                                  <TooltipProvider>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <Badge variant="destructive" className="ml-1">
-                                          {cellResults.length}
-                                        </Badge>
-                                      </TooltipTrigger>
-                                      <TooltipContent>
-                                        <div className="max-w-xs">
-                                          {cellResults.map((result, i) => (
-                                            <p key={i} className="text-sm">
-                                              {result.ruleName}: {result.message}
-                                            </p>
-                                          ))}
-                                        </div>
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </TooltipProvider>
-                                )}
+                              <div className="flex space-x-1">
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  onClick={() => handleEditClick(rowIndex)}
+                                  title="Edit"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  onClick={() => handleDeleteRow(rowIndex)}
+                                  title="Delete"
+                                  className="text-red-500 hover:text-red-700"
+                                >
+                                  <Trash className="h-4 w-4" />
+                                </Button>
                               </div>
                             )}
                           </TableCell>
-                        )
-                      })}
-                    </TableRow>
-                  ))
+                        )}
+                        {columns.map((column) => {
+                          const cellResults = getCellValidationResults(actualRowIndex, column)
+                          const hasErrors = cellResults.length > 0
+
+                          return (
+                            <TableCell
+                              key={`${row.id || rowIndex}-${column}`}
+                              className={hasErrors ? "relative bg-red-50" : ""}
+                            >
+                              {onDataChange ? (
+                                renderEditableCell(column, row[column], actualRowIndex)
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <span>
+                                    {row[column] !== null && row[column] !== undefined ? String(row[column]) : ""}
+                                  </span>
+                                  {hasErrors && (
+                                    <TooltipProvider>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <Badge variant="destructive" className="ml-1">
+                                            {cellResults.length}
+                                          </Badge>
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                          <div className="max-w-xs">
+                                            {cellResults.map((result, i) => (
+                                              <p key={i} className="text-sm">
+                                                {result.ruleName}: {result.message}
+                                              </p>
+                                            ))}
+                                          </div>
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    </TooltipProvider>
+                                  )}
+                                </div>
+                              )}
+                            </TableCell>
+                          )
+                        })}
+                      </TableRow>
+                    )
+                  })
                 ) : (
                   <TableRow>
                     <TableCell colSpan={columns.length + (onDataChange ? 1 : 0)} className="text-center py-4">

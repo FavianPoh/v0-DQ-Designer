@@ -1,13 +1,19 @@
 import type React from "react"
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import "./globals.css"
+import { ThemeProvider } from "@/components/theme-provider"
 
 export const metadata: Metadata = {
   title: "Data Quality Framework",
   description: "A framework for managing data quality rules and validations",
   manifest: "/manifest.json",
-  themeColor: "#4f46e5",
     generator: 'v0.dev'
+}
+
+export const viewport: Viewport = {
+  themeColor: "#4f46e5",
+  width: "device-width",
+  initialScale: 1,
 }
 
 export default function RootLayout({
@@ -16,13 +22,15 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
-        <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <link rel="manifest" href="/manifest.json" />
+        <link rel="manifest" href="/manifest.json" crossOrigin="use-credentials" />
       </head>
-      <body>{children}</body>
+      <body>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+          {children}
+        </ThemeProvider>
+      </body>
     </html>
   )
 }

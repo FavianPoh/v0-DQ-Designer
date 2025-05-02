@@ -22,6 +22,7 @@ import type {
 } from "@/lib/types"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
+import { MultiColumnConditionEditor } from "./multi-column-condition-editor"
 
 interface RuleFormProps {
   initialRule?: DataQualityRule
@@ -216,6 +217,22 @@ const REGEX_EXAMPLES = [
   { name: "Alphanumeric", pattern: "^[a-zA-Z0-9]+$", description: "Only letters and numbers" },
   { name: "ZIP Code", pattern: "^\\d{5}(-\\d{4})?$", description: "US ZIP code with optional 4-digit extension" },
 ]
+
+// Add this helper function to ensure logical operators are set
+function ensureLogicalOperators(conditions: Condition[]): Condition[] {
+  if (!conditions || conditions.length === 0) return []
+
+  return conditions.map((condition, index) => {
+    // Make sure every condition except the last one has a logical operator
+    if (index < conditions.length - 1) {
+      return {
+        ...condition,
+        logicalOperator: condition.logicalOperator || "AND", // Default to AND if not set
+      }
+    }
+    return condition
+  })
+}
 
 export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, onCancel }: RuleFormProps) {
   const [rule, setRule] = useState<DataQualityRule>(
@@ -579,12 +596,15 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
     }))
   }
 
+  // In your RuleForm component, modify the handleConditionsChange function:
   const handleConditionsChange = (newConditions: Condition[]) => {
-    setConditions(newConditions)
-    setRule((prev) => ({
-      ...prev,
-      conditions: newConditions,
-    }))
+    // Ensure all conditions have logical operators set
+    const updatedConditions = ensureLogicalOperators(newConditions)
+
+    setRule({
+      ...rule,
+      conditions: updatedConditions,
+    })
   }
 
   const handleAdditionalConditionsChange = (newConditions: Condition[]) => {
@@ -682,6 +702,15 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
   const addColumnCondition = () => {
     // Use the table from the first condition as default
     const defaultTable = columnConditions.length > 0 ? columnConditions[0].table : tables[0] || ""
+
+    // Ensure the previous condition has a logical operator
+    if (columnConditions.length > 0) {
+      const updatedConditions = [...columnConditions]
+      if (!updatedConditions[columnConditions.length - 1].logicalOperator) {
+        updatedConditions[columnConditions.length - 1].logicalOperator = "AND"
+        setColumnConditions(updatedConditions)
+      }
+    }
 
     setColumnConditions([
       ...columnConditions,
@@ -1402,7 +1431,7 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={addUniqueColumn}
+                  onClick={addColumnCondition}
                   className="flex items-center gap-1"
                 >
                   <Plus className="h-4 w-4" /> Add Column
@@ -1961,16 +1990,36 @@ Example: ${RULE_TYPE_EXAMPLES[columnConditions[0]?.ruleType]?.example}`,
                 </Select>
               </div>
             )}
+            {index < columnConditions.length - 1 && (
+              <div className="space-y-2 mt-4 pt-4 border-t">
+                <Label htmlFor={`condition-${index}-logicalOperator`}>Connect with Next Condition Using</Label>
+                <Select
+                  value={condition.logicalOperator || "AND"}
+                  onValueChange={(value) => handleColumnConditionChange(index, "logicalOperator", value)}
+                >
+                  <SelectTrigger id={`condition-${index}-logicalOperator`}>
+                    <SelectValue placeholder="Select logical operator" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="AND">AND</SelectItem>
+                    <SelectItem value="OR">OR</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-gray-500">
+                  {condition.logicalOperator === "OR"
+                    ? "This condition OR the next condition must be true"
+                    : "This condition AND the next condition must be true"}
+                </p>
+              </div>
+            )}
 
             {renderColumnConditionParameters(condition, index)}
           </div>
         ))}
 
-        {columnConditions.length < 3 && (
-          <Button type="button" variant="outline" size="sm" onClick={addColumnCondition}>
-            <Plus className="h-4 w-4 mr-2" /> Add Condition
-          </Button>
-        )}
+        <Button type="button" variant="outline" size="sm" onClick={addColumnCondition}>
+          <Plus className="h-4 w-4 mr-2" /> Add Condition
+        </Button>
 
         {rule.ruleType === "reference-integrity" && renderReferenceIntegrityParameters()}
         {rule.ruleType === "composite-reference" && renderCompositeReferenceParameters()}
@@ -1991,7 +2040,7 @@ Example: ${RULE_TYPE_EXAMPLES[columnConditions[0]?.ruleType]?.example}`,
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={addUniqueColumn}
+                  onClick={addColumnCondition}
                   className="flex items-center gap-1"
                 >
                   <Plus className="h-4 w-4" /> Add Column
@@ -2081,6 +2130,14 @@ Example: ${RULE_TYPE_EXAMPLES[columnConditions[0]?.ruleType]?.example}`,
           </Accordion>
         )}
 
+        {rule.ruleType === "multi-column" && (
+          <MultiColumnConditionEditor
+            columns={tableColumns[rule.table] || []}
+            conditions={ensureLogicalOperators(rule.conditions || [])}
+            onChange={handleConditionsChange}
+          />
+        )}
+
         <div className="space-y-2">
           <Label htmlFor="description">Description</Label>
           <Textarea
@@ -2092,11 +2149,7 @@ Example: ${RULE_TYPE_EXAMPLES[columnConditions[0]?.ruleType]?.example}`,
         </div>
 
         <div className="flex items-center space-x-2">
-          <Checkbox
-            id="enabled"
-            checked={rule.enabled}
-            onCheckedChange={(checked) => handleChange("enabled", checked)}
-          />
+          <Checkbox id="enabled" checked={rule.enabled} onChange={(e) => handleChange("enabled", e.target.checked)} />
           <Label htmlFor="enabled" className="text-sm font-normal">
             Enabled
           </Label>

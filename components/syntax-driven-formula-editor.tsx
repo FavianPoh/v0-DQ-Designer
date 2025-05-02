@@ -22,7 +22,7 @@ interface SyntaxDrivenFormulaEditorProps {
   data?: DataRecord[]
 }
 
-export function SyntaxDrivenFormulaEditor({
+export function FormulaSyntaxEditor({
   columns,
   formula,
   useComparison,
@@ -31,7 +31,6 @@ export function SyntaxDrivenFormulaEditor({
   onFormulaChange,
   onUseComparisonChange,
   onOperatorChange,
-  onValueChange,
   data,
 }: SyntaxDrivenFormulaEditorProps) {
   const [formulaInput, setFormulaInput] = useState(formula)

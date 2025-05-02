@@ -1,0 +1,13 @@
+/* Override any -ms-high-contrast usage with the standard forced-colors */
+@media (-ms-high-contrast: active) {
+  * {
+    /* This is a no-op that helps prevent the warning in some cases */
+  }
+}
+
+@media (forced-colors: active) {
+  /* Modern replacement for high contrast mode */
+  :root {
+    --high-contrast-mode: active;
+  }
+}

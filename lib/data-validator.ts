@@ -44,92 +44,18 @@ export function validateDataset(
       return
     }
 
-    // Generate passing validations for all enabled rules and all rows
-    // This ensures we have a complete set of validation results
-    Object.entries(datasets).forEach(([tableName, tableData]) => {
-      // Get all rules that apply to this table
-      const tableRules = rules.filter((r) => r.table === tableName && r.enabled !== false)
-
-      // For each row in the table
-      tableData.forEach((row, rowIndex) => {
-        // For each applicable rule
-        tableRules.forEach((rule) => {
-          // Check if we already have a validation result for this rule and row
-          const hasResult = results.some(
-            (r) =>
-              r.table === tableName &&
-              r.rowIndex === rowIndex &&
-              (r.ruleName === rule.name || r.ruleName.includes(`[ID: ${rule.id}]`) || r.ruleId === rule.id),
-          )
-
-          // If we don't have a result, it means the validation passed
-          if (!hasResult) {
-            // Add a passing validation result
-            results.push({
-              rowIndex,
-              table: tableName,
-              column: rule.column,
-              ruleName: rule.name,
-              message: "Passed validation",
-              severity: "success",
-              ruleId: rule.id,
-            })
-          }
-        })
-      })
-    })
-
     const tableData = datasets[rule.table]
     if (!tableData) {
       console.log(`Table ${rule.table} not found for rule ${rule.name}`)
       return
     }
 
-    // For date rules, add special handling
-    const isDateRule = rule.ruleType.startsWith("date-")
-    if (isDateRule) {
-      console.log(`Processing date rule: ${rule.name} (${rule.ruleType}) on table ${rule.table}, column ${rule.column}`)
-
-      // Check if the column exists in the table
-      if (tableData.length > 0 && !(rule.column in tableData[0])) {
-        console.log(`Column ${rule.column} not found in table ${rule.table} for rule ${rule.name}`)
-        return
-      }
-    }
-
     // Process each row in the table
     tableData.forEach((row, rowIndex) => {
       let validationResult: ValidationResult | null = null
 
-      // Special handling for date rules to ensure they're processed
-      if (isDateRule) {
-        const value = row[rule.column]
-        console.log(`Validating date rule ${rule.name} for row ${rowIndex}, value: ${value}, type: ${typeof value}`)
-
-        // Force validation for date rules
-        validationResult = validateDateRule(row, rowIndex, rule)
-
-        if (validationResult) {
-          console.log(`Date rule validation failed: ${validationResult.message}`)
-          results.push(validationResult)
-        } else {
-          // For passing date rules, add a passing result
-          console.log(`Date rule validation passed for row ${rowIndex}`)
-
-          // Always add passing results for date rules so they can be filtered/displayed as needed
-          results.push({
-            rowIndex,
-            table: rule.table,
-            column: rule.column,
-            ruleName: rule.name,
-            message: "Passed date validation",
-            severity: "success", // Always use "success" for passing rules
-            ruleId: rule.id, // Include the rule ID for reference
-          })
-        }
-      }
       // Special handling for composite reference rules
-      else if (rule.ruleType === "composite-reference") {
+      if (rule.ruleType === "composite-reference") {
         validationResult = validateCompositeReference(row, rowIndex, rule, datasets)
         if (validationResult) {
           results.push(validationResult)
@@ -147,12 +73,34 @@ export function validateDataset(
         validationResult = validateColumnConditions(row, rowIndex, rule, datasets, valueLists)
         if (validationResult) {
           results.push(validationResult)
+        } else {
+          // Add a passing result if validation passed
+          results.push({
+            rowIndex,
+            table: rule.table,
+            column: rule.column,
+            ruleName: rule.name,
+            message: "Passed validation",
+            severity: "success",
+            ruleId: rule.id,
+          })
         }
       } else {
         // Use the traditional validation approach
         validationResult = validateRule(row, rowIndex, rule, datasets, valueLists)
         if (validationResult) {
           results.push(validationResult)
+        } else {
+          // Add a passing result if validation passed
+          results.push({
+            rowIndex,
+            table: rule.table,
+            column: rule.column,
+            ruleName: rule.name,
+            message: "Passed validation",
+            severity: "success",
+            ruleId: rule.id,
+          })
         }
       }
     })
@@ -412,6 +360,7 @@ function validateReferenceIntegrity(
       ruleName: rule.name,
       message: `Reference table ${referenceTable} or column ${referenceColumn} not found`,
       severity: rule.severity,
+      ruleId: rule.id,
     }
   }
 
@@ -435,6 +384,7 @@ function validateReferenceIntegrity(
       ruleName: rule.name,
       message,
       severity: rule.severity,
+      ruleId: rule.id,
     }
   }
 
@@ -457,37 +407,57 @@ function validateColumnConditions(
   const firstCondition = rule.columnConditions[0]
   const firstValue = row[firstCondition.column]
 
-  let isValid = true
-  let message = ""
-  let failedColumn = firstCondition.column
-
   // Validate the first condition
   const result = validateSingleColumnCondition(firstValue, row, firstCondition, datasets, valueLists)
-  isValid = result.isValid
-  message = result.message
+
+  // If there's only one condition, return its result
+  if (rule.columnConditions.length === 1) {
+    if (!result.isValid) {
+      return {
+        rowIndex,
+        table: rule.table,
+        column: firstCondition.column,
+        ruleName: rule.name,
+        message: result.message,
+        severity: rule.severity,
+        ruleId: rule.id,
+      }
+    }
+    return null // Passed validation
+  }
+
+  // For multiple conditions, we need to evaluate them with their logical operators
+  let isValid = result.isValid
+  let failedColumn = isValid ? "" : firstCondition.column
+  let failedMessage = isValid ? "" : result.message
 
   // Process subsequent conditions with their logical operators
   for (let i = 1; i < rule.columnConditions.length; i++) {
     const currentCondition = rule.columnConditions[i]
-    const logicalOp = currentCondition.logicalOperator
+    const previousCondition = rule.columnConditions[i - 1]
+    const logicalOp = previousCondition.logicalOperator || "AND"
     const currentValue = row[currentCondition.column]
 
     const conditionResult = validateSingleColumnCondition(currentValue, row, currentCondition, datasets, valueLists)
 
     if (logicalOp === "AND") {
+      // With AND, both conditions must be true
       isValid = isValid && conditionResult.isValid
-      if (!conditionResult.isValid) {
-        message = conditionResult.message
+      if (!conditionResult.isValid && failedMessage === "") {
         failedColumn = currentCondition.column
+        failedMessage = conditionResult.message
       }
     } else {
-      // OR
+      // With OR, either condition can be true
       isValid = isValid || conditionResult.isValid
       if (isValid) {
-        message = ""
-      } else {
-        message = conditionResult.message
+        // If we've found a valid condition with OR, we can clear the failure
+        failedColumn = ""
+        failedMessage = ""
+      } else if (failedMessage === "") {
+        // Only update the failure message if we haven't set one yet
         failedColumn = currentCondition.column
+        failedMessage = conditionResult.message
       }
     }
   }
@@ -497,14 +467,15 @@ function validateColumnConditions(
     return {
       rowIndex,
       table: rule.table,
-      column: failedColumn, // Use the column that actually failed
+      column: failedColumn || rule.column,
       ruleName: rule.name,
-      message,
+      message: failedMessage || "Failed validation",
       severity: rule.severity,
+      ruleId: rule.id,
     }
   }
 
-  return null
+  return null // Passed validation
 }
 
 // Helper function to validate a single column condition
@@ -740,6 +711,7 @@ function validateRule(
       ruleName: rule.name,
       message,
       severity: rule.severity,
+      ruleId: rule.id,
     }
   }
 
