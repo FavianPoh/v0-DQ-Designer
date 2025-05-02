@@ -1213,6 +1213,49 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
           </div>
         )
 
+      case "list":
+        return (
+          <div className="space-y-2">
+            <Label htmlFor={`condition-${index}-listId`}>Value List</Label>
+            <Select
+              value={condition.parameters.listId ?? ""}
+              onValueChange={(value) => handleColumnConditionParameterChange(index, "listId", value)}
+            >
+              <SelectTrigger id={`condition-${index}-listId`}>
+                <SelectValue placeholder="Select a value list" />
+              </SelectTrigger>
+              <SelectContent>
+                {valueLists.map((list) => (
+                  <SelectItem key={list.id} value={list.id}>
+                    {list.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {condition.parameters.listId && (
+              <div className="mt-2 p-2 bg-muted rounded-md">
+                <p className="text-xs font-medium mb-1">List Preview:</p>
+                <div className="text-xs max-h-24 overflow-y-auto">
+                  {valueLists
+                    .find((list) => list.id === condition.parameters.listId)
+                    ?.values.slice(0, 10)
+                    .map((value, i) => (
+                      <span
+                        key={i}
+                        className="inline-block mr-1 mb-1 px-1.5 py-0.5 bg-background rounded border text-xs"
+                      >
+                        {value}
+                      </span>
+                    ))}
+                  {(valueLists.find((list) => list.id === condition.parameters.listId)?.values.length || 0) > 10 && (
+                    <span className="text-xs text-muted-foreground">+ more</span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )
+
       case "formula":
         return (
           <div className="space-y-4">

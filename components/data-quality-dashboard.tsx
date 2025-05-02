@@ -513,14 +513,55 @@ export function DataQualityDashboard() {
     refreshValidationResults()
   }
 
+  // Add this right before the refreshValidationResults function
+  const logRuleTypes = () => {
+    console.log("All rules:", rules)
+
+    // Count rules by type
+    const ruleTypeCount = rules.reduce(
+      (acc, rule) => {
+        acc[rule.ruleType] = (acc[rule.ruleType] || 0) + 1
+        return acc
+      },
+      {} as Record<string, number>,
+    )
+
+    console.log("Rule types count:", ruleTypeCount)
+
+    // Count rules with cross-table conditions
+    const rulesWithCrossTableConditions = rules.filter(
+      (r) => r.crossTableConditions && r.crossTableConditions.length > 0,
+    )
+
+    console.log(
+      "Rules with cross-table conditions:",
+      rulesWithCrossTableConditions.length,
+      rulesWithCrossTableConditions,
+    )
+  }
+
+  // Modify the refreshValidationResults function to include the logging
   const refreshValidationResults = () => {
     // Add debug logging for validation process
     console.log("Starting validation with rules:", rules)
+
+    // Log rule types and cross-table rules
+    logRuleTypes()
 
     const results = validateDataset(datasets, rules, valueLists)
 
     // After getting validation results
     console.log("Validation complete. Results:", results)
+
+    // Debug cross-table validation results
+    const crossTableRuleIds = rules
+      .filter((r) => r.crossTableConditions && r.crossTableConditions.length > 0)
+      .map((r) => r.id)
+
+    if (crossTableRuleIds.length > 0) {
+      const crossTableResults = results.filter((r) => crossTableRuleIds.includes(r.ruleId))
+      console.log("Cross-table validation results:", crossTableResults.length, crossTableResults)
+    }
 
     // Debug date rules
     const dateRules = rules.filter((r) => r.ruleType.startsWith("date-") || r.name.toLowerCase().includes("date"))

@@ -40,7 +40,7 @@ export function RuleManager({
   rules,
   tables,
   datasets,
-  valueLists,
+  valueLists: initialValueLists,
   onAddRule,
   onDeleteRule,
   onUpdateRule,
@@ -55,6 +55,7 @@ export function RuleManager({
   const [filterTable, setFilterTable] = useState<string>("")
   const [ruleToDelete, setRuleToDelete] = useState<string | null>(null)
   const [expandedRuleId, setExpandedRuleId] = useState<string | null>(null)
+  const [valueLists, setValueLists] = useState<ValueList[]>(initialValueLists || [])
 
   // Sync external editing state with local state
   useEffect(() => {
@@ -198,6 +199,19 @@ export function RuleManager({
         return ruleType.charAt(0).toUpperCase() + ruleType.slice(1)
     }
   }
+
+  // Add this useEffect to fetch value lists if it doesn't exist
+  useEffect(() => {
+    // Fetch value lists from API
+    fetch("/api/lists")
+      .then((response) => response.json())
+      .then((data) => {
+        setValueLists(data)
+      })
+      .catch((error) => {
+        console.error("Error fetching value lists:", error)
+      })
+  }, [])
 
   return (
     <TooltipProvider>
