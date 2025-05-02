@@ -1,38 +1,44 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Input } from "@/components/ui/input"
+import { ChevronDown, ChevronUp, Filter, X, Plus } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
-import { Pencil, Save, X, Plus, Trash, Shield, ShieldAlert } from "lucide-react"
+import { Pencil, Save, Trash, Shield, ShieldAlert } from "lucide-react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { RuleForm } from "@/components/rule-form"
-import type { DataRecord, DataQualityRule, ValueList, ValidationResult } from "@/lib/types"
-
-// Add a tooltip to show validation messages when hovering over highlighted cells
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import type { DataRecord, DataQualityRule, ValueList } from "@/lib/types"
 
 interface DatasetViewerProps {
-  data: DataRecord[]
+  data: any[]
+  validationResults?: any[]
   tableName: string
-  onDataChange: (newData: DataRecord[]) => void
+  onDataChange?: (newData: DataRecord[]) => void
   onAddRule?: (rule: DataQualityRule) => void
   valueLists?: ValueList[]
   datasets?: Record<string, DataRecord[]>
-  validationResults?: ValidationResult[] // Add this prop
 }
 
 export function DatasetViewer({
   data,
+  validationResults,
   tableName,
   onDataChange,
   onAddRule,
   valueLists = [],
   datasets = {},
-  validationResults = [], // Add default empty array
 }: DatasetViewerProps) {
+  const [displayData, setDisplayData] = useState<any[]>([])
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" } | null>(null)
+  const [filters, setFilters] = useState<Record<string, string>>({})
+  const [showFilters, setShowFilters] = useState<Record<string, boolean>>({})
+  const tableRef = useRef<HTMLTableElement>(null)
   const [searchTerm, setSearchTerm] = useState("")
   const [currentPage, setCurrentPage] = useState(1)
   const [editingRow, setEditingRow] = useState<number | null>(null)
@@ -42,7 +48,123 @@ export function DatasetViewer({
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null)
   const rowsPerPage = 10
 
+  // Get all column names from the first row of data
   const columns = data.length > 0 ? Object.keys(data[0]) : []
+
+  // Calculate optimal column widths based on content
+  useEffect(() => {
+    if (data.length === 0) return
+
+    const calculateColumnWidth = (column: string) => {
+      // Start with the column name length (minimum width)
+      let maxWidth = column.length * 10
+
+      // Check each row's value length
+      data.forEach((row) => {
+        const value = row[column]
+        const valueStr = value !== null && value !== undefined ? String(value) : ""
+        const valueWidth = valueStr.length * 8 // Approximate width based on character count
+        maxWidth = Math.max(maxWidth, valueWidth)
+      })
+
+      // Add padding and cap maximum width
+      return Math.min(Math.max(maxWidth + 24, 100), 300)
+    }
+
+    const widths: Record<string, number> = {}
+    columns.forEach((column) => {
+      widths[column] = calculateColumnWidth(column)
+    })
+
+    setColumnWidths(widths)
+  }, [data, columns])
+
+  // Apply sorting and filtering to data
+  useEffect(() => {
+    let result = [...data]
+
+    // Apply filters
+    Object.keys(filters).forEach((key) => {
+      const filterValue = filters[key].toLowerCase()
+      if (filterValue) {
+        result = result.filter((item) => {
+          const value = item[key]
+          return value !== null && value !== undefined && String(value).toLowerCase().includes(filterValue)
+        })
+      }
+    })
+
+    // Apply sorting
+    if (sortConfig !== null) {
+      result.sort((a, b) => {
+        const aValue = a[sortConfig.key]
+        const bValue = b[sortConfig.key]
+
+        // Handle null/undefined values
+        if (aValue === null || aValue === undefined) return sortConfig.direction === "asc" ? -1 : 1
+        if (bValue === null || bValue === undefined) return sortConfig.direction === "asc" ? 1 : -1
+
+        // Compare based on type
+        if (typeof aValue === "number" && typeof bValue === "number") {
+          return sortConfig.direction === "asc" ? aValue - bValue : bValue - aValue
+        }
+
+        // Default string comparison
+        const aString = String(aValue).toLowerCase()
+        const bString = String(bValue).toLowerCase()
+        return sortConfig.direction === "asc" ? aString.localeCompare(bString) : bString.localeCompare(aString)
+      })
+    }
+
+    setDisplayData(result)
+  }, [data, sortConfig, filters])
+
+  const handleSort = (column: string) => {
+    let direction: "asc" | "desc" = "asc"
+
+    if (sortConfig && sortConfig.key === column && sortConfig.direction === "asc") {
+      direction = "desc"
+    } else if (sortConfig && sortConfig.key === column && sortConfig.direction === "desc") {
+      // Clear sort if clicking the same column that's already sorted desc
+      setSortConfig(null)
+      return
+    }
+
+    setSortConfig({ key: column, direction })
+  }
+
+  const handleFilterChange = (column: string, value: string) => {
+    setFilters((prev) => ({
+      ...prev,
+      [column]: value,
+    }))
+  }
+
+  const toggleFilter = (column: string) => {
+    setShowFilters((prev) => ({
+      ...prev,
+      [column]: !prev[column],
+    }))
+  }
+
+  const clearFilter = (column: string) => {
+    setFilters((prev) => {
+      const newFilters = { ...prev }
+      delete newFilters[column]
+      return newFilters
+    })
+    setShowFilters((prev) => ({
+      ...prev,
+      [column]: false,
+    }))
+  }
+
+  // Function to check if a cell has validation errors
+  const getCellValidationResults = (rowIndex: number, column: string) => {
+    if (!validationResults) return []
+
+    return validationResults.filter((result) => result.rowIndex === rowIndex && result.column === column)
+  }
 
   const filteredData = data.filter((row) =>
     Object.values(row).some((value) => String(value).toLowerCase().includes(searchTerm.toLowerCase())),
@@ -69,7 +191,9 @@ export function DatasetViewer({
 
       if (actualIndex !== -1) {
         newData[actualIndex] = editedData
-        onDataChange(newData)
+        if (onDataChange) {
+          onDataChange(newData)
+        }
       }
 
       setEditingRow(null)
@@ -115,7 +239,9 @@ export function DatasetViewer({
     }
 
     const newData = [...data, newRow]
-    onDataChange(newData)
+    if (onDataChange) {
+      onDataChange(newData)
+    }
   }
 
   const handleDeleteRow = (rowIndex: number) => {
@@ -124,7 +250,9 @@ export function DatasetViewer({
     if (actualIndex !== -1) {
       const newData = [...data]
       newData.splice(actualIndex, 1)
-      onDataChange(newData)
+      if (onDataChange) {
+        onDataChange(newData)
+      }
     }
   }
 
@@ -143,6 +271,7 @@ export function DatasetViewer({
 
   // Add a function to determine the validation status of a cell
   const getCellValidationStatus = (rowIndex: number, column: string) => {
+    if (!validationResults) return null
     // Filter validation results for this specific cell
     const cellResults = validationResults.filter(
       (result) => result.table === tableName && result.rowIndex === rowIndex && result.column === column,
@@ -183,6 +312,7 @@ export function DatasetViewer({
 
   // Add this function to get validation messages for a cell
   const getCellValidationMessages = (rowIndex: number, column: string) => {
+    if (!validationResults) return null
     // Filter validation results for this specific cell
     const cellResults = validationResults.filter(
       (result) => result.table === tableName && result.rowIndex === rowIndex && result.column === column,
@@ -456,6 +586,7 @@ export function DatasetViewer({
 
   // Add a function to check if there are any validation issues
   const hasValidationIssues = () => {
+    if (!validationResults) return false
     return validationResults.some(
       (result) => result.table === tableName && (result.severity === "failure" || result.severity === "warning"),
     )
@@ -471,9 +602,11 @@ export function DatasetViewer({
             <div className="w-64">
               <Input placeholder="Search data..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
             </div>
-            <Button onClick={handleAddRow} size="sm">
-              <Plus className="h-4 w-4 mr-1" /> Add Row
-            </Button>
+            {onDataChange && (
+              <Button onClick={handleAddRow} size="sm">
+                <Plus className="h-4 w-4 mr-1" /> Add Row
+              </Button>
+            )}
           </div>
         </div>
 
@@ -493,81 +626,168 @@ export function DatasetViewer({
           </div>
         )}
 
-        <div className="border rounded-md overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[100px]">Actions</TableHead>
-                {columns.map((column) => (
-                  <TableHead key={column} className="font-medium">
-                    <div className="flex items-center gap-2">
-                      {column}
-                      {onAddRule && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-5 w-5"
-                          onClick={() => {
-                            setSelectedColumn(column)
-                            setSelectedRowIndex(null)
-                            setCreateRuleDialogOpen(true)
-                          }}
-                          title={`Create rule for ${column}`}
-                        >
-                          <Shield className="h-3 w-3 text-blue-500" />
-                        </Button>
-                      )}
-                    </div>
-                  </TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {paginatedData.map((row, rowIndex) => (
-                <TableRow key={rowIndex}>
-                  <TableCell>
-                    {editingRow === rowIndex ? (
-                      <div className="flex space-x-1">
-                        <Button variant="outline" size="icon" onClick={handleSaveEdit} title="Save">
-                          <Save className="h-4 w-4" />
-                        </Button>
-                        <Button variant="outline" size="icon" onClick={handleCancelEdit} title="Cancel">
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="flex space-x-1">
-                        <Button variant="outline" size="icon" onClick={() => handleEditClick(rowIndex)} title="Edit">
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          onClick={() => handleDeleteRow(rowIndex)}
-                          title="Delete"
-                          className="text-red-500 hover:text-red-700"
-                        >
-                          <Trash className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    )}
-                  </TableCell>
+        <div className="rounded-md border">
+          <div className="max-h-[600px] overflow-auto">
+            <Table ref={tableRef}>
+              <TableHeader className="sticky top-0 bg-white z-10">
+                <TableRow>
+                  {onDataChange && <TableHead className="w-[100px]">Actions</TableHead>}
                   {columns.map((column) => (
-                    <TableCell key={`${rowIndex}-${column}`}>
-                      {renderEditableCell(column, row[column], rowIndex)}
-                    </TableCell>
+                    <TableHead
+                      key={column}
+                      style={{ width: `${columnWidths[column]}px`, minWidth: `${columnWidths[column]}px` }}
+                      className="relative"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1 cursor-pointer" onClick={() => handleSort(column)}>
+                          {column}
+                          {sortConfig?.key === column &&
+                            (sortConfig.direction === "asc" ? <ChevronUp size={16} /> : <ChevronDown size={16} />)}
+                        </div>
+                        <div className="flex items-center">
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    toggleFilter(column)
+                                  }}
+                                  className={`p-1 rounded-sm ${filters[column] ? "bg-blue-100 text-blue-700" : "hover:bg-gray-100"}`}
+                                >
+                                  <Filter size={14} />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>Filter {column}</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                          {onAddRule && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-5 w-5"
+                              onClick={() => {
+                                setSelectedColumn(column)
+                                setSelectedRowIndex(null)
+                                setCreateRuleDialogOpen(true)
+                              }}
+                              title={`Create rule for ${column}`}
+                            >
+                              <Shield className="h-3 w-3 text-blue-500" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+
+                      {showFilters[column] && (
+                        <div className="absolute top-full left-0 right-0 bg-white p-2 shadow-md z-20 flex gap-1">
+                          <Input
+                            placeholder={`Filter ${column}...`}
+                            value={filters[column] || ""}
+                            onChange={(e) => handleFilterChange(column, e.target.value)}
+                            className="h-8 text-sm"
+                          />
+                          {filters[column] && (
+                            <button onClick={() => clearFilter(column)} className="p-1 hover:bg-gray-100 rounded-sm">
+                              <X size={16} />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </TableHead>
                   ))}
                 </TableRow>
-              ))}
-              {paginatedData.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={columns.length + 1} className="text-center py-4">
-                    No data found
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {displayData.length > 0 ? (
+                  displayData.map((row, rowIndex) => (
+                    <TableRow key={rowIndex}>
+                      {onDataChange && (
+                        <TableCell>
+                          {editingRow === rowIndex ? (
+                            <div className="flex space-x-1">
+                              <Button variant="outline" size="icon" onClick={handleSaveEdit} title="Save">
+                                <Save className="h-4 w-4" />
+                              </Button>
+                              <Button variant="outline" size="icon" onClick={handleCancelEdit} title="Cancel">
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ) : (
+                            <div className="flex space-x-1">
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                onClick={() => handleEditClick(rowIndex)}
+                                title="Edit"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                onClick={() => handleDeleteRow(rowIndex)}
+                                title="Delete"
+                                className="text-red-500 hover:text-red-700"
+                              >
+                                <Trash className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          )}
+                        </TableCell>
+                      )}
+                      {columns.map((column) => {
+                        const cellResults = getCellValidationResults(rowIndex, column)
+                        const hasErrors = cellResults.length > 0
+
+                        return (
+                          <TableCell key={`${rowIndex}-${column}`} className={hasErrors ? "relative bg-red-50" : ""}>
+                            {onDataChange ? (
+                              renderEditableCell(column, row[column], rowIndex)
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <span>
+                                  {row[column] !== null && row[column] !== undefined ? String(row[column]) : ""}
+                                </span>
+                                {hasErrors && (
+                                  <TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <Badge variant="destructive" className="ml-1">
+                                          {cellResults.length}
+                                        </Badge>
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        <div className="max-w-xs">
+                                          {cellResults.map((result, i) => (
+                                            <p key={i} className="text-sm">
+                                              {result.ruleName}: {result.message}
+                                            </p>
+                                          ))}
+                                        </div>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                )}
+                              </div>
+                            )}
+                          </TableCell>
+                        )
+                      })}
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={columns.length} className="text-center py-4">
+                      No data available
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </div>
 
         {totalPages > 1 && (

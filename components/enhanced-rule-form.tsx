@@ -32,7 +32,7 @@ const RULE_TYPES: { value: RuleType; label: string }[] = [
   { value: "cross-column", label: "Cross-Column Validation" },
   { value: "lookup", label: "Table Lookup" },
   { value: "custom", label: "Custom Function" },
-]
+].sort((a, b) => a.label.localeCompare(b.label))
 
 export function EnhancedRuleForm({ initialRule, tables, onSubmit, onCancel }: EnhancedRuleFormProps) {
   const [rule, setRule] = useState<DataQualityRule>(

@@ -2,11 +2,11 @@
 
 import type React from "react"
 
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect, useRef } from "react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import type { ValidationResult, DataTables, DataRecord } from "@/lib/types"
+import type { DataTables, DataRecord } from "@/lib/types"
 import {
   AlertTriangle,
   CheckCircle,
@@ -20,6 +20,9 @@ import {
   TableIcon,
   Calendar,
   XCircle,
+  ChevronDown,
+  ChevronUp,
+  X,
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
@@ -29,7 +32,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { RuleForm } from "@/components/rule-form"
-import type { DataQualityRule, ValueList } from "@/lib/types"
+import type { DataQualityRule, ValueList, ValidationResult } from "@/lib/types"
+import { Input } from "@/components/ui/input"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 interface ValidationResultsProps {
   results: ValidationResult[]
@@ -41,6 +46,7 @@ interface ValidationResultsProps {
   valueLists?: ValueList[]
   showPassingRules?: boolean
   onTogglePassingRules?: () => void
+  onRowClick?: (result: ValidationResult) => void
 }
 
 export function ValidationResults({
@@ -53,6 +59,7 @@ export function ValidationResults({
   valueLists = [],
   showPassingRules = false,
   onTogglePassingRules,
+  onRowClick,
 }: ValidationResultsProps) {
   // Filter states
   const [filterTable, setFilterTable] = useState<string>("all")
@@ -74,6 +81,23 @@ export function ValidationResults({
 
   const [editRuleDialogOpen, setEditRuleDialogOpen] = useState<boolean>(false)
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null)
+
+  const [displayResults, setDisplayResults] = useState<ValidationResult[]>([])
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" } | null>(null)
+  const [filters, setFilters] = useState<Record<string, string>>({})
+  const [showFilters, setShowFilters] = useState<Record<string, boolean>>({})
+  const tableRef = useRef<HTMLTableElement>(null)
+
+  // Define columns for validation results
+  const columns = [
+    { key: "table", label: "Table" },
+    { key: "ruleName", label: "Rule" },
+    { key: "rowIndex", label: "Row" },
+    { key: "column", label: "Column" },
+    { key: "message", label: "Message" },
+    { key: "severity", label: "Severity" },
+  ]
 
   // Compute derived data using useMemo to avoid recalculations on every render
   const {
@@ -374,6 +398,79 @@ export function ValidationResults({
     activeTab,
   ])
 
+  // Calculate optimal column widths based on content
+  useEffect(() => {
+    if (initialResults.length === 0) return
+
+    const calculateColumnWidth = (column: string) => {
+      // Start with the column name length (minimum width)
+      let maxWidth = column.length * 10
+
+      // Check each row's value length
+      initialResults.forEach((row) => {
+        const value = (row as any)[column]
+        const valueStr = value !== null && value !== undefined ? String(value) : ""
+        const valueWidth = valueStr.length * 8 // Approximate width based on character count
+        maxWidth = Math.max(maxWidth, valueWidth)
+      })
+
+      // Add padding and cap maximum width
+      return Math.min(Math.max(maxWidth + 24, 100), 300)
+    }
+
+    const widths: Record<string, number> = {}
+    columns.forEach((column) => {
+      widths[column.key] = calculateColumnWidth(column.key)
+    })
+
+    // Special case for message column - allow it to be wider
+    if (widths["message"]) {
+      widths["message"] = Math.min(widths["message"], 400)
+    }
+
+    setColumnWidths(widths)
+  }, [initialResults])
+
+  // Apply sorting and filtering to data
+  useEffect(() => {
+    let filteredResults = [...initialResults]
+
+    // Apply filters
+    Object.keys(filters).forEach((key) => {
+      const filterValue = filters[key].toLowerCase()
+      if (filterValue) {
+        filteredResults = filteredResults.filter((item) => {
+          const value = (item as any)[key]
+          return value !== null && value !== undefined && String(value).toLowerCase().includes(filterValue)
+        })
+      }
+    })
+
+    // Apply sorting
+    if (sortConfig !== null) {
+      filteredResults.sort((a, b) => {
+        const aValue = (a as any)[sortConfig.key]
+        const bValue = (b as any)[sortConfig.key]
+
+        // Handle null/undefined values
+        if (aValue === null || aValue === undefined) return sortConfig.direction === "asc" ? -1 : 1
+        if (bValue === null || bValue === undefined) return sortConfig.direction === "asc" ? 1 : -1
+
+        // Special handling for rowIndex which should be sorted numerically
+        if (sortConfig.key === "rowIndex") {
+          return sortConfig.direction === "asc" ? aValue - bValue : bValue - aValue
+        }
+
+        // Default string comparison
+        const aString = String(aValue).toLowerCase()
+        const bString = String(bValue).toLowerCase()
+        return sortConfig.direction === "asc" ? aString.localeCompare(bString) : bString.localeCompare(aString)
+      })
+    }
+
+    setDisplayResults(filteredResults)
+  }, [initialResults, sortConfig, filters])
+
   // Add this useEffect to reset the rule filter when rule type changes
   useEffect(() => {
     setFilterRule("all")
@@ -401,6 +498,46 @@ export function ValidationResults({
   // Handle tab change
   const handleTabChange = (value: string) => {
     setActiveTab(value)
+  }
+
+  const handleSort = (column: string) => {
+    let direction: "asc" | "desc" = "asc"
+
+    if (sortConfig && sortConfig.key === column && sortConfig.direction === "asc") {
+      direction = "desc"
+    } else if (sortConfig && sortConfig.key === column && sortConfig.direction === "desc") {
+      // Clear sort if clicking the same column that's already sorted desc
+      setSortConfig(null)
+      return
+    }
+
+    setSortConfig({ key: column, direction })
+  }
+
+  const handleFilterChange = (column: string, value: string) => {
+    setFilters((prev) => ({
+      ...prev,
+      [column]: value,
+    }))
+  }
+
+  const toggleFilter = (column: string) => {
+    setShowFilters((prev) => ({
+      ...prev,
+      [column]: !prev[column],
+    }))
+  }
+
+  const clearFilter = (column: string) => {
+    setFilters((prev) => {
+      const newFilters = { ...prev }
+      delete newFilters[column]
+      return newFilters
+    })
+    setShowFilters((prev) => ({
+      ...prev,
+      [column]: false,
+    }))
   }
 
   // Reset all filters
@@ -702,6 +839,7 @@ export function ValidationResults({
         </Label>
       </div>
 
+      {/*
       {showPassingRows ? (
         <Tabs value={activeTab} onValueChange={handleTabChange}>
           <TabsList>
@@ -747,6 +885,100 @@ export function ValidationResults({
           rules,
         )
       )}
+      */}
+
+      <div className="rounded-md border">
+        <ScrollArea className="h-[600px] w-full">
+          <Table ref={tableRef}>
+            <TableHeader className="sticky top-0 bg-white z-10">
+              <TableRow>
+                {columns.map((column) => (
+                  <TableHead
+                    key={column.key}
+                    style={{
+                      width: `${columnWidths[column.key]}px`,
+                      minWidth: `${columnWidths[column.key]}px`,
+                    }}
+                    className="relative"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1 cursor-pointer" onClick={() => handleSort(column.key)}>
+                        {column.label}
+                        {sortConfig?.key === column.key &&
+                          (sortConfig.direction === "asc" ? <ChevronUp size={16} /> : <ChevronDown size={16} />)}
+                      </div>
+                      <div className="flex items-center">
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  toggleFilter(column.key)
+                                }}
+                                className={`p-1 rounded-sm ${filters[column.key] ? "bg-blue-100 text-blue-700" : "hover:bg-gray-100"}`}
+                              >
+                                <Filter size={14} />
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Filter {column.label}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </div>
+                    </div>
+
+                    {showFilters[column.key] && (
+                      <div className="absolute top-full left-0 right-0 bg-white p-2 shadow-md z-20 flex gap-1">
+                        <Input
+                          placeholder={`Filter ${column.label}...`}
+                          value={filters[column.key] || ""}
+                          onChange={(e) => handleFilterChange(column.key, e.target.value)}
+                          className="h-8 text-sm"
+                        />
+                        {filters[column.key] && (
+                          <button onClick={() => clearFilter(column.key)} className="p-1 hover:bg-gray-100 rounded-sm">
+                            <X size={16} />
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {displayResults.length > 0 ? (
+                displayResults.map((result, index) => (
+                  <TableRow
+                    key={index}
+                    className={onRowClick ? "cursor-pointer hover:bg-gray-50" : ""}
+                    onClick={() => onRowClick && onRowClick(result)}
+                  >
+                    <TableCell>{result.table}</TableCell>
+                    <TableCell>{result.ruleName}</TableCell>
+                    <TableCell>{result.rowIndex}</TableCell>
+                    <TableCell>{result.column}</TableCell>
+                    <TableCell>{result.message}</TableCell>
+                    <TableCell>
+                      <Badge variant={result.severity === "failure" ? "destructive" : "warning"}>
+                        {result.severity}
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={columns.length} className="text-center py-4">
+                    No validation issues found
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </ScrollArea>
+      </div>
 
       {/* Row Data Dialog */}
       <Dialog open={rowDataDialogOpen} onOpenChange={setRowDataDialogOpen}>

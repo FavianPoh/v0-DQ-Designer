@@ -279,7 +279,7 @@ export function RuleManager({
                 <Card
                   key={rule.id}
                   id={`rule-${rule.id}`}
-                  className={`transition-all duration-300 cursor-pointer hover:shadow-md ${
+                  className={`transition-all duration-300 cursor-pointer hover:shadow-md hover:border-blue-300 hover:bg-blue-50/30 group ${
                     actualEditingRuleId === rule.id ? "border-blue-500 border-2" : ""
                   } ${rule.enabled === false ? "border-dashed bg-gray-50" : ""}`}
                   onClick={() => toggleExpandRule(rule.id)}
@@ -293,7 +293,9 @@ export function RuleManager({
 
                   <CardHeader className="pb-1 pt-3 px-4 relative">
                     <div className="flex justify-between items-start">
-                      <CardTitle className={`text-base font-medium ${rule.enabled === false ? "text-gray-500" : ""}`}>
+                      <CardTitle
+                        className={`text-base font-medium ${rule.enabled === false ? "text-gray-500" : ""} group-hover:text-blue-600`}
+                      >
                         {displayRuleName(rule.name)}
                       </CardTitle>
                       <div className="flex space-x-1">

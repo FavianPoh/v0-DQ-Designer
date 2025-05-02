@@ -32,36 +32,34 @@ interface RuleFormProps {
   onCancel: () => void
 }
 
-// Update the RULE_TYPES array to rename "Reference Integrity" to "Cross Integrity"
-// and "Composite Reference" to "Composite Integrity"
+// Update the RULE_TYPES array to be sorted alphabetically by label
 const RULE_TYPES: { value: RuleType; label: string }[] = [
-  { value: "required", label: "Required Field" },
+  { value: "contains", label: "Contains String" },
+  { value: "composite-reference", label: "Cross-Table Composite Key" },
+  { value: "reference-integrity", label: "Cross-Table Key Integrity" },
+  { value: "cross-column", label: "Cross-Column Validation" },
+  { value: "custom", label: "Custom Function" },
+  { value: "date-after", label: "Date After" },
+  { value: "date-before", label: "Date Before" },
+  { value: "date-between", label: "Date Between" },
+  { value: "date-format", label: "Date Format" },
+  { value: "dependency", label: "Conditional Dependency" },
+  { value: "enum", label: "Enumeration" },
   { value: "equals", label: "Equals" },
-  { value: "not-equals", label: "Not Equals" },
   { value: "greater-than", label: "Greater Than" },
   { value: "greater-than-equals", label: "Greater Than or Equal" },
   { value: "less-than", label: "Less Than" },
   { value: "less-than-equals", label: "Less Than or Equal" },
+  { value: "list", label: "List Validation" },
+  { value: "lookup", label: "Lookup Validation" },
+  { value: "multi-column", label: "Multi-Column Conditions" },
+  { value: "not-equals", label: "Not Equals" },
   { value: "range", label: "Numeric Range" },
   { value: "regex", label: "Regex Pattern" },
+  { value: "required", label: "Required Field" },
   { value: "type", label: "Type Validation" },
-  { value: "enum", label: "Enumeration" },
-  { value: "list", label: "List Validation" },
-  { value: "contains", label: "Contains String" },
-  { value: "formula", label: "Math Formula" },
-  { value: "dependency", label: "Conditional Dependency" },
-  { value: "lookup", label: "Lookup Validation" },
-  { value: "reference-integrity", label: "Cross-Table Key Integrity" },
-  { value: "composite-reference", label: "Cross-Table Composite Key" },
-  { value: "custom", label: "Custom Function" },
   { value: "unique", label: "Unique Values" },
-  { value: "cross-column", label: "Cross-Column Validation" },
-  { value: "multi-column", label: "Multi-Column Conditions" },
-  { value: "date-before", label: "Date Before" },
-  { value: "date-after", label: "Date After" },
-  { value: "date-between", label: "Date Between" },
-  { value: "date-format", label: "Date Format" },
-]
+].sort((a, b) => a.label.localeCompare(b.label))
 
 // Add examples and explanations for each rule type
 const RULE_TYPE_EXAMPLES: Record<RuleType, { example: string; explanation: string }> = {
