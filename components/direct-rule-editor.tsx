@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { RuleForm } from "@/components/rule-form"
 import type { DataQualityRule, DataTables, ValueList } from "@/lib/types"
+import { JavaScriptExplainer } from "./javascript-explainer"
 
 interface DirectRuleEditorProps {
   ruleId: string | null
@@ -64,14 +65,25 @@ export function DirectRuleEditor({
           <DialogTitle>Edit Rule: {rule?.name?.replace(/ \[ID: [a-zA-Z0-9-]+\]$/, "")}</DialogTitle>
         </DialogHeader>
         {rule && (
-          <RuleForm
-            initialRule={rule}
-            tables={tables}
-            datasets={datasets}
-            valueLists={valueLists}
-            onSubmit={handleUpdateRule}
-            onCancel={handleCancel}
-          />
+          <>
+            <RuleForm
+              initialRule={rule}
+              tables={tables}
+              datasets={datasets}
+              valueLists={valueLists}
+              onSubmit={handleUpdateRule}
+              onCancel={handleCancel}
+            />
+            {rule.ruleType === "custom" && rule.parameters.functionBody && (
+              <JavaScriptExplainer code={rule.parameters.functionBody} columnName={rule.column} />
+            )}
+            {rule.ruleType === "formula" && rule.parameters.formula && (
+              <JavaScriptExplainer code={rule.parameters.formula} columnName={rule.column} />
+            )}
+            {rule.ruleType === "cross-column" && rule.parameters.condition && (
+              <JavaScriptExplainer code={rule.parameters.condition} columnName={rule.column} />
+            )}
+          </>
         )}
       </DialogContent>
     </Dialog>

@@ -1,30 +1,32 @@
 export type RuleType =
   | "required"
-  | "range"
-  | "regex"
-  | "unique"
-  | "type"
-  | "enum"
-  | "dependency"
-  | "multi-column" // Changed back from "conjunction"
-  | "lookup"
-  | "list"
-  | "custom"
-  | "cross-column"
-  | "contains"
-  | "formula"
   | "equals"
   | "not-equals"
   | "greater-than"
   | "greater-than-equals"
   | "less-than"
   | "less-than-equals"
-  | "reference-integrity" // Now "Cross-Table Key Integrity" in the UI
-  | "composite-reference" // Now "Cross-Table Composite Key" in the UI
+  | "range"
+  | "regex"
+  | "unique"
+  | "type"
+  | "enum"
+  | "list"
+  | "contains"
+  | "dependency"
+  | "multi-column"
+  | "lookup"
+  | "custom"
+  | "formula"
+  | "javascript-formula"
   | "date-before"
   | "date-after"
   | "date-between"
   | "date-format"
+  | "reference-integrity"
+  | "composite-reference"
+  | "column-comparison"
+  | "math-operation" // New rule type
 
 export type RuleSeverity = "warning" | "failure" | "success"
 
@@ -107,3 +109,24 @@ export interface ValueList {
 }
 
 export type TableName = "users" | "transactions"
+
+export interface DataQualityRuleParameters {
+  // For column-comparison rule
+  leftColumn?: string
+  rightColumn?: string
+  comparisonOperator?: "==" | "!=" | ">" | ">=" | "<" | "<="
+}
+
+export type MathOperationType = "add" | "subtract" | "multiply" | "divide"
+
+export interface MathOperandDefinition {
+  type: "column" | "constant"
+  value: string | number
+}
+
+export interface MathOperationRuleParameters {
+  operation: MathOperationType
+  operands: MathOperandDefinition[]
+  comparisonOperator: "==" | "!=" | ">" | ">=" | "<" | "<="
+  comparisonValue: number
+}

@@ -16,27 +16,6 @@ export function validateDataset(
 ): ValidationResult[] {
   const results: ValidationResult[] = []
 
-  // Log all date rules for debugging
-  const dateRules = rules.filter(
-    (r) =>
-      r.ruleType === "date-before" ||
-      r.ruleType === "date-after" ||
-      r.ruleType === "date-between" ||
-      r.ruleType === "date-format",
-  )
-
-  console.log(
-    "Date rules to validate:",
-    dateRules.map((r) => ({
-      id: r.id,
-      name: r.name,
-      type: r.ruleType,
-      table: r.table,
-      column: r.column,
-      parameters: r.parameters,
-    })),
-  )
-
   // Process each rule
   rules.forEach((rule) => {
     // Skip disabled rules
@@ -54,8 +33,44 @@ export function validateDataset(
     tableData.forEach((row, rowIndex) => {
       let validationResult: ValidationResult | null = null
 
+      // Special handling for column comparison rules
+      if (rule.ruleType === "column-comparison") {
+        validationResult = validateColumnComparison(row, rowIndex, rule)
+        if (validationResult) {
+          results.push(validationResult)
+        } else {
+          // Add a passing result if validation passed
+          results.push({
+            rowIndex,
+            table: rule.table,
+            column: rule.column,
+            ruleName: rule.name,
+            message: "Passed validation",
+            severity: "success",
+            ruleId: rule.id,
+          })
+        }
+      }
+      // Special handling for math operation rules
+      else if (rule.ruleType === "math-operation") {
+        validationResult = validateMathOperation(row, rowIndex, rule)
+        if (validationResult) {
+          results.push(validationResult)
+        } else {
+          // Add a passing result if validation passed
+          results.push({
+            rowIndex,
+            table: rule.table,
+            column: rule.column,
+            ruleName: rule.name,
+            message: "Passed validation",
+            severity: "success",
+            ruleId: rule.id,
+          })
+        }
+      }
       // Special handling for composite reference rules
-      if (rule.ruleType === "composite-reference") {
+      else if (rule.ruleType === "composite-reference") {
         validationResult = validateCompositeReference(row, rowIndex, rule, datasets)
         if (validationResult) {
           results.push(validationResult)
@@ -106,11 +121,253 @@ export function validateDataset(
     })
   })
 
-  // Log validation results for debugging
-  const dateResults = results.filter((r) => r.ruleName.includes("date") || r.message.toLowerCase().includes("date"))
-  console.log(`Date validation results: ${dateResults.length}`, dateResults)
-
   return results
+}
+
+// New function to validate column comparison rules
+function validateColumnComparison(row: DataRecord, rowIndex: number, rule: DataQualityRule): ValidationResult | null {
+  const { parameters, table, column } = rule
+  const { leftColumn, rightColumn, comparisonOperator } = parameters
+
+  // Ensure we have all required parameters
+  if (!leftColumn || !rightColumn || !comparisonOperator) {
+    return {
+      rowIndex,
+      table,
+      column,
+      ruleName: rule.name,
+      message: "Missing required parameters for column comparison",
+      severity: rule.severity,
+      ruleId: rule.id,
+    }
+  }
+
+  // Get the values from the row
+  const leftValue = row[leftColumn]
+  const rightValue = row[rightColumn]
+
+  // Convert string values to numbers if possible
+  const leftNum = typeof leftValue === "string" ? Number.parseFloat(leftValue) : leftValue
+  const rightNum = typeof rightValue === "string" ? Number.parseFloat(rightValue) : rightValue
+
+  // Check if both values are numbers
+  if (typeof leftNum !== "number" || isNaN(leftNum) || typeof rightNum !== "number" || isNaN(rightNum)) {
+    return {
+      rowIndex,
+      table,
+      column,
+      ruleName: rule.name,
+      message: `Cannot compare non-numeric values: ${leftValue} ${comparisonOperator} ${rightValue}`,
+      severity: rule.severity,
+      ruleId: rule.id,
+    }
+  }
+
+  // Perform the comparison
+  let isValid = false
+  switch (comparisonOperator) {
+    case "==":
+      isValid = leftNum === rightNum
+      break
+    case "!=":
+      isValid = leftNum !== rightNum
+      break
+    case ">":
+      isValid = leftNum > rightNum
+      break
+    case ">=":
+      isValid = leftNum >= rightNum
+      break
+    case "<":
+      isValid = leftNum < rightNum
+      break
+    case "<=":
+      isValid = leftNum <= rightNum
+      break
+    default:
+      isValid = false
+  }
+
+  // If the validation fails, return a result
+  if (!isValid) {
+    return {
+      rowIndex,
+      table,
+      column,
+      ruleName: rule.name,
+      message: `Column comparison failed: ${leftColumn} (${leftNum}) ${comparisonOperator} ${rightColumn} (${rightNum})`,
+      severity: rule.severity,
+      ruleId: rule.id,
+    }
+  }
+
+  // Validation passed
+  return null
+}
+
+// Function to validate math operation rules
+function validateMathOperation(row: DataRecord, rowIndex: number, rule: DataQualityRule): ValidationResult | null {
+  const { parameters, table, column } = rule
+  const { operation, operands, comparisonOperator, comparisonValue } = parameters as any
+
+  if (!operation || !operands || !comparisonOperator || comparisonValue === undefined) {
+    return {
+      rowIndex,
+      table,
+      column,
+      ruleName: rule.name,
+      message: "Missing required parameters for math operation",
+      severity: rule.severity,
+      ruleId: rule.id,
+    }
+  }
+
+  // Collect operand values
+  const operandValues: number[] = []
+  let invalidOperandFound = false
+  let invalidOperandMessage = ""
+
+  for (let i = 0; i < operands.length; i++) {
+    const operand = operands[i]
+
+    if (operand.type === "constant") {
+      // For constants, just use the value directly
+      operandValues.push(Number(operand.value))
+    } else if (operand.type === "column") {
+      // For columns, get the value from the row
+      const columnName = operand.value as string
+      const columnValue = row[columnName]
+
+      // Convert to number
+      const numValue = typeof columnValue === "string" ? Number.parseFloat(columnValue) : columnValue
+
+      if (typeof numValue !== "number" || isNaN(numValue)) {
+        invalidOperandFound = true
+        invalidOperandMessage = `Invalid value for operand ${i + 1}: Column "${columnName}" has non-numeric value "${columnValue}"`
+        break
+      }
+
+      operandValues.push(numValue)
+    }
+  }
+
+  // If any operand is invalid, return error
+  if (invalidOperandFound) {
+    return {
+      rowIndex,
+      table,
+      column,
+      ruleName: rule.name,
+      message: invalidOperandMessage,
+      severity: rule.severity,
+      ruleId: rule.id,
+    }
+  }
+
+  // Perform the math operation
+  let result: number
+
+  switch (operation) {
+    case "add":
+      result = operandValues.reduce((sum, value) => sum + value, 0)
+      break
+    case "subtract":
+      // Start with first value, then subtract the rest
+      result = operandValues.reduce((diff, value, index) => (index === 0 ? value : diff - value), 0)
+      break
+    case "multiply":
+      result = operandValues.reduce((product, value) => product * value, 1)
+      break
+    case "divide":
+      // Check for division by zero
+      if (operandValues.slice(1).some((value) => value === 0)) {
+        return {
+          rowIndex,
+          table,
+          column,
+          ruleName: rule.name,
+          message: "Division by zero error",
+          severity: rule.severity,
+          ruleId: rule.id,
+        }
+      }
+
+      // Start with first value, then divide by the rest
+      result = operandValues.reduce((quotient, value, index) => (index === 0 ? value : quotient / value), 0)
+      break
+    default:
+      return {
+        rowIndex,
+        table,
+        column,
+        ruleName: rule.name,
+        message: `Unknown operation: ${operation}`,
+        severity: rule.severity,
+        ruleId: rule.id,
+      }
+  }
+
+  // Perform the comparison
+  let isValid = false
+  switch (comparisonOperator) {
+    case "==":
+      isValid = result === comparisonValue
+      break
+    case "!=":
+      isValid = result !== comparisonValue
+      break
+    case ">":
+      isValid = result > comparisonValue
+      break
+    case ">=":
+      isValid = result >= comparisonValue
+      break
+    case "<":
+      isValid = result < comparisonValue
+      break
+    case "<=":
+      isValid = result <= comparisonValue
+      break
+    default:
+      isValid = false
+  }
+
+  // Create a human-readable representation of the operation
+  const operationString = operands
+    .map((op, index) => {
+      const opValue = op.type === "column" ? `${op.value}(${row[op.value as string]})` : op.value
+      if (index === 0) return opValue
+
+      switch (operation) {
+        case "add":
+          return `+ ${opValue}`
+        case "subtract":
+          return `- ${opValue}`
+        case "multiply":
+          return `× ${opValue}`
+        case "divide":
+          return `÷ ${opValue}`
+        default:
+          return opValue
+      }
+    })
+    .join(" ")
+
+  // If the validation fails, return a result
+  if (!isValid) {
+    return {
+      rowIndex,
+      table,
+      column,
+      ruleName: rule.name,
+      message: `Math operation failed: (${operationString}) = ${result} ${comparisonOperator} ${comparisonValue}`,
+      severity: rule.severity,
+      ruleId: rule.id,
+    }
+  }
+
+  // Validation passed
+  return null
 }
 
 // New function specifically for date rule validation
@@ -672,6 +929,10 @@ function validateRule(
         // Direct boolean evaluation
         ;({ isValid, message } = validateDirectFormula(row, rule.parameters.formula))
       }
+      break
+
+    case "javascript-formula":
+      ;({ isValid, message } = validateJavaScriptFormula(row, rule.parameters.formula))
       break
 
     case "date-before":
@@ -1374,7 +1635,7 @@ function validateContains(
   }
 }
 
-// Add the validateFormula function
+// Simple and direct formula validation function
 function validateFormula(
   row: DataRecord,
   formula?: string,
@@ -1386,27 +1647,11 @@ function validateFormula(
   }
 
   try {
-    // Replace column references with actual values
-    let evalFormula = formula
-    const columnNames = Object.keys(row).sort((a, b) => b.length - a.length) // Sort by length descending to avoid partial replacements
+    console.log("Formula with comparison:", formula, operator, value)
 
-    for (const columnName of columnNames) {
-      const columnRegex = new RegExp(`\\b${columnName}\\b`, "g")
-      evalFormula = evalFormula.replace(
-        columnRegex,
-        String(row[columnName] === null || row[columnName] === undefined ? "null" : row[columnName]),
-      )
-    }
-
-    // Evaluate the formula
-    const result = new Function(`return ${evalFormula};`)()
-
-    if (typeof result !== "number") {
-      return {
-        isValid: false,
-        message: `Formula result is not a number: ${result}`,
-      }
-    }
+    // Calculate the formula result by directly substituting values
+    const result = evaluateSimpleFormula(formula, row)
+    console.log("Formula evaluation result:", result)
 
     // Compare the result with the expected value using the specified operator
     let isValid = false
@@ -1433,85 +1678,68 @@ function validateFormula(
         isValid = false
     }
 
+    // Create a detailed message for failed validations
+    let detailedMessage = ""
+    if (!isValid) {
+      detailedMessage = `Formula result ${result} ${operator} ${value} is false`
+      detailedMessage += "\nColumn values:"
+      Object.keys(row).forEach((col) => {
+        if (formula.includes(col)) {
+          detailedMessage += `\n  ${col} = ${JSON.stringify(row[col])}`
+        }
+      })
+    }
+
     return {
       isValid,
-      message: isValid ? "" : `Formula result ${result} ${operator} ${value} is false`,
+      message: isValid ? "" : detailedMessage,
     }
   } catch (error) {
+    console.error("Formula comparison evaluation error:", error)
+
+    // Create a more helpful error message
+    let errorMessage = `Error evaluating formula: ${error.message}`
+    errorMessage += "\nFormula: " + formula
+    errorMessage += "\nColumn values:"
+    Object.keys(row).forEach((col) => {
+      if (formula.includes(col)) {
+        errorMessage += `\n  ${col} = ${JSON.stringify(row[col])}`
+      }
+    })
+
     return {
       isValid: false,
-      message: `Error evaluating formula: ${error}`,
+      message: errorMessage,
     }
   }
 }
 
-// Add a new function for direct formula evaluation (without comparison)
+// Simple and direct boolean formula validation
 function validateDirectFormula(row: DataRecord, formula?: string): { isValid: boolean; message: string } {
   if (!formula) {
     return { isValid: true, message: "" }
   }
 
   try {
-    // Replace column references with actual values
-    let evalFormula = formula
-    const columnNames = Object.keys(row).sort((a, b) => b.length - a.length) // Sort by length descending
+    console.log("Direct formula:", formula)
 
-    for (const columnName of columnNames) {
-      const columnRegex = new RegExp(`\\b${columnName}\\b`, "g")
-      evalFormula = evalFormula.replace(
-        columnRegex,
-        String(row[columnName] === null || row[columnName] === undefined ? "null" : row[columnName]),
-      )
-    }
+    // For direct formulas, we evaluate the expression and convert to boolean
+    const result = evaluateSimpleFormula(formula, row)
+    console.log("Direct formula evaluation result:", result)
 
-    // Evaluate the formula
-    const result = new Function(`return ${evalFormula};`)()
-
-    // Convert the result to a boolean if it's not already
+    // Convert the result to a boolean
     const boolResult = Boolean(result)
 
-    // Create a detailed message that includes the formula and the calculated values
+    // Create a detailed message for failed validations
     let detailedMessage = ""
     if (!boolResult) {
-      // For formulas with comparisons, try to extract the left and right sides
-      const comparisonOperators = [">=", "<=", ">", "<", "==", "!=", "===", "!=="]
-      let comparisonFound = false
-
-      for (const op of comparisonOperators) {
-        if (formula.includes(op)) {
-          const parts = formula.split(op)
-          if (parts.length === 2) {
-            // Create a more detailed message with the calculation
-            let leftSide = parts[0].trim()
-            let rightSide = parts[1].trim()
-
-            // Try to evaluate each side separately
-            try {
-              const leftEval = ""
-              const rightEval = ""
-
-              // Replace column references with values for display
-              for (const columnName of columnNames) {
-                const columnRegex = new RegExp(`\\b${columnName}\\b`, "g")
-                leftSide = leftSide.replace(columnRegex, `${columnName}(${row[columnName]})`)
-                rightSide = rightSide.replace(columnRegex, `${columnName}(${row[columnName]})`)
-              }
-
-              detailedMessage =
-                `Formula evaluated to false: ${formula} (Result: ${result})\n` +
-                `Calculation: ${leftSide} ${op} ${rightSide}`
-              comparisonFound = true
-              break
-            } catch (evalError) {
-              // If evaluation fails, use the default message
-            }
-          }
+      detailedMessage = `Formula evaluated to false: ${formula} (Result: ${result})`
+      detailedMessage += "\nColumn values:"
+      Object.keys(row).forEach((col) => {
+        if (formula.includes(col)) {
+          detailedMessage += `\n  ${col} = ${JSON.stringify(row[col])}`
         }
-      }
-
-      if (!comparisonFound) {
-        detailedMessage = `Formula evaluated to false: ${formula} (Result: ${result})`
-      }
+      })
     }
 
     return {
@@ -1519,9 +1747,86 @@ function validateDirectFormula(row: DataRecord, formula?: string): { isValid: bo
       message: boolResult ? "" : detailedMessage,
     }
   } catch (error) {
+    console.error("Direct formula evaluation error:", error)
+
+    // Create a more helpful error message
+    let errorMessage = `Error evaluating formula: ${error.message}`
+    errorMessage += "\nFormula: " + formula
+    errorMessage += "\nColumn values:"
+    Object.keys(row).forEach((col) => {
+      if (formula.includes(col)) {
+        errorMessage += `\n  ${col} = ${JSON.stringify(row[col])}`
+      }
+    })
+
     return {
       isValid: false,
-      message: `Error evaluating formula: ${error}`,
+      message: errorMessage,
+    }
+  }
+}
+
+// Completely re-implemented JavaScript formula validation with a safer approach
+function validateJavaScriptFormula(row: DataRecord, formula?: string): { isValid: boolean; message: string } {
+  if (!formula) {
+    return { isValid: true, message: "" }
+  }
+
+  try {
+    console.log("JavaScript formula:", formula)
+
+    // Use the same safer approach with a context object
+    const context: Record<string, any> = {}
+
+    // Add all row values to the context
+    for (const [key, val] of Object.entries(row)) {
+      context[key] = val
+    }
+
+    // Log the context for debugging
+    console.log("JavaScript formula evaluation context:", context)
+
+    // Create a function that takes the context as a parameter
+    // For JavaScript formulas, we need to handle the return statement differently
+    const evalFunc = new Function(
+      "context",
+      `
+      try {
+        with(context) {
+          ${formula}
+        }
+      } catch (error) {
+        console.error("JavaScript formula inner evaluation error:", error);
+        throw error;
+      }
+      `,
+    )
+
+    // Execute the function with our context
+    const result = evalFunc(context)
+    console.log("JavaScript formula evaluation result:", result)
+
+    // Convert the result to a boolean
+    const isValid = Boolean(result)
+
+    return {
+      isValid,
+      message: isValid ? "" : `JavaScript formula evaluated to false: ${formula}`,
+    }
+  } catch (error) {
+    console.error("JavaScript formula evaluation error:", error)
+
+    // Create a more helpful error message
+    let errorMessage = `Error evaluating JavaScript formula: ${error.message}`
+    errorMessage += "\nFormula: " + formula
+    errorMessage += "\nColumn values:"
+    Object.keys(row).forEach((col) => {
+      errorMessage += `\n  ${col} = ${JSON.stringify(row[col])}`
+    })
+
+    return {
+      isValid: false,
+      message: errorMessage,
     }
   }
 }
@@ -1799,4 +2104,44 @@ function validateDateFormat(value: any, format?: string, customFormat?: string):
     isValid,
     message: isValid ? "" : `Date must be in ${formatDescription} format`,
   }
+}
+
+// Helper function to evaluate a formula by directly substituting values
+function evaluateSimpleFormula(formula: string, row: DataRecord): any {
+  // Create a copy of the formula that we'll modify
+  let processedFormula = formula
+
+  // Get all column names from the row
+  const columnNames = Object.keys(row)
+
+  // Sort column names by length (descending) to avoid partial replacements
+  columnNames.sort((a, b) => b.length - a.length)
+
+  // Replace each column name with its actual value from the row
+  for (const columnName of columnNames) {
+    // Use regex with word boundaries to avoid partial replacements
+    const regex = new RegExp(`\\b${columnName}\\b`, "g")
+
+    // Get the value for this column
+    const value = row[columnName]
+
+    // Replace the column name with its literal value
+    if (typeof value === "string") {
+      // For strings, wrap in quotes
+      processedFormula = processedFormula.replace(regex, JSON.stringify(value))
+    } else if (value === null || value === undefined) {
+      // For null/undefined, use null
+      processedFormula = processedFormula.replace(regex, "null")
+    } else {
+      // For numbers, booleans, etc. use the value directly
+      processedFormula = processedFormula.replace(regex, String(value))
+    }
+  }
+
+  console.log("Processed formula:", processedFormula)
+
+  // Evaluate the processed formula
+  // We use new Function to evaluate the expression in a safe context
+  const evalFunc = new Function(`return (${processedFormula});`)
+  return evalFunc()
 }

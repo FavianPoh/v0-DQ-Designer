@@ -32,6 +32,8 @@ const RULE_TYPES: { value: RuleType; label: string }[] = [
   { value: "cross-column", label: "Cross-Column Validation" },
   { value: "lookup", label: "Table Lookup" },
   { value: "custom", label: "Custom Function" },
+  { value: "column-comparison", label: "Column Comparison" },
+  { value: "math-operation", label: "Math Operation" }, // New rule type
 ].sort((a, b) => a.label.localeCompare(b.label))
 
 export function EnhancedRuleForm({ initialRule, tables, onSubmit, onCancel }: EnhancedRuleFormProps) {
@@ -402,6 +404,68 @@ export function EnhancedRuleForm({ initialRule, tables, onSubmit, onCancel }: En
                 Write a function body that returns true if valid, false if invalid. The function has access to 'value'
                 (the cell value) and 'row' (the entire data row).
               </p>
+            </div>
+          )}
+
+          {rule.ruleType === "column-comparison" && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="leftColumn">Left Column</Label>
+                  <Select
+                    value={rule.parameters.leftColumn || ""}
+                    onValueChange={(value) => handleParameterChange("leftColumn", value)}
+                  >
+                    <SelectTrigger id="leftColumn">
+                      <SelectValue placeholder="Select column" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {currentTableColumns.map((col) => (
+                        <SelectItem key={col} value={col}>
+                          {col}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="rightColumn">Right Column</Label>
+                  <Select
+                    value={rule.parameters.rightColumn || ""}
+                    onValueChange={(value) => handleParameterChange("rightColumn", value)}
+                  >
+                    <SelectTrigger id="rightColumn">
+                      <SelectValue placeholder="Select column" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {currentTableColumns.map((col) => (
+                        <SelectItem key={col} value={col}>
+                          {col}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="comparisonOperator">Comparison Operator</Label>
+                <Select
+                  value={rule.parameters.comparisonOperator || ""}
+                  onValueChange={(value) => handleParameterChange("comparisonOperator", value)}
+                >
+                  <SelectTrigger id="comparisonOperator">
+                    <SelectValue placeholder="Select operator" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="==">Equal to (==)</SelectItem>
+                    <SelectItem value="!=">Not equal to (!=)</SelectItem>
+                    <SelectItem value="&gt;">Greater than (&gt;)</SelectItem>
+                    <SelectItem value="&gt;=">Greater than or equal to (&gt;=)</SelectItem>
+                    <SelectItem value="&lt;">Less than (&lt;)</SelectItem>
+                    <SelectItem value="&lt;=">Less than or equal to (&lt;=)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           )}
         </div>
