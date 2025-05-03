@@ -33,6 +33,229 @@ function debugRule(rule: DataQualityRule, label = "Rule Debug") {
   console.log("=================")
 }
 
+// Add this function to the data-validator.ts file, near the top with the other debug functions
+
+function validateDateRuleWithSafeguards(
+  row: DataRecord,
+  rowIndex: number,
+  rule: DataQualityRule,
+): ValidationResult | null {
+  console.log("=== Safe Date Rule Validation ===")
+  console.log("Rule:", {
+    id: rule.id,
+    name: rule.name,
+    table: rule.table,
+    column: rule.column,
+    ruleType: rule.ruleType,
+    parameters: rule.parameters,
+  })
+
+  // CRITICAL: Check if column is defined
+  if (!rule.column) {
+    console.error(`CRITICAL ERROR: Missing column for date rule: ${rule.name} [ID: ${rule.id}]`)
+    return {
+      rowIndex,
+      table: rule.table,
+      column: "",
+      ruleName: rule.name,
+      message: `Configuration error: Missing column name for date rule`,
+      severity: "failure",
+      ruleId: rule.id,
+    }
+  }
+
+  // Check if column exists in the row
+  if (!(rule.column in row)) {
+    console.error(`Column "${rule.column}" not found in row for rule: ${rule.name} [ID: ${rule.id}]`)
+    console.log("Available columns:", Object.keys(row))
+    return {
+      rowIndex,
+      table: rule.table,
+      column: rule.column,
+      ruleName: rule.name,
+      message: `Column "${rule.column}" not found in data`,
+      severity: rule.severity,
+      ruleId: rule.id,
+    }
+  }
+
+  const value = row[rule.column]
+  console.log(`Date value for column ${rule.column}:`, value, typeof value)
+
+  // If the value is undefined or null, we can't validate it as a date
+  if (value === undefined || value === null || value === "") {
+    // For required date fields, null/undefined/empty is invalid
+    const isRequired = rule.parameters.required === true
+    if (isRequired) {
+      return {
+        rowIndex,
+        table: rule.table,
+        column: rule.column,
+        ruleName: rule.name,
+        message: "Date is required and must be valid",
+        severity: rule.severity,
+        ruleId: rule.id,
+      }
+    } else {
+      // If date is null/undefined/empty and not required, skip validation
+      return null
+    }
+  }
+
+  // Convert value to Date if it's not already
+  let dateValue: Date | null = null
+
+  if (value instanceof Date) {
+    dateValue = new Date(value) // Create a copy to avoid modifying the original
+  } else if (typeof value === "string" && value.trim() !== "") {
+    try {
+      dateValue = new Date(value)
+      if (isNaN(dateValue.getTime())) {
+        dateValue = null
+      }
+    } catch (e) {
+      dateValue = null
+    }
+  }
+
+  // For required date fields, null/undefined/empty is invalid
+  const isRequired = rule.parameters.required === true
+
+  if (!dateValue) {
+    if (isRequired) {
+      return {
+        rowIndex,
+        table: rule.table,
+        column: rule.column,
+        ruleName: rule.name,
+        message: "Date is required and must be valid",
+        severity: rule.severity,
+        ruleId: rule.id,
+      }
+    } else {
+      // If date is null/undefined/empty and not required, skip validation
+      return null
+    }
+  }
+
+  let isValid = true
+  let message = ""
+
+  switch (rule.ruleType) {
+    case "date-before":
+      if (!rule.parameters.compareDate) {
+        isValid = true
+        message = "No compare date specified"
+      } else {
+        const compareDate = new Date(rule.parameters.compareDate)
+
+        // Create copies to avoid modifying the original dates
+        const dateValueCopy = new Date(dateValue.getTime())
+        const compareDateCopy = new Date(compareDate.getTime())
+
+        // Normalize dates to remove time components for consistent comparison
+        const dateValueTime = new Date(dateValueCopy.setHours(0, 0, 0, 0)).getTime()
+        const compareDateTime = new Date(compareDateCopy.setHours(0, 0, 0, 0)).getTime()
+
+        const inclusive = rule.parameters.inclusive === true
+        isValid = inclusive ? dateValueTime <= compareDateTime : dateValueTime < compareDateTime
+
+        if (!isValid) {
+          message = `Date must be ${inclusive ? "on or " : ""}before ${rule.parameters.compareDate}`
+        }
+      }
+      break
+
+    case "date-after":
+      if (!rule.parameters.compareDate) {
+        isValid = true
+        message = "No compare date specified"
+      } else {
+        const compareDate = new Date(rule.parameters.compareDate)
+
+        // Create copies to avoid modifying the original dates
+        const dateValueCopy = new Date(dateValue.getTime())
+        const compareDateCopy = new Date(compareDate.getTime())
+
+        // Normalize dates to remove time components for consistent comparison
+        const dateValueTime = new Date(dateValueCopy.setHours(0, 0, 0, 0)).getTime()
+        const compareDateTime = new Date(compareDateCopy.setHours(0, 0, 0, 0)).getTime()
+
+        const inclusive = rule.parameters.inclusive === true
+        isValid = inclusive ? dateValueTime >= compareDateTime : dateValueTime > compareDateTime
+
+        if (!isValid) {
+          message = `Date must be ${inclusive ? "on or " : ""}after ${rule.parameters.compareDate}`
+        }
+      }
+      break
+
+    case "date-between":
+      if (!rule.parameters.startDate || !rule.parameters.endDate) {
+        isValid = true
+        message = "Start or end date not specified"
+      } else {
+        const startDate = new Date(rule.parameters.startDate)
+        const endDate = new Date(rule.parameters.endDate)
+
+        // Create copies to avoid modifying the original dates
+        const dateValueCopy = new Date(dateValue.getTime())
+        const startDateCopy = new Date(startDate.getTime())
+        const endDateCopy = new Date(endDate.getTime())
+
+        // Normalize dates to remove time components for consistent comparison
+        const dateValueTime = new Date(dateValueCopy.setHours(0, 0, 0, 0)).getTime()
+        const startDateTime = new Date(startDateCopy.setHours(0, 0, 0, 0)).getTime()
+        const endDateTime = new Date(endDateCopy.setHours(0, 0, 0, 0)).getTime()
+
+        const inclusive = rule.parameters.inclusive === true
+
+        isValid = inclusive
+          ? dateValueTime >= startDateTime && dateValueTime <= endDateTime
+          : dateValueTime > startDateTime && dateValueTime < endDateTime
+
+        if (!isValid) {
+          message = `Date must be ${inclusive ? "on or " : ""}between ${rule.parameters.startDate} and ${rule.parameters.endDate}`
+        }
+      }
+      break
+
+    case "date-format":
+      // For date objects, format is always valid
+      isValid = true
+      break
+
+    default:
+      isValid = true
+  }
+
+  console.log(`Date rule validation result: ${isValid ? "PASS" : "FAIL"}, message: ${message}`)
+
+  // If validation fails, return a validation result with the appropriate severity
+  if (!isValid) {
+    return {
+      rowIndex,
+      table: rule.table,
+      column: rule.column,
+      ruleName: rule.name,
+      message,
+      severity: rule.severity,
+      ruleId: rule.id,
+    }
+  }
+
+  // For successful validations, return a success result
+  return {
+    rowIndex,
+    table: rule.table,
+    column: rule.column,
+    ruleName: rule.name,
+    message: "Passed date validation",
+    severity: "success",
+    ruleId: rule.id,
+  }
+}
+
 export function validateDataset(
   datasets: DataTables,
   rules: DataQualityRule[],
@@ -61,6 +284,15 @@ export function validateDataset(
     // Process each row in the table
     tableData.forEach((row, rowIndex) => {
       let validationResult: ValidationResult | null = null
+
+      // Special handling for date rules - REPLACE THIS SECTION
+      if (rule.ruleType.startsWith("date-")) {
+        validationResult = validateDateRuleWithSafeguards(row, rowIndex, rule)
+        if (validationResult) {
+          results.push(validationResult)
+        }
+        return // Skip the rest of the processing for date rules
+      }
 
       // Special handling for column comparison rules
       if (rule.ruleType === "column-comparison") {
@@ -486,6 +718,19 @@ function validateMathOperation(row: DataRecord, rowIndex: number, rule: DataQual
 
 // New function specifically for date rule validation
 function validateDateRule(row: DataRecord, rowIndex: number, rule: DataQualityRule): ValidationResult | null {
+  // Check if column is defined
+  if (!rule.column) {
+    console.error(`Missing column for date rule: ${rule.name} [ID: ${rule.id}]`)
+    return {
+      rowIndex,
+      table: rule.table,
+      column: "",
+      ruleName: rule.name,
+      message: `Configuration error: Missing column name for date rule`,
+      severity: "failure",
+      ruleId: rule.id,
+    }
+  }
   // Enhanced debugging for date rules
   console.log("=== Date Rule Validation ===")
   console.log("Rule:", {
@@ -496,20 +741,6 @@ function validateDateRule(row: DataRecord, rowIndex: number, rule: DataQualityRu
     ruleType: rule.ruleType,
     parameters: rule.parameters,
   })
-
-  // Check if column is defined
-  if (!rule.column) {
-    console.error(`Missing column for date rule: ${rule.name} [ID: ${rule.id}]`)
-    return {
-      rowIndex,
-      table: rule.table,
-      column: "",
-      ruleName: rule.name,
-      message: `Invalid rule configuration: missing column name for date rule`,
-      severity: rule.severity,
-      ruleId: rule.id,
-    }
-  }
 
   // Check if column exists in the row
   if (!(rule.column in row)) {

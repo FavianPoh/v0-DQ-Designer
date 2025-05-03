@@ -306,18 +306,24 @@ export function DataQualityDashboard() {
   const handleUpdateRule = async (updatedRule: DataQualityRule) => {
     try {
       setIsSaving(true)
+
+      // Create a deep copy to avoid reference issues
+      const ruleCopy = JSON.parse(JSON.stringify(updatedRule))
+
       // Preserve the ID in the rule name if it exists
-      let updatedName = updatedRule.name
-      if (!updatedName.includes(`[ID: ${updatedRule.id}]`)) {
-        updatedName = `${updatedRule.name} [ID: ${updatedRule.id}]`
+      let updatedName = ruleCopy.name
+      if (!updatedName.includes(`[ID: ${ruleCopy.id}]`)) {
+        updatedName = `${ruleCopy.name} [ID: ${ruleCopy.id}]`
       }
 
-      // Special handling for the problematic rule
-      if (updatedRule.id === "4bd3758a-7bd2-444f-9ea7-b7c126957ce0") {
-        console.log("Updating problematic date rule:", updatedRule)
+      // Special handling for date rules
+      if (ruleCopy.ruleType?.startsWith("date-")) {
+        console.log("Updating date rule in handleUpdateRule:", ruleCopy)
+        console.log("Column value:", ruleCopy.column)
 
         // Ensure column is not empty
-        if (!updatedRule.column) {
+        if (!ruleCopy.column) {
+          console.error("Missing column for date rule in handleUpdateRule")
           toast({
             title: "Error",
             description: "Column must be specified for date rules",
@@ -328,23 +334,12 @@ export function DataQualityDashboard() {
         }
       }
 
-      // Ensure column is not empty for any rule
-      if (!updatedRule.column) {
-        toast({
-          title: "Error",
-          description: "Column must be specified for the rule",
-          variant: "destructive",
-        })
-        setIsSaving(false)
-        return
-      }
-
       const finalRule = {
-        ...updatedRule,
+        ...ruleCopy,
         name: updatedName,
       }
 
-      console.log("Updating rule:", finalRule)
+      console.log("Final rule for update in handleUpdateRule:", finalRule)
 
       // Update on server
       const response = await fetch("/api/rules", {
@@ -807,9 +802,92 @@ export function DataQualityDashboard() {
     )
   }
 
-  // Add this right before the return statement, after the loading check
-  const handleDirectRuleUpdate = (updatedRule: DataQualityRule) => {
-    handleUpdateRule(updatedRule)
+  const handleDirectRuleUpdate = async (updatedRule: DataQualityRule) => {
+    try {
+      setIsSaving(true)
+
+      // Create a deep copy to avoid reference issues
+      const ruleCopy = JSON.parse(JSON.stringify(updatedRule))
+
+      console.log("Received rule for update:", ruleCopy)
+
+      // Preserve the ID in the rule name if it exists
+      let updatedName = ruleCopy.name
+      if (!updatedName.includes(`[ID: ${ruleCopy.id}]`)) {
+        updatedName = `${ruleCopy.name} [ID: ${ruleCopy.id}]`
+      }
+
+      // Special handling for date rules
+      if (ruleCopy.ruleType?.startsWith("date-")) {
+        console.log("Updating date rule:", ruleCopy)
+        console.log("Column value:", ruleCopy.column)
+
+        // Ensure column is not empty
+        if (!ruleCopy.column) {
+          console.error("Missing column for date rule in dashboard update")
+          toast({
+            title: "Error",
+            description: "Column must be specified for date rules",
+            variant: "destructive",
+          })
+          setIsSaving(false)
+          return
+        }
+      }
+
+      const finalRule = {
+        ...ruleCopy,
+        name: updatedName,
+      }
+
+      console.log("Final rule for update:", finalRule)
+
+      // Update on server
+      const response = await fetch("/api/rules", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(finalRule),
+      })
+
+      // Update local state regardless of server response
+      setRules((prev) => {
+        const newRules = prev.map((rule) => {
+          if (rule.id === finalRule.id) {
+            return finalRule
+          }
+          return rule
+        })
+        // Also update localStorage
+        localStorage.setItem("dataQualityRules", JSON.stringify(newRules))
+        return newRules
+      })
+
+      setEditingRuleId(null)
+
+      if (response.ok) {
+        toast({
+          title: "Success",
+          description: "Rule updated successfully",
+        })
+      } else {
+        toast({
+          title: "Warning",
+          description: "Rule updated in browser storage only",
+          variant: "default",
+        })
+      }
+    } catch (error) {
+      console.error("Error updating rule:", error)
+      toast({
+        title: "Warning",
+        description: "Rule updated in browser storage only",
+        variant: "default",
+      })
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   const handleViewRowData = (row: any) => {
@@ -902,6 +980,14 @@ export function DataQualityDashboard() {
             editingRuleId={editingRuleId}
             onRuleHighlighted={() => setHighlightedRuleId(null)}
             onEditingChange={setEditingRuleId}
+            isSaving={isSaving}
+          />
+        </TabsContent>
+        <TabsContent value="lists" className="pt-4">
+          <ListManager
+            lists={valueLists}
+            onAddList={handleAddList}
+            onUpdateList={handleUpdateList}
             isSaving={isSaving}
           />
         </TabsContent>

@@ -1,10 +1,11 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { RuleForm } from "@/components/rule-form"
 import type { DataQualityRule, DataTables, ValueList } from "@/lib/types"
-import { JavaScriptExplainer } from "./javascript-explainer"
+import { SimplifiedDateRuleEditor } from "@/components/simplified-date-rule-editor"
+import { toast } from "@/components/ui/use-toast"
 
 interface DirectRuleEditorProps {
   ruleId: string | null
@@ -25,98 +26,92 @@ export function DirectRuleEditor({
   onUpdateRule,
   onCancel,
 }: DirectRuleEditorProps) {
-  // Add this at the beginning of the component function
-  console.log("DirectRuleEditor ruleId:", ruleId)
-
-  const [isOpen, setIsOpen] = useState(false)
-  const [rule, setRule] = useState<DataQualityRule | undefined>(undefined)
+  const [open, setOpen] = useState(false)
+  const [rule, setRule] = useState<DataQualityRule | null>(null)
+  const [isDateRule, setIsDateRule] = useState(false)
 
   // When ruleId changes, find the rule and open the dialog
   useEffect(() => {
     if (ruleId) {
       const foundRule = rules.find((r) => r.id === ruleId)
-      setRule(foundRule)
-      setIsOpen(true)
-    } else {
-      setIsOpen(false)
-      setRule(undefined)
-    }
-  }, [ruleId, rules])
+      if (foundRule) {
+        // Create a deep copy to avoid reference issues
+        const ruleCopy = JSON.parse(JSON.stringify(foundRule))
+        console.log("Found rule to edit:", ruleCopy)
 
-  // In the useEffect that loads the rule, add debugging
-  useEffect(() => {
-    if (ruleId) {
-      const ruleToEdit = rules.find((r) => r.id === ruleId)
-      if (ruleToEdit) {
-        console.log("Loading rule in DirectRuleEditor:", ruleToEdit)
-        setRule(ruleToEdit)
+        // Check if it's a date rule
+        const isDate = ruleCopy.ruleType?.startsWith("date-") || false
+        setIsDateRule(isDate)
 
-        // Special handling for the problematic rule
-        if (ruleToEdit.id === "4bd3758a-7bd2-444f-9ea7-b7c126957ce0") {
-          console.log("Found problematic date rule:", ruleToEdit)
+        if (isDate) {
+          console.log("Editing date rule with column:", ruleCopy.column)
         }
+
+        setRule(ruleCopy)
+        setOpen(true)
+      } else {
+        console.error("Rule not found:", ruleId)
+        setOpen(false)
       }
+    } else {
+      setOpen(false)
+      setRule(null)
+      setIsDateRule(false)
     }
   }, [ruleId, rules])
 
-  const handleUpdateRule = (updatedRule: DataQualityRule) => {
-    onUpdateRule(updatedRule)
-    setIsOpen(false)
-  }
-
-  const handleCancel = () => {
-    setIsOpen(false)
+  // Handle dialog close
+  const handleClose = () => {
+    setOpen(false)
     onCancel()
   }
 
-  // In the handleSave function, add validation for date rules
-  const handleSave = () => {
-    // Validate rule before saving
-    if (rule.ruleType.startsWith("date-") && !rule.column) {
-      alert("Please select a column for the date rule")
+  // Handle rule update
+  const handleUpdate = (updatedRule: DataQualityRule) => {
+    // Special validation for date rules
+    if (updatedRule.ruleType?.startsWith("date-") && !updatedRule.column) {
+      toast({
+        title: "Error",
+        description: "Please select a column for the date rule",
+        variant: "destructive",
+      })
       return
     }
 
-    console.log("Saving rule:", rule)
-    onUpdateRule(rule)
-    setIsOpen(false)
+    console.log("Updating rule with column:", updatedRule.column)
+    onUpdateRule(updatedRule)
+    setOpen(false)
   }
 
   return (
     <Dialog
-      open={isOpen}
+      open={open}
       onOpenChange={(open) => {
-        setIsOpen(open)
         if (!open) {
-          onCancel()
+          handleClose()
         }
+        setOpen(open)
       }}
     >
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Edit Rule: {rule?.name?.replace(/ \[ID: [a-zA-Z0-9-]+\]$/, "")}</DialogTitle>
-        </DialogHeader>
-        {rule && (
-          <>
-            <RuleForm
-              initialRule={rule}
-              tables={tables}
-              datasets={datasets}
-              valueLists={valueLists}
-              onSubmit={handleSave}
-              onCancel={handleCancel}
-            />
-            {rule.ruleType === "custom" && rule.parameters.functionBody && (
-              <JavaScriptExplainer code={rule.parameters.functionBody} columnName={rule.column} />
-            )}
-            {rule.ruleType === "formula" && rule.parameters.formula && (
-              <JavaScriptExplainer code={rule.parameters.formula} columnName={rule.column} />
-            )}
-            {rule.ruleType === "cross-column" && rule.parameters.condition && (
-              <JavaScriptExplainer code={rule.parameters.condition} columnName={rule.column} />
-            )}
-          </>
-        )}
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" onInteractOutside={(e) => e.preventDefault()}>
+        {rule && isDateRule ? (
+          <SimplifiedDateRuleEditor
+            rule={rule}
+            tables={tables}
+            datasets={datasets}
+            onSave={handleUpdate}
+            onCancel={handleClose}
+          />
+        ) : rule ? (
+          <RuleForm
+            initialRule={rule}
+            tables={tables}
+            datasets={datasets}
+            valueLists={valueLists}
+            onSubmit={handleUpdate}
+            onCancel={handleClose}
+          />
+        ) : null}
       </DialogContent>
     </Dialog>
   )
