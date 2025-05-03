@@ -1,28 +1,24 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Plus, Trash2 } from "lucide-react"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Plus, Trash2, HelpCircle } from "lucide-react"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import type {
   DataQualityRule,
   RuleType,
+  RuleSeverity,
   DataTables,
   ValueList,
   Condition,
   CrossTableCondition,
   ColumnCondition,
 } from "@/lib/types"
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
-import { Dialog, DialogContent } from "@/components/ui/dialog"
-import { MultiColumnConditionEditor } from "./multi-column-condition-editor"
 import { JavaScriptExplainer } from "./javascript-explainer"
 
 interface RuleFormProps {
@@ -186,52 +182,6 @@ const RULE_TYPE_EXAMPLES: Record<RuleType, { example: string; explanation: strin
   },
 }
 
-// Regex glossary for the regex rule type
-const REGEX_GLOSSARY = [
-  { pattern: "^", description: "Matches the start of a string" },
-  { pattern: "$", description: "Matches the end of a string" },
-  { pattern: ".", description: "Matches any single character except newlines" },
-  { pattern: "\\d", description: "Matches any digit (0-9)" },
-  { pattern: "\\D", description: "Matches any non-digit character" },
-  { pattern: "\\w", description: "Matches any word character (alphanumeric + underscore)" },
-  { pattern: "\\W", description: "Matches any non-word character" },
-  { pattern: "\\s", description: "Matches any whitespace character (spaces, tabs, line breaks)" },
-  { pattern: "\\S", description: "Matches any non-whitespace character" },
-  { pattern: "[abc]", description: "Matches any character in the brackets" },
-  { pattern: "[^abc]", description: "Matches any character not in the brackets" },
-  { pattern: "[a-z]", description: "Matches any character in the range" },
-  { pattern: "a|b", description: "Matches either 'a' or 'b'" },
-  { pattern: "a?", description: "Matches zero or one of 'a'" },
-  { pattern: "a*", description: "Matches zero or more of 'a'" },
-  { pattern: "a+", description: "Matches one or more of 'a'" },
-  { pattern: "a{3}", description: "Matches exactly 3 of 'a'" },
-  { pattern: "a{3,}", description: "Matches 3 or more of 'a'" },
-  { pattern: "a{3,6}", description: "Matches between 3 and 6 of 'a'" },
-]
-
-// Common regex examples
-const REGEX_EXAMPLES = [
-  {
-    name: "Email",
-    pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
-    description: "Validates email addresses",
-  },
-  {
-    name: "URL",
-    pattern: "^(https?:\\/\\/)?([\\da-z.-]+)\\.([a-z.]{2,6})([/\\w .-]*)*\\/?$",
-    description: "Validates URLs",
-  },
-  { name: "Phone Number", pattern: "^\\+?[1-9]\\d{1,14}$", description: "Validates international phone numbers" },
-  { name: "Date (YYYY-MM-DD)", pattern: "^\\d{4}-\\d{2}-\\d{2}$", description: "Validates dates in YYYY-MM-DD format" },
-  {
-    name: "Password",
-    pattern: "^(?=.*[A-Za-z])(?=.*\\d)[A-Za-z\\d]{8,}$",
-    description: "At least 8 characters with at least one letter and one number",
-  },
-  { name: "Alphanumeric", pattern: "^[a-zA-Z0-9]+$", description: "Only letters and numbers" },
-  { name: "ZIP Code", pattern: "^\\d{5}(-\\d{4})?$", description: "US ZIP code with optional 4-digit extension" },
-]
-
 // Add this helper function to ensure logical operators are set
 function ensureLogicalOperators(conditions: Condition[]): Condition[] {
   if (!conditions || conditions.length === 0) return []
@@ -357,9 +307,6 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
     hasColumnsMatch: sourceColumns.filter(Boolean).length === referenceColumns.filter(Boolean).length,
     hasReferenceTable: !!rule.parameters.referenceTable,
   })
-
-  // Add this with the other state variables
-  const [regexDialogOpen, setRegexDialogOpen] = useState(false)
 
   // Initialize table columns for all tables
   useEffect(() => {
@@ -1081,88 +1028,14 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
 
       case "regex":
         return (
-          <div className="flex items-center justify-between">
+          <div className="space-y-2">
             <Label htmlFor={`condition-${index}-pattern`}>Regex Pattern</Label>
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-xs"
-              type="button"
-              onClick={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-
-                // Create a simple text representation of regex examples
-                let helpText = "=== REGEX EXAMPLES ===\n\n"
-
-                // Add common patterns
-                helpText += "Email: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$\n"
-                helpText += "URL: ^(https?:\\/\\/)?([\\da-z.-]+)\\.([a-z.]{2,6})([/\\w .-]*)*\\/?$\n"
-                helpText += "Phone: ^\\+?[1-9]\\d{1,14}$\n"
-                helpText += "Date (YYYY-MM-DD): ^\\d{4}-\\d{2}-\\d{2}$\n"
-                helpText += "Password (min 8 chars, 1 letter, 1 number): ^(?=.*[A-Za-z])(?=.*\\d)[A-Za-z\\d]{8,}$\n"
-                helpText += "Alphanumeric: ^[a-zA-Z0-9]+$\n"
-                helpText += "ZIP Code: ^\\d{5}(-\\d{4})?$\n\n"
-
-                // Add syntax reference
-                helpText += "=== REGEX SYNTAX ===\n\n"
-                helpText += "^ - Start of string\n"
-                helpText += "$ - End of string\n"
-                helpText += ". - Any single character\n"
-                helpText += "\\d - Any digit (0-9)\n"
-                helpText += "\\w - Any word character (a-z, A-Z, 0-9, _)\n"
-                helpText += "\\s - Any whitespace character\n"
-                helpText += "[abc] - Any character in the brackets\n"
-                helpText += "[^abc] - Any character NOT in the brackets\n"
-                helpText += "a? - Zero or one of 'a'\n"
-                helpText += "a* - Zero or more of 'a'\n"
-                helpText += "a+ - One or more of 'a'\n"
-
-                alert(helpText)
-
-                // Ask if user wants to use a specific pattern
-                const usePattern = confirm("Would you like to use one of the example patterns?")
-                if (usePattern) {
-                  const pattern = prompt(
-                    "Enter the pattern number to use:\n1. Email\n2. URL\n3. Phone\n4. Date\n5. Password\n6. Alphanumeric\n7. ZIP Code",
-                  )
-
-                  switch (pattern) {
-                    case "1":
-                      handleColumnConditionParameterChange(
-                        index,
-                        "pattern",
-                        "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
-                      )
-                      break
-                    case "2":
-                      handleColumnConditionParameterChange(
-                        index,
-                        "pattern",
-                        "^(https?:\\/\\/)?([\\da-z.-]+)\\.([a-z.]{2,6})([/\\w .-]*)*\\/?$",
-                      )
-                      break
-                    case "3":
-                      handleColumnConditionParameterChange(index, "pattern", "^\\+?[1-9]\\d{1,14}$")
-                      break
-                    case "4":
-                      handleColumnConditionParameterChange(index, "pattern", "^\\d{4}-\\d{2}-\\d{2}$")
-                      break
-                    case "5":
-                      handleColumnConditionParameterChange(index, "pattern", "^(?=.*[A-Za-z])(?=.*\\d)[A-Za-z\\d]{8,}$")
-                      break
-                    case "6":
-                      handleColumnConditionParameterChange(index, "pattern", "^[a-zA-Z0-9]+$")
-                      break
-                    case "7":
-                      handleColumnConditionParameterChange(index, "pattern", "^\\d{5}(-\\d{4})?$")
-                      break
-                  }
-                }
-              }}
-            >
-              Regex Help
-            </Button>
+            <Input
+              id={`condition-${index}-pattern`}
+              value={condition.parameters.pattern ?? ""}
+              onChange={(e) => handleColumnConditionParameterChange(index, "pattern", e.target.value)}
+              placeholder="Enter a regular expression pattern"
+            />
           </div>
         )
 
@@ -1360,27 +1233,6 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
 
             {condition.parameters.functionBody && (
               <JavaScriptExplainer code={condition.parameters.functionBody} columnName={condition.column} />
-            )}
-          </div>
-        )
-
-      case "javascript-formula":
-        return (
-          <div className="space-y-2">
-            <Label htmlFor={`condition-${index}-javascriptFormula`}>JavaScript Formula</Label>
-            <Textarea
-              id={`condition-${index}-javascriptFormula`}
-              value={condition.parameters.javascriptFormula ?? ""}
-              onChange={(e) => handleColumnConditionParameterChange(index, "javascriptFormula", e.target.value)}
-              placeholder="return row.amount - row.refundAmount - row.processingFee >= 0;"
-              rows={4}
-            />
-            <p className="text-xs text-gray-500">
-              Write a JavaScript expression that returns true if valid, false if invalid. The expression has direct
-              access to the 'row' object.
-            </p>
-            {condition.parameters.javascriptFormula && (
-              <JavaScriptExplainer code={condition.parameters.javascriptFormula} columnName={condition.column} />
             )}
           </div>
         )
@@ -1627,913 +1479,154 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
                   Comparison Value
                 </Label>
                 <Input
-                  id={`condition-${index}-comparisonValue`}
                   type="number"
-                  value={condition.parameters.comparisonValue ?? 0}
+                  id={`condition-${index}-comparisonValue`}
+                  value={condition.parameters.comparisonValue || 0}
                   onChange={(e) =>
                     handleColumnConditionParameterChange(index, "comparisonValue", Number(e.target.value))
                   }
-                  placeholder="e.g., 0"
+                  placeholder="Enter value to compare against"
                 />
               </div>
             </div>
 
-            <div className="bg-gray-50 p-4 rounded-md text-sm">
-              <p className="font-medium mb-1">Preview:</p>
-              <div className="font-mono">{renderMathOperationPreview(condition.parameters)}</div>
+            <div className="mt-4 p-3 bg-gray-50 rounded-md">
+              <p className="text-sm font-medium">Preview:</p>
+              <p className="text-sm text-gray-700">{renderMathOperationPreview(condition.parameters)}</p>
             </div>
           </div>
         )
-
-      case "contains":
-        return (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor={`condition-${index}-searchString`}>Search String</Label>
-              <Input
-                id={`condition-${index}-searchString`}
-                value={condition.parameters.searchString || ""}
-                onChange={(e) => handleColumnConditionParameterChange(index, "searchString", e.target.value)}
-                placeholder="Enter text to search for"
-              />
-              <p className="text-xs text-gray-500">
-                The validation will check if the field value contains this string.
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor={`condition-${index}-caseSensitive`} className="flex items-center gap-2">
-                <Checkbox
-                  id={`condition-${index}-caseSensitive`}
-                  checked={condition.parameters.caseSensitive || false}
-                  onCheckedChange={(checked) =>
-                    handleColumnConditionParameterChange(index, "caseSensitive", checked === true)
-                  }
-                />
-                <span>Case Sensitive</span>
-              </Label>
-              <p className="text-xs text-gray-500">If checked, the search will be case sensitive.</p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor={`condition-${index}-matchType`}>Match Type</Label>
-              <Select
-                value={condition.parameters.matchType || "contains"}
-                onValueChange={(value) => handleColumnConditionParameterChange(index, "matchType", value)}
-              >
-                <SelectTrigger id={`condition-${index}-matchType`}>
-                  <SelectValue placeholder="Select match type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="contains">Contains</SelectItem>
-                  <SelectItem value="not-contains">Does Not Contain</SelectItem>
-                  <SelectItem value="starts-with">Starts With</SelectItem>
-                  <SelectItem value="ends-with">Ends With</SelectItem>
-                  <SelectItem value="exact">Exact Match</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-gray-500">
-                Determines how the string should be matched against the field value.
-              </p>
-            </div>
-          </div>
-        )
-
-      case "date-before":
-        return (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor={`condition-${index}-compareDate`}>Before Date</Label>
-              <Input
-                id={`condition-${index}-compareDate`}
-                type="date"
-                value={condition.parameters.compareDate || ""}
-                onChange={(e) => handleColumnConditionParameterChange(index, "compareDate", e.target.value)}
-                placeholder="YYYY-MM-DD"
-              />
-              <p className="text-xs text-gray-500">The date value must be before this date.</p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor={`condition-${index}-inclusive`} className="flex items-center gap-2">
-                <Checkbox
-                  id={`condition-${index}-inclusive`}
-                  checked={condition.parameters.inclusive || false}
-                  onCheckedChange={(checked) =>
-                    handleColumnConditionParameterChange(index, "inclusive", checked === true)
-                  }
-                />
-                <span>Inclusive (include the specified date)</span>
-              </Label>
-              <p className="text-xs text-gray-500">If checked, the date can be equal to the specified date.</p>
-            </div>
-          </div>
-        )
-
-      case "date-after":
-        return (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor={`condition-${index}-compareDate`}>After Date</Label>
-              <Input
-                id={`condition-${index}-compareDate`}
-                type="date"
-                value={condition.parameters.compareDate || ""}
-                onChange={(e) => handleColumnConditionParameterChange(index, "compareDate", e.target.value)}
-                placeholder="YYYY-MM-DD"
-              />
-              <p className="text-xs text-gray-500">The date value must be after this date.</p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor={`condition-${index}-inclusive`} className="flex items-center gap-2">
-                <Checkbox
-                  id={`condition-${index}-inclusive`}
-                  checked={condition.parameters.inclusive || false}
-                  onCheckedChange={(checked) =>
-                    handleColumnConditionParameterChange(index, "inclusive", checked === true)
-                  }
-                />
-                <span>Inclusive (include the specified date)</span>
-              </Label>
-              <p className="text-xs text-gray-500">If checked, the date can be equal to the specified date.</p>
-            </div>
-          </div>
-        )
-
-      case "date-between":
-        return (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor={`condition-${index}-startDate`}>Start Date</Label>
-              <Input
-                id={`condition-${index}-startDate`}
-                type="date"
-                value={condition.parameters.startDate || ""}
-                onChange={(e) => handleColumnConditionParameterChange(index, "startDate", e.target.value)}
-                placeholder="YYYY-MM-DD"
-              />
-              <p className="text-xs text-gray-500">The date value must be after this start date.</p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor={`condition-${index}-endDate`}>End Date</Label>
-              <Input
-                id={`condition-${index}-endDate`}
-                type="date"
-                value={condition.parameters.endDate || ""}
-                onChange={(e) => handleColumnConditionParameterChange(index, "endDate", e.target.value)}
-                placeholder="YYYY-MM-DD"
-              />
-              <p className="text-xs text-gray-500">The date value must be before this end date.</p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor={`condition-${index}-inclusive`} className="flex items-center gap-2">
-                <Checkbox
-                  id={`condition-${index}-inclusive`}
-                  checked={condition.parameters.inclusive || false}
-                  onCheckedChange={(checked) =>
-                    handleColumnConditionParameterChange(index, "inclusive", checked === true)
-                  }
-                />
-                <span>Inclusive (include the specified dates)</span>
-              </Label>
-              <p className="text-xs text-gray-500">If checked, the date can be equal to the start or end date.</p>
-            </div>
-          </div>
-        )
-
-      case "date-format":
-        return (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor={`condition-${index}-format`}>Date Format</Label>
-              <Select
-                value={condition.parameters.format || "iso"}
-                onValueChange={(value) => handleColumnConditionParameterChange(index, "format", value)}
-              >
-                <SelectTrigger id={`condition-${index}-format`}>
-                  <SelectValue placeholder="Select date format" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="iso">ISO (YYYY-MM-DD)</SelectItem>
-                  <SelectItem value="us">US (MM/DD/YYYY)</SelectItem>
-                  <SelectItem value="eu">European (DD/MM/YYYY)</SelectItem>
-                  <SelectItem value="custom">Custom Format</SelectItem>
-                </SelectContent>
-                <p className="text-xs text-gray-500">
-                  Select the expected format for date values.
-                </p>
-              </div>
-
-              {condition.parameters.format === "custom" && (
-                <div className="space-y-2">
-                  <Label htmlFor={`condition-${index}-customFormat`}>Custom Format Pattern</Label>
-                  <Input
-                    id={`condition-${index}-customFormat`}
-                    value={condition.parameters.customFormat || ""}
-                    onChange={(e) => handleColumnConditionParameterChange(index, "customFormat", e.target.value)}
-                    placeholder="e.g., YYYY-MM-DD HH:mm:ss"
-                  />
-                  <p className="text-xs text-gray-500">
-                    Use YYYY for year, MM for month, DD for day, HH for hour, mm for minute, ss for second.
-                  </p>
-                </div>
-              )}
-            </div>
-          )
 
       default:
-        return null
+        return <p className="text-sm text-gray-500">No parameters needed for this rule type.</p>
     }
   }
 
-  const renderReferenceIntegrityParameters = () => {
-    return (
-      <div className="space-y-4">
-        <div className="bg-muted p-4 rounded-md mb-4">
-          <h4 className="text-sm font-mediummm mb-2">About Cross-Table Key Integrity</h4>
-          <p className="text-xs text-gray-700 mb-2">
-            This rule validates that a value in one table exists in another table (foreign key check).
-          </p>
-          <div className="text-xs space-y-1">
-            <p>
-              <strong>Example:</strong> Validate that userId in the orders table exists in the id column of the users
-              table.
-            </p>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="referenceTable">Reference Table</Label>
-          <Select
-            value={rule.parameters.referenceTable || ""}
-            onValueChange={(value) => handleParameterChange("referenceTable", value)}
-          >
-            <SelectTrigger id="referenceTable">
-              <SelectValue placeholder="Select reference table" />
-            </SelectTrigger>
-            <SelectContent>
-              {tables
-                .filter((table) => table !== getPrimaryTable()) // Don't allow referencing the same table
-                .map((table) => (
-                  <SelectItem key={table} value={table}>
-                    {table.charAt(0).toUpperCase() + table.slice(1)}
-                  </SelectItem>
-                ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {rule.parameters.referenceTable && (
-          <div className="space-y-2">
-            <Label htmlFor="referenceColumn">Reference Column</Label>
-            <Select
-              value={rule.parameters.referenceColumn || ""}
-              onValueChange={(value) => handleParameterChange("referenceColumn", value)}
-            >
-              <SelectTrigger id="referenceColumn">
-                <SelectValue placeholder="Select reference column" />
-              </SelectTrigger>
-              <SelectContent>
-                {referenceTableColumns.map((column) => (
-                  <SelectItem key={column} value={column}>
-                    {column}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-
-        <div className="space-y-2">
-          <Label htmlFor="checkType">Check Type</Label>
-          <Select
-            value={rule.parameters.checkType || "exists"}
-            onValueChange={(value) => handleParameterChange("checkType", value)}
-          >
-            <SelectTrigger id="checkType">
-              <SelectValue placeholder="Select check type" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="exists">Must Exist</SelectItem>
-              <SelectItem value="not-exists">Must Not Exist</SelectItem>
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-gray-500">
-            {rule.parameters.checkType === "not-exists"
-              ? "Validates that the value does NOT exist in the reference table (exclusivity check)"
-              : "Validates that the value exists in the reference table (foreign key check)"}
-          </p>
-        </div>
-      </div>
-    )
-  }
-
-  // Render parameters for the composite reference rule type
-  const renderCompositeReferenceParameters = () => {
-    return (
-      <div className="space-y-4">
-        <div className="bg-muted p-4 rounded-md mb-4">
-          <h4 className="text-sm font-medium mb-2">About Cross-Table Composite Keys</h4>
-          <p className="text-xs text-gray-700 mb-2">
-            This rule validates that a combination of columns (source columns) in one table exists as a combination of
-            columns (reference columns) in another table.
-          </p>
-          <div className="text-xs space-y-1">
-            <p>
-              <strong>Example:</strong> Validate that (firstName, lastName) in the source table exists as (firstName,
-              lastName) in the reference table.
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="sourceTable">Source Table</Label>
-            <Select
-              value={rule.parameters.sourceTable || rule.table || ""}
-              onValueChange={(value) => {
-                handleParameterChange("sourceTable", value)
-                // Also update the main rule table to keep them in sync
-                handleChange("table", value)
-                // Reset source columns when table changes
-                setSourceColumns([""])
-                setRule((prev) => ({
-                  ...prev,
-                  parameters: {
-                    ...prev.parameters,
-                    sourceColumns: [""],
-                  },
-                }))
-              }}
-            >
-              <SelectTrigger id="sourceTable">
-                <SelectValue placeholder="Select source table" />
-              </SelectTrigger>
-              <SelectContent>
-                {tables.map((table) => (
-                  <SelectItem key={table} value={table}>
-                    {table.charAt(0).toUpperCase() + table.slice(1)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="referenceTable">Reference Table</Label>
-            <Select
-              value={rule.parameters.referenceTable || ""}
-              onValueChange={(value) => handleParameterChange("referenceTable", value)}
-            >
-              <SelectTrigger id="referenceTable">
-                <SelectValue placeholder="Select reference table" />
-              </SelectTrigger>
-              <SelectContent>
-                {tables
-                  .filter((table) => table !== (rule.parameters.sourceTable || rule.table)) // Don't allow referencing the same table
-                  .map((table) => (
-                    <SelectItem key={table} value={table}>
-                      {table.charAt(0).toUpperCase() + table.slice(1)}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <div className="flex justify-between items-center mb-2">
-            <div className="flex items-center gap-1">
-              <Label>Source Columns</Label>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-5 w-5 p-0"
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  window.alert(
-                    `These columns from the source table (${rule.parameters.sourceTable || rule.table}) will be checked against the reference columns. The order matters - each source column will be matched with the corresponding reference column.`,
-                  )
-                }}
-              >
-                <HelpCircle className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={addSourceColumn}
-              className="flex items-center gap-1"
-            >
-              <Plus className="h-4 w-4" /> Add Column
-            </Button>
-          </div>
-
-          <div className="space-y-2">
-            {sourceColumns.map((column, index) => (
-              <div key={`source-${index}`} className="flex items-center gap-2">
-                <Select value={column} onValueChange={(value) => updateSourceColumn(index, value)}>
-                  <SelectTrigger className="flex-1">
-                    <SelectValue placeholder="Select column" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {getColumnsForTable(rule.parameters.sourceTable || rule.table || "")
-                      .filter((col) => !sourceColumns.includes(col) || col === column)
-                      .map((col) => (
-                        <SelectItem key={col} value={col}>
-                          {col}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-                {sourceColumns.length > 1 && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => removeSourceColumn(index)}
-                    className="h-8 w-8 p-0"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                )}
-              </div>
-            ))}
-          </div>
-          <p className="text-xs text-gray-500">
-            Select multiple columns that together form a composite key to check against the reference table. For single
-            column references, use the "Cross-Table Key Integrity" rule type instead.
-          </p>
-        </div>
-
-        {rule.parameters.referenceTable && (
-          <div className="space-y-2">
-            <div className="flex justify-between items-center mb-2">
-              <div className="flex items-center gap-1">
-                <Label>Reference Columns</Label>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-5 w-5 p-0">
-                        <HelpCircle className="h-3.5 w-3.5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p className="max-w-xs">
-                        These columns from the reference table ({rule.parameters.referenceTable}) will be matched with
-                        the source columns. The order matters - each reference column will be matched with the
-                        corresponding source column.
-                      </p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={addReferenceColumn}
-                className="flex items-center gap-1"
-                disabled={!rule.parameters.referenceTable}
-              >
-                <Plus className="h-4 w-4" /> Add Column
-              </Button>
-            </div>
-
-            <div className="space-y-2">
-              {referenceColumns.map((column, index) => (
-                <div key={`reference-${index}`} className="flex items-center gap-2">
-                  <Select value={column} onValueChange={(value) => updateReferenceColumn(index, value)}>
-                    <SelectTrigger className="flex-1">
-                      <SelectValue placeholder="Select column" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {referenceTableColumns
-                        .filter((col) => !referenceColumns.includes(col) || col === column)
-                        .map((col) => (
-                          <SelectItem key={col} value={col}>
-                            {col}
-                          </SelectItem>
-                        ))}
-                  </SelectContent>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => removeReferenceColumn(index)}
-                    className="h-8 w-8 p-0"
-                    disabled={referenceColumns.length <= 1}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-            <p className="text-xs text-gray-500">
-              The number of reference columns must match the number of source columns. The order of columns is
-              important.
-            </p>
-            {!formDebug.hasColumnsMatch && (
-              <p className="text-xs text-red-500">The number of source columns and reference columns must match.</p>
-            )}
-          </div>
-        )}
-      </div>
-    )
-  }
-
   return (
-    <TooltipProvider>
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="name">Rule Name</Label>
-            <Input
-              type="text"
-              id="name"
-              value={rule.name}
-              onChange={(e) => handleChange("name", e.target.value)}
-              placeholder="Enter rule name"
-            />
-            {!formDebug.hasName && <p className="text-xs text-red-500">Rule name is required.</p>}
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="severity">Severity</Label>
-            <Select value={rule.severity} onValueChange={(value) => handleChange("severity", value)}>
-              <SelectTrigger id="severity">
-                <SelectValue placeholder="Select severity" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="failure">Failure</SelectItem>
-                <SelectItem value="warning">Warning</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+    <form onSubmit={handleSubmit} className="space-y-6">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="name">Rule Name</Label>
+          <Input
+            id="name"
+            value={rule.name}
+            onChange={(e) => handleChange("name", e.target.value)}
+            placeholder="Enter rule name"
+            required
+          />
         </div>
 
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Label htmlFor="ruleType">Rule Type</Label>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-5 w-5 p-0"
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  window.alert("Select the type of validation rule to apply to this column.")
-                }}
-              >
-                <HelpCircle className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-
-            {columnConditions[0]?.ruleType && (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-xs"
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    window.alert(
-                      `${RULE_TYPES.find((t) => t.value === columnConditions[0]?.ruleType)?.label || "Rule Type"}
-
-${RULE_TYPE_EXAMPLES[columnConditions[0]?.ruleType]?.explanation}
-
-Example: ${RULE_TYPE_EXAMPLES[columnConditions[0]?.ruleType]?.example}`,
-                    )
-                  }}
-                >
-                  View Example
-                </Button>
-                {/* Keep a hidden dialog for future implementation */}
-                <Dialog>
-                  <DialogContent style={{ display: "none" }}></DialogContent>
-                </Dialog>
-              </>
-            )}
-          </div>
-
-          <Select
-            value={columnConditions[0]?.ruleType || ""}
-            onValueChange={(value) => handleColumnConditionChange(0, "ruleType", value as RuleType)}
-          >
-            <SelectTrigger id="ruleType">
-              <SelectValue placeholder="Select rule type" />
+          <Label htmlFor="severity">Severity</Label>
+          <Select value={rule.severity} onValueChange={(value) => handleChange("severity", value as RuleSeverity)}>
+            <SelectTrigger id="severity">
+              <SelectValue placeholder="Select severity" />
             </SelectTrigger>
             <SelectContent>
-              {RULE_TYPES.map((type) => (
-                <SelectItem key={type.value} value={type.value}>
-                  {type.label}
+              <SelectItem value="warning">Warning</SelectItem>
+              <SelectItem value="failure">Failure</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="table">Table</Label>
+          <Select value={rule.table} onValueChange={(value) => handleChange("table", value)}>
+            <SelectTrigger id="table">
+              <SelectValue placeholder="Select table" />
+            </SelectTrigger>
+            <SelectContent>
+              {tables.map((table) => (
+                <SelectItem key={table} value={table}>
+                  {table}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
 
-        {rule.ruleType !== "composite-reference" && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="table">Table</Label>
-              <Select value={rule.table} onValueChange={(value) => handleChange("table", value)}>
-                <SelectTrigger id="table">
-                  <SelectValue placeholder="Select table" />
-                </SelectTrigger>
-                <SelectContent>
-                  {tables.map((table) => (
-                    <SelectItem key={table} value={table}>
-                      {table.charAt(0).toUpperCase() + table.slice(1)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="column">Column</Label>
-              <Select
-                value={columnConditions[0]?.column || ""}
-                onValueChange={(value) => handleColumnConditionChange(0, "column", value)}
-              >
-                <SelectTrigger id="column">
-                  <SelectValue placeholder="Select column" />
-                </SelectTrigger>
-                <SelectContent>
-                  {tableColumns[rule.table]?.map((column) => (
-                    <SelectItem key={column} value={column}>
-                      {column}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        )}
-
-        {/* Render parameters based on rule type */}
-        {columnConditions.map((condition, index) => (
-          <div key={`condition-${index}`} className="space-y-4 border rounded-md p-4">
-            <div className="flex justify-between items-center mb-2">
-              <h3 className="text-sm font-medium">Condition #{index + 1}</h3>
-              {columnConditions.length > 1 && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => removeColumnCondition(index)}
-                  className="h-8 w-8 p-0"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-
-            {columnConditions.length > 1 && (
-              <div className="space-y-2">
-                <Label htmlFor={`condition-${index}-table`}>Table</Label>
-                <Select
-                  value={condition.table}
-                  onValueChange={(value) => handleColumnConditionChange(index, "table", value)}
-                >
-                  <SelectTrigger id={`condition-${index}-table`}>
-                    <SelectValue placeholder="Select table" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {tables.map((table) => (
-                      <SelectItem key={table} value={table}>
-                        {table.charAt(0).toUpperCase() + table.slice(1)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            {columnConditions.length > 1 && (
-              <div className="space-y-2">
-                <Label htmlFor={`condition-${index}-column`}>Column</Label>
-                <Select
-                  value={condition.column}
-                  onValueChange={(value) => handleColumnConditionChange(index, "column", value)}
-                >
-                  <SelectTrigger id={`condition-${index}-column`}>
-                    <SelectValue placeholder="Select column" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {tableColumns[condition.table]?.map((column) => (
-                      <SelectItem key={column} value={column}>
-                        {column}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            {columnConditions.length > 1 && (
-              <div className="space-y-2">
-                <Label htmlFor={`condition-${index}-ruleType`}>Rule Type</Label>
-                <Select
-                  value={condition.ruleType}
-                  onValueChange={(value) => handleColumnConditionChange(index, "ruleType", value)}
-                >
-                  <SelectTrigger id={`condition-${index}-ruleType`}>
-                    <SelectValue placeholder="Select rule type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {RULE_TYPES.map((type) => (
-                      <SelectItem key={type.value} value={type.value}>
-                        {type.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            {index < columnConditions.length - 1 && (
-              <div className="space-y-2 mt-4 pt-4 border-t">
-                <Label htmlFor={`condition-${index}-logicalOperator`}>Connect with Next Condition Using</Label>
-                <Select
-                  value={condition.logicalOperator || "AND"}
-                  onValueChange={(value) => handleColumnConditionChange(index, "logicalOperator", value)}
-                >
-                  <SelectTrigger id={`condition-${index}-logicalOperator`}>
-                    <SelectValue placeholder="Select logical operator" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="AND">AND</SelectItem>
-                    <SelectItem value="OR">OR</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-gray-500">
-                  {condition.logicalOperator === "OR"
-                    ? "This condition OR the next condition must be true"
-                    : "This condition AND the next condition must be true"}
-                </p>
-              </div>
-            )}
-
-            {renderColumnConditionParameters(condition, index)}
-          </div>
-        ))}
-
-        <Button type="button" variant="outline" size="sm" onClick={addColumnCondition}>
-          <Plus className="h-4 w-4 mr-2" /> Add Condition
-        </Button>
-
-        {rule.ruleType === "reference-integrity" && renderReferenceIntegrityParameters()}
-        {rule.ruleType === "composite-reference" && renderCompositeReferenceParameters()}
-        {rule.ruleType === "unique" && (
-          <div className="space-y-4 border rounded-md p-4">
-            <div className="bg-muted p-3 rounded-md">
-              <h4 className="text-sm font-medium mb-2">About Unique Values</h4>
-              <p className="text-xs text-gray-700">
-                This rule validates that values in the selected column(s) are unique across all rows in the table. You
-                can select multiple columns to check for composite uniqueness.
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex justify-between items-center mb-2">
-                <Label>Columns to Check for Uniqueness</Label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={addColumnCondition}
-                  className="flex items-center gap-1"
-                >
-                  <Plus className="h-4 w-4" /> Add Column
-                </Button>
-              </div>
-
-              <div className="space-y-2">
-                {uniqueColumns.map((column, index) => (
-                  <div key={`unique-${index}`} className="flex items-center gap-2">
-                    <Select value={column} onValueChange={(value) => updateUniqueColumn(index, value)}>
-                      <SelectTrigger className="flex-1">
-                        <SelectValue placeholder="Select column" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {getColumnsForTable(getPrimaryTable())
-                          .filter((col) => !uniqueColumns.includes(col) || col === column)
-                          .map((col) => (
-                            <SelectItem key={col} value={col}>
-                              {col}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                    {uniqueColumns.length > 1 && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeUniqueColumn(index)}
-                        className="h-8 w-8 p-0"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              {uniqueColumns.length > 1 && (
-                <div className="mt-2">
-                  <p className="text-xs text-gray-500">
-                    The combination of values across these columns must be unique. For example, if you select
-                    "firstName" and "lastName", the combination (firstName + lastName) must be unique, but individual
-                    first or last names can repeat.
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {rule.table && tableColumns[rule.table] && tableColumns[rule.table].length > 0 && (
-          <Accordion type="single" collapsible className="border rounded-md">
-            <AccordionItem value="secondary-columns" className="border-none">
-              <AccordionTrigger className="px-4 py-2 hover:no-underline">
-                <div className="flex flex-col items-start">
-                  <span>Secondary Columns</span>
-                  <span className="text-xs text-gray-500 font-normal">
-                    {selectedSecondaryColumns.length > 0
-                      ? `${selectedSecondaryColumns.length} column${selectedSecondaryColumns.length > 1 ? "s" : ""} selected`
-                      : "Optionally select additional columns to include in the validation"}
-                  </span>
-                </div>
-              </AccordionTrigger>
-              <AccordionContent className="px-4 pb-4">
-                <p className="text-xs text-gray-500 mb-2">
-                  Select additional columns that are referenced or involved in this rule.
-                </p>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                  {tableColumns[rule.table]
-                    .filter((col) => col !== rule.column)
-                    .map((column) => (
-                      <div key={column} className="flex items-center space-x-2">
-                        <Checkbox
-                          id={`col-${column}`}
-                          checked={selectedSecondaryColumns.includes(column)}
-                          onCheckedChange={(checked) => handleSecondaryColumnToggle(column, checked)}
-                        />
-                        <Label htmlFor={`col-${column}`} className="text-sm font-normal">
-                          {column}
-                        </Label>
-                      </div>
-                    ))}
-                </div>
-              </AccordionContent>
-            </AccordionItem>
-          </Accordion>
-        )}
-
-        {rule.ruleType === "multi-column" && (
-          <MultiColumnConditionEditor
-            columns={tableColumns[rule.table] || []}
-            conditions={ensureLogicalOperators(rule.conditions || [])}
-            onChange={handleConditionsChange}
-          />
-        )}
-
         <div className="space-y-2">
-          <Label htmlFor="description">Description</Label>
-          <Textarea
-            id="description"
-            value={rule.description}
-            onChange={(e) => handleChange("description", e.target.value)}
-            placeholder="Enter rule description"
-          />
+          <Label htmlFor="column">Column</Label>
+          <Select value={rule.column} onValueChange={(value) => handleChange("column", value)}>
+            <SelectTrigger id="column">
+              <SelectValue placeholder="Select column" />
+            </SelectTrigger>
+            <SelectContent>
+              {tableColumns[rule.table]?.map((column) => (
+                <SelectItem key={column} value={column}>
+                  {column}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
+      </div>
 
+      <div className="space-y-2">
+        <Label htmlFor="ruleType">Rule Type</Label>
+        <Select value={rule.ruleType} onValueChange={(value) => handleChange("ruleType", value as RuleType)}>
+          <SelectTrigger id="ruleType">
+            <SelectValue placeholder="Select rule type" />
+          </SelectTrigger>
+          <SelectContent>
+            {RULE_TYPES.map((type) => (
+              <SelectItem key={type.value} value={type.value}>
+                {type.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {RULE_TYPE_EXAMPLES[rule.ruleType] && (
+          <div className="mt-2 p-2 bg-muted rounded-md">
+            <p className="text-xs font-medium">Example:</p>
+            <p className="text-xs text-muted-foreground">{RULE_TYPE_EXAMPLES[rule.ruleType].example}</p>
+            <p className="text-xs font-medium mt-2">Explanation:</p>
+            <p className="text-xs text-muted-foreground">{RULE_TYPE_EXAMPLES[rule.ruleType].explanation}</p>
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-2">
         <div className="flex items-center space-x-2">
-          <Checkbox id="enabled" checked={rule.enabled} onChange={(e) => handleChange("enabled", e.target.checked)} />
-          <Label htmlFor="enabled" className="text-sm font-normal">
-            Enabled
+          <Checkbox
+            id="enabled"
+            checked={rule.enabled !== false}
+            onChange={(checked) => handleChange("enabled", checked === true)}
+          />
+          <Label htmlFor="enabled" className="font-normal">
+            Rule enabled
           </Label>
         </div>
+        <p className="text-xs text-gray-500">Disabled rules will not be evaluated during validation.</p>
+      </div>
 
-        <div className="flex justify-end space-x-2">
-          <Button type="button" variant="ghost" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button type="submit">Save</Button>
-        </div>
-      </form>
-    </TooltipProvider>
+      {/* Parameters Section */}
+      <div className="border p-4 rounded-md space-y-4">
+        <h3 className="font-medium">Rule Parameters</h3>
+        {renderColumnConditionParameters(columnConditions[0], 0)}
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="description">Description</Label>
+        <Textarea
+          id="description"
+          value={rule.description}
+          onChange={(e) => handleChange("description", e.target.value)}
+          placeholder="Describe what this rule checks for..."
+          rows={2}
+        />
+      </div>
+
+      <div className="flex justify-end space-x-2 pt-2">
+        <Button type="button" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit">{initialRule ? "Update Rule" : "Add Rule"}</Button>
+      </div>
+    </form>
   )
 }
+
+export default RuleForm
