@@ -1496,25 +1496,7 @@ function validateEnum(value: any, allowedValues?: any[]): { isValid: boolean; me
     return { isValid: true, message: "" }
   }
 
-  // Improved type comparison - try both strict and loose comparison
-  // This handles cases where the value might be a number but allowed values are strings
-  const isValid = allowedValues.some((allowedValue) => {
-    // Try strict equality first
-    if (value === allowedValue) return true
-
-    // If value is a number, try comparing with numeric conversion of allowed value
-    if (typeof value === "number" && !isNaN(Number(allowedValue)) && value === Number(allowedValue)) {
-      return true
-    }
-
-    // If value is a string, try comparing with string conversion of allowed value
-    if (typeof value === "string" && String(allowedValue) === value) {
-      return true
-    }
-
-    return false
-  })
-
+  const isValid = allowedValues.includes(value)
   return {
     isValid,
     message: isValid ? "" : `Value must be one of: ${allowedValues.join(", ")}`,
@@ -2126,10 +2108,7 @@ function validateDateFormat(value: any, format?: string, customFormat?: string):
     }
 
     // Date objects are always valid for format checking
-    return {
-      isValid: true,
-      message: "",
-    }
+    return { isValid: true, message: "" }
   }
 
   // If it's not a Date object, check if it's a string in the right format

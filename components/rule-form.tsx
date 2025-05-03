@@ -551,19 +551,10 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
     // If changing the rule type, update the first column condition
     if (field === "ruleType" && columnConditions.length > 0) {
       const updatedConditions = [...columnConditions]
-      
-      // For enum rule type, preserve the allowedValues parameter if it exists
-      let newParameters = {};
-      if (value === "enum" && updatedConditions[0].ruleType === "enum") {
-        newParameters = {
-          allowedValues: updatedConditions[0].parameters.allowedValues || []
-        };
-      }
-      
       updatedConditions[0] = {
         ...updatedConditions[0],
         ruleType: value,
-        parameters: newParameters, // Use preserved parameters or empty object
+        parameters: {}, // Reset parameters when rule type changes
       }
       setColumnConditions(updatedConditions)
 
@@ -708,27 +699,14 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
   // Handle column condition field change
   const handleColumnConditionChange = (index: number, field: keyof ColumnCondition, value: any) => {
     const updatedConditions = [...columnConditions]
-    
-    // Special handling for rule type changes
+    updatedConditions[index] = {
+      ...updatedConditions[index],
+      [field]: value,
+    }
+
+    // If changing rule type, reset parameters
     if (field === "ruleType") {
-      // Preserve parameters for enum rule type
-      let newParameters = {};
-      if (value === "enum" && updatedConditions[index].ruleType === "enum") {
-        newParameters = {
-          allowedValues: updatedConditions[index].parameters.allowedValues || []
-        };
-      }
-      
-      updatedConditions[index] = {
-        ...updatedConditions[index],
-        [field]: value,
-        parameters: newParameters,
-      }
-    } else {
-      updatedConditions[index] = {
-        ...updatedConditions[index],
-        [field]: value,
-      }
+      updatedConditions[index].parameters = {}
     }
 
     // If changing table, reset column
@@ -762,18 +740,10 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
           }))
         }
       } else if (field === "ruleType") {
-        // Preserve parameters for enum rule type
-        let newParameters = {};
-        if (value === "enum" && rule.ruleType === "enum") {
-          newParameters = {
-            allowedValues: rule.parameters.allowedValues || []
-          };
-        }
-        
         setRule((prev) => ({
           ...prev,
           ruleType: value,
-          parameters: newParameters,
+          parameters: {},
         }))
       } else if (field === "table") {
         setRule((prev) => ({
@@ -1228,46 +1198,18 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
               value={
                 Array.isArray(condition.parameters.allowedValues) ? condition.parameters.allowedValues.join(", ") : ""
               }
-              onChange={(e) => {
-                // Improved parsing of allowed values
-                const rawValues = e.target.value
-                  .split(",")
-                  .map((v) => v.trim())
-                  .filter((v) => v.length > 0);
-              
-                // Convert values to appropriate types (number if it looks like a number)
-                const processedValues = rawValues.map(val => {
-                  // Check if the value is a valid number
-                  const numVal = Number(val);
-                  if (!isNaN(numVal) && String(numVal) === val) {
-                    return numVal; // It's a valid number, store as number
-                  }
-                  return val; // Keep as string
-                });
-                
-                handleColumnConditionParameterChange(index, "allowedValues", processedValues);
-              }}
+              onChange={(e) =>
+                handleColumnConditionParameterChange(
+                  index,
+                  "allowedValues",
+                  e.target.value
+                    .split(",")
+                    .map((v) => v.trim())
+                    .filter((v) => v.length > 0),
+                )
+              }
               placeholder="e.g., active, pending, inactive"
             />
-            {Array.isArray(condition.parameters.allowedValues) && condition.parameters.allowedValues.length > 0 && (
-              <div className="mt-2 p-2 bg-muted rounded-md">
-                <p className="text-xs font-medium mb-1">Current allowed values:</p>
-                <div className="flex flex-wrap gap-1">
-                  {condition.parameters.allowedValues.map((value, i) => (
-                    <span
-                      key={i}
-                      className="inline-block px-2 py-1 bg-background rounded border text-xs"
-                      title={`Type: ${typeof value}`}
-                    >
-                      {String(value)}
-                      <span className="text-xs text-muted-foreground ml-1">
-                        ({typeof value})
-                      </span>
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         )
 
@@ -1911,7 +1853,7 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
     return (
       <div className="space-y-4">
         <div className="bg-muted p-4 rounded-md mb-4">
-          <h4 className="text-sm font-mediumm mb-2">About Cross-Table Key Integrity</h4>
+          <h4 className="text-sm font-mediummm mb-2">About Cross-Table Key Integrity</h4>
           <p className="text-xs text-gray-700 mb-2">
             This rule validates that a value in one table exists in another table (foreign key check).
           </p>
