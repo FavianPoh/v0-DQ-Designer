@@ -273,8 +273,14 @@ export function NewDateRuleEditor({ rule, tables, datasets, onSave, onCancel }: 
                   <SelectItem value="us">US (MM/DD/YYYY)</SelectItem>
                   <SelectItem value="eu">EU (DD/MM/YYYY)</SelectItem>
                   <SelectItem value="custom">Custom Format</SelectItem>
+                  <SelectItem value="any">Any Valid Date</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-gray-500">
+                {editedRule.parameters.format === "any"
+                  ? "Validates that the value can be parsed as a valid date without enforcing a specific format."
+                  : "Select a specific date format to enforce."}
+              </p>
             </div>
 
             {editedRule.parameters.format === "custom" && (

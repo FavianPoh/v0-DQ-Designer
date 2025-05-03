@@ -33,6 +33,25 @@ function debugRule(rule: DataQualityRule, label = "Rule Debug") {
   console.log("=================")
 }
 
+// Add this function near the top of the file with the other debug functions
+function debugDateBetweenRule(rule: DataQualityRule, value: any, result: { isValid: boolean; message: string }) {
+  console.log("=== Date Between Rule Debug ===")
+  console.log("Rule:", {
+    id: rule.id,
+    name: rule.name,
+    ruleType: rule.ruleType,
+    parameters: rule.parameters,
+  })
+  console.log("Value:", value)
+  console.log("Parsed dates:", {
+    startDate: rule.parameters.startDate ? new Date(rule.parameters.startDate) : null,
+    endDate: rule.parameters.endDate ? new Date(rule.parameters.endDate) : null,
+    valueDate: value instanceof Date ? value : new Date(value),
+  })
+  console.log("Validation result:", result)
+  console.log("==============================")
+}
+
 // Add this function to the data-validator.ts file, near the top with the other debug functions
 
 function validateDateRuleWithSafeguards(
@@ -48,53 +67,57 @@ function validateDateRuleWithSafeguards(
     column: rule.column,
     ruleType: rule.ruleType,
     parameters: rule.parameters,
+    severity: rule.severity, // Log severity to ensure it's being passed correctly
   })
 
+  // Create a deep copy of the rule to avoid any reference issues
+  const ruleCopy = JSON.parse(JSON.stringify(rule))
+
   // CRITICAL: Check if column is defined
-  if (!rule.column) {
-    console.error(`CRITICAL ERROR: Missing column for date rule: ${rule.name} [ID: ${rule.id}]`)
+  if (!ruleCopy.column) {
+    console.error(`CRITICAL ERROR: Missing column for date rule: ${ruleCopy.name} [ID: ${ruleCopy.id}]`)
     return {
       rowIndex,
-      table: rule.table,
+      table: ruleCopy.table,
       column: "",
-      ruleName: rule.name,
+      ruleName: ruleCopy.name,
       message: `Configuration error: Missing column name for date rule`,
       severity: "failure",
-      ruleId: rule.id,
+      ruleId: ruleCopy.id,
     }
   }
 
   // Check if column exists in the row
-  if (!(rule.column in row)) {
-    console.error(`Column "${rule.column}" not found in row for rule: ${rule.name} [ID: ${rule.id}]`)
+  if (!(ruleCopy.column in row)) {
+    console.error(`Column "${ruleCopy.column}" not found in row for rule: ${ruleCopy.name} [ID: ${ruleCopy.id}]`)
     console.log("Available columns:", Object.keys(row))
     return {
       rowIndex,
-      table: rule.table,
-      column: rule.column,
-      ruleName: rule.name,
-      message: `Column "${rule.column}" not found in data`,
-      severity: rule.severity,
-      ruleId: rule.id,
+      table: ruleCopy.table,
+      column: ruleCopy.column,
+      ruleName: ruleCopy.name,
+      message: `Column "${ruleCopy.column}" not found in data`,
+      severity: ruleCopy.severity,
+      ruleId: ruleCopy.id,
     }
   }
 
-  const value = row[rule.column]
-  console.log(`Date value for column ${rule.column}:`, value, typeof value)
+  const value = row[ruleCopy.column]
+  console.log(`Date value for column ${ruleCopy.column}:`, value, typeof value)
 
   // If the value is undefined or null, we can't validate it as a date
   if (value === undefined || value === null || value === "") {
     // For required date fields, null/undefined/empty is invalid
-    const isRequired = rule.parameters.required === true
+    const isRequired = ruleCopy.parameters.required === true
     if (isRequired) {
       return {
         rowIndex,
-        table: rule.table,
-        column: rule.column,
-        ruleName: rule.name,
+        table: ruleCopy.table,
+        column: ruleCopy.column,
+        ruleName: ruleCopy.name,
         message: "Date is required and must be valid",
-        severity: rule.severity,
-        ruleId: rule.id,
+        severity: ruleCopy.severity,
+        ruleId: ruleCopy.id,
       }
     } else {
       // If date is null/undefined/empty and not required, skip validation
@@ -111,26 +134,30 @@ function validateDateRuleWithSafeguards(
     try {
       dateValue = new Date(value)
       if (isNaN(dateValue.getTime())) {
+        console.error(`Invalid date string: "${value}"`)
         dateValue = null
+      } else {
+        console.log(`Successfully parsed date string: "${value}" to:`, dateValue)
       }
     } catch (e) {
+      console.error(`Error parsing date string: "${value}"`, e)
       dateValue = null
     }
   }
 
   // For required date fields, null/undefined/empty is invalid
-  const isRequired = rule.parameters.required === true
+  const isRequired = ruleCopy.parameters.required === true
 
   if (!dateValue) {
     if (isRequired) {
       return {
         rowIndex,
-        table: rule.table,
-        column: rule.column,
-        ruleName: rule.name,
+        table: ruleCopy.table,
+        column: ruleCopy.column,
+        ruleName: ruleCopy.name,
         message: "Date is required and must be valid",
-        severity: rule.severity,
-        ruleId: rule.id,
+        severity: ruleCopy.severity,
+        ruleId: ruleCopy.id,
       }
     } else {
       // If date is null/undefined/empty and not required, skip validation
@@ -141,13 +168,14 @@ function validateDateRuleWithSafeguards(
   let isValid = true
   let message = ""
 
-  switch (rule.ruleType) {
+  switch (ruleCopy.ruleType) {
     case "date-before":
-      if (!rule.parameters.compareDate) {
+      if (!ruleCopy.parameters.compareDate) {
         isValid = true
         message = "No compare date specified"
       } else {
-        const compareDate = new Date(rule.parameters.compareDate)
+        const compareDate = new Date(ruleCopy.parameters.compareDate)
+        console.log(`Comparing date ${dateValue} with ${compareDate}`)
 
         // Create copies to avoid modifying the original dates
         const dateValueCopy = new Date(dateValue.getTime())
@@ -157,21 +185,24 @@ function validateDateRuleWithSafeguards(
         const dateValueTime = new Date(dateValueCopy.setHours(0, 0, 0, 0)).getTime()
         const compareDateTime = new Date(compareDateCopy.setHours(0, 0, 0, 0)).getTime()
 
-        const inclusive = rule.parameters.inclusive === true
+        const inclusive = ruleCopy.parameters.inclusive === true
         isValid = inclusive ? dateValueTime <= compareDateTime : dateValueTime < compareDateTime
 
+        console.log(`Date comparison: ${dateValueTime} ${inclusive ? "<=" : "<"} ${compareDateTime} = ${isValid}`)
+
         if (!isValid) {
-          message = `Date must be ${inclusive ? "on or " : ""}before ${rule.parameters.compareDate}`
+          message = `Date must be ${inclusive ? "on or " : ""}before ${ruleCopy.parameters.compareDate}`
         }
       }
       break
 
     case "date-after":
-      if (!rule.parameters.compareDate) {
+      if (!ruleCopy.parameters.compareDate) {
         isValid = true
         message = "No compare date specified"
       } else {
-        const compareDate = new Date(rule.parameters.compareDate)
+        const compareDate = new Date(ruleCopy.parameters.compareDate)
+        console.log(`Comparing date ${dateValue} with ${compareDate}`)
 
         // Create copies to avoid modifying the original dates
         const dateValueCopy = new Date(dateValue.getTime())
@@ -181,22 +212,25 @@ function validateDateRuleWithSafeguards(
         const dateValueTime = new Date(dateValueCopy.setHours(0, 0, 0, 0)).getTime()
         const compareDateTime = new Date(compareDateCopy.setHours(0, 0, 0, 0)).getTime()
 
-        const inclusive = rule.parameters.inclusive === true
+        const inclusive = ruleCopy.parameters.inclusive === true
         isValid = inclusive ? dateValueTime >= compareDateTime : dateValueTime > compareDateTime
 
+        console.log(`Date comparison: ${dateValueTime} ${inclusive ? ">=" : ">"} ${compareDateTime} = ${isValid}`)
+
         if (!isValid) {
-          message = `Date must be ${inclusive ? "on or " : ""}after ${rule.parameters.compareDate}`
+          message = `Date must be ${inclusive ? "on or " : ""}after ${ruleCopy.parameters.compareDate}`
         }
       }
       break
 
     case "date-between":
-      if (!rule.parameters.startDate || !rule.parameters.endDate) {
+      if (!ruleCopy.parameters.startDate || !ruleCopy.parameters.endDate) {
         isValid = true
         message = "Start or end date not specified"
       } else {
-        const startDate = new Date(rule.parameters.startDate)
-        const endDate = new Date(rule.parameters.endDate)
+        const startDate = new Date(ruleCopy.parameters.startDate)
+        const endDate = new Date(ruleCopy.parameters.endDate)
+        console.log(`Checking if date ${dateValue} is between ${startDate} and ${endDate}`)
 
         // Create copies to avoid modifying the original dates
         const dateValueCopy = new Date(dateValue.getTime())
@@ -208,14 +242,20 @@ function validateDateRuleWithSafeguards(
         const startDateTime = new Date(startDateCopy.setHours(0, 0, 0, 0)).getTime()
         const endDateTime = new Date(endDateCopy.setHours(0, 0, 0, 0)).getTime()
 
-        const inclusive = rule.parameters.inclusive === true
+        const inclusive = ruleCopy.parameters.inclusive === true
 
         isValid = inclusive
           ? dateValueTime >= startDateTime && dateValueTime <= endDateTime
           : dateValueTime > startDateTime && dateValueTime < endDateTime
 
+        console.log(
+          `Date between check: ${startDateTime} ${inclusive ? "<=" : "<"} ${dateValueTime} ${
+            inclusive ? "<=" : "<"
+          } ${endDateTime} = ${isValid}`,
+        )
+
         if (!isValid) {
-          message = `Date must be ${inclusive ? "on or " : ""}between ${rule.parameters.startDate} and ${rule.parameters.endDate}`
+          message = `Date must be ${inclusive ? "on or " : ""}between ${ruleCopy.parameters.startDate} and ${ruleCopy.parameters.endDate}`
         }
       }
       break
@@ -235,24 +275,24 @@ function validateDateRuleWithSafeguards(
   if (!isValid) {
     return {
       rowIndex,
-      table: rule.table,
-      column: rule.column,
-      ruleName: rule.name,
+      table: ruleCopy.table,
+      column: ruleCopy.column,
+      ruleName: ruleCopy.name,
       message,
-      severity: rule.severity,
-      ruleId: rule.id,
+      severity: ruleCopy.severity,
+      ruleId: ruleCopy.id,
     }
   }
 
   // For successful validations, return a success result
   return {
     rowIndex,
-    table: rule.table,
-    column: rule.column,
-    ruleName: rule.name,
+    table: ruleCopy.table,
+    column: ruleCopy.column,
+    ruleName: ruleCopy.name,
     message: "Passed date validation",
     severity: "success",
-    ruleId: rule.id,
+    ruleId: ruleCopy.id,
   }
 }
 
@@ -1921,6 +1961,17 @@ function validateEnum(value: any, allowedValues?: any[]): { isValid: boolean; me
     return { isValid: true, message: "" }
   }
 
+  // Check if allowedValues is actually an array
+  if (!Array.isArray(allowedValues)) {
+    console.error("validateEnum received non-array allowedValues:", allowedValues)
+    // Convert to array if possible, or use empty array as fallback
+    if (typeof allowedValues === "object") {
+      allowedValues = Object.values(allowedValues)
+    } else {
+      allowedValues = [allowedValues]
+    }
+  }
+
   const isValid = allowedValues.includes(value)
   return {
     isValid,
@@ -2541,10 +2592,19 @@ function validateDateBetween(
   }
 }
 
-function validateDateFormat(value: any, format?: string, customFormat?: string): { isValid: boolean; message: string } {
-  console.log("validateDateFormat called with:", { value, format, customFormat })
+function validateDateFormat(
+  value: any,
+  format?: string,
+  customFormat?: string,
+  required?: boolean,
+): { isValid: boolean; message: string } {
+  console.log("validateDateFormat called with:", { value, format, customFormat, required })
 
   if (value === null || value === undefined || value === "") {
+    // If the field is required, empty values are invalid
+    if (required === true) {
+      return { isValid: false, message: "Field is required and must be a valid date" }
+    }
     return { isValid: true, message: "" }
   }
 
@@ -2566,6 +2626,16 @@ function validateDateFormat(value: any, format?: string, customFormat?: string):
     return {
       isValid: false,
       message: `Value must be a string for format validation, got ${typeof value}: ${value}`,
+    }
+  }
+
+  // If format is "any", just check if the string can be parsed as a valid date
+  if (format === "any") {
+    const date = new Date(value)
+    const isValid = !isNaN(date.getTime())
+    return {
+      isValid,
+      message: isValid ? "" : "Value must be a valid date",
     }
   }
 

@@ -98,6 +98,14 @@ export function SimplifiedDateRuleEditor({ rule, tables, datasets, onSave, onCan
       return false
     }
 
+    // Additional validation based on rule type
+    if (editedRule.ruleType === "date-between") {
+      if (!editedRule.parameters.startDate || !editedRule.parameters.endDate) {
+        setValidationError("Please select both start and end dates")
+        return false
+      }
+    }
+
     return true
   }
 
@@ -247,8 +255,14 @@ export function SimplifiedDateRuleEditor({ rule, tables, datasets, onSave, onCan
                   <SelectItem value="iso">ISO (YYYY-MM-DD)</SelectItem>
                   <SelectItem value="us">US (MM/DD/YYYY)</SelectItem>
                   <SelectItem value="eu">EU (DD/MM/YYYY)</SelectItem>
+                  <SelectItem value="any">Any Valid Date</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-gray-500">
+                {editedRule.parameters.format === "any"
+                  ? "Validates that the value can be parsed as a valid date without enforcing a specific format."
+                  : "Select a specific date format to enforce."}
+              </p>
             </div>
 
             <div className="flex items-center space-x-2">
@@ -364,6 +378,24 @@ export function SimplifiedDateRuleEditor({ rule, tables, datasets, onSave, onCan
             onChange={(e) => handleDescriptionChange(e.target.value)}
             placeholder="Describe what this rule checks for..."
           />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="severity" className="font-medium">
+            Severity
+          </Label>
+          <Select
+            value={editedRule.severity}
+            onValueChange={(value) => setEditedRule((prev) => ({ ...prev, severity: value }))}
+          >
+            <SelectTrigger id="severity">
+              <SelectValue placeholder="Select severity" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="failure">Failure</SelectItem>
+              <SelectItem value="warning">Warning</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </CardContent>
       <CardFooter className="flex justify-end space-x-2">

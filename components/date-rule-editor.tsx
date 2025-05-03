@@ -77,8 +77,7 @@ export function DateRuleEditor({ rule, tables, datasets, onSave, onCancel }: Dat
     }))
   }
 
-  // Handle save
-  const handleSave = () => {
+  const validateRule = (): boolean => {
     // Validate the rule before saving
     if (!editedRule.column) {
       setValidationError("Please select a column for this date rule")
@@ -89,20 +88,28 @@ export function DateRuleEditor({ rule, tables, datasets, onSave, onCancel }: Dat
           errorElement.scrollIntoView({ behavior: "smooth", block: "center" })
         }
       }, 100)
-      return
+      return false
     }
 
     // Additional validation based on rule type
     if (editedRule.ruleType === "date-before" || editedRule.ruleType === "date-after") {
       if (!editedRule.parameters.compareDate) {
         setValidationError("Please select a comparison date")
-        return
+        return false
       }
     } else if (editedRule.ruleType === "date-between") {
       if (!editedRule.parameters.startDate || !editedRule.parameters.endDate) {
         setValidationError("Please select both start and end dates")
-        return
+        return false
       }
+    }
+    return true
+  }
+
+  // Handle save
+  const handleSave = () => {
+    if (!validateRule()) {
+      return
     }
 
     console.log("Saving date rule with column:", editedRule.column)
@@ -242,8 +249,14 @@ export function DateRuleEditor({ rule, tables, datasets, onSave, onCancel }: Dat
                   <SelectItem value="us">US (MM/DD/YYYY)</SelectItem>
                   <SelectItem value="eu">EU (DD/MM/YYYY)</SelectItem>
                   <SelectItem value="custom">Custom Format</SelectItem>
+                  <SelectItem value="any">Any Valid Date</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-gray-500">
+                {editedRule.parameters.format === "any"
+                  ? "Validates that the value can be parsed as a valid date without enforcing a specific format."
+                  : "Select a specific date format to enforce."}
+              </p>
             </div>
 
             {editedRule.parameters.format === "custom" && (
@@ -367,6 +380,24 @@ export function DateRuleEditor({ rule, tables, datasets, onSave, onCancel }: Dat
         <div className="border p-4 rounded-md space-y-4">
           <h3 className="font-medium">Rule Parameters</h3>
           {renderParameters()}
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="severity" className="font-medium">
+            Severity
+          </Label>
+          <Select
+            value={editedRule.severity}
+            onValueChange={(value) => setEditedRule((prev) => ({ ...prev, severity: value }))}
+          >
+            <SelectTrigger id="severity">
+              <SelectValue placeholder="Select severity" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="failure">Failure</SelectItem>
+              <SelectItem value="warning">Warning</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="space-y-2">

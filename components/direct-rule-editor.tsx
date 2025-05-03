@@ -1,11 +1,8 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Dialog, DialogContent } from "@/components/ui/dialog"
-import { RuleForm } from "@/components/rule-form"
-import type { DataQualityRule, DataTables, ValueList } from "@/lib/types"
 import { SimplifiedDateRuleEditor } from "@/components/simplified-date-rule-editor"
-import { toast } from "@/components/ui/use-toast"
+import type { DataQualityRule, DataTables, ValueList } from "@/lib/types"
 
 interface DirectRuleEditorProps {
   ruleId: string | null
@@ -26,93 +23,46 @@ export function DirectRuleEditor({
   onUpdateRule,
   onCancel,
 }: DirectRuleEditorProps) {
-  const [open, setOpen] = useState(false)
   const [rule, setRule] = useState<DataQualityRule | null>(null)
-  const [isDateRule, setIsDateRule] = useState(false)
 
-  // When ruleId changes, find the rule and open the dialog
+  // Update the rule when the ruleId changes
   useEffect(() => {
     if (ruleId) {
       const foundRule = rules.find((r) => r.id === ruleId)
       if (foundRule) {
+        console.log("DirectRuleEditor: Found rule to edit:", foundRule)
         // Create a deep copy to avoid reference issues
-        const ruleCopy = JSON.parse(JSON.stringify(foundRule))
-        console.log("Found rule to edit:", ruleCopy)
-
-        // Check if it's a date rule
-        const isDate = ruleCopy.ruleType?.startsWith("date-") || false
-        setIsDateRule(isDate)
-
-        if (isDate) {
-          console.log("Editing date rule with column:", ruleCopy.column)
-        }
-
-        setRule(ruleCopy)
-        setOpen(true)
+        setRule(JSON.parse(JSON.stringify(foundRule)))
       } else {
-        console.error("Rule not found:", ruleId)
-        setOpen(false)
+        console.error("DirectRuleEditor: Rule not found for ID:", ruleId)
+        setRule(null)
       }
     } else {
-      setOpen(false)
       setRule(null)
-      setIsDateRule(false)
     }
   }, [ruleId, rules])
 
-  // Handle dialog close
-  const handleClose = () => {
-    setOpen(false)
-    onCancel()
+  // If no rule is selected, don't render anything
+  if (!rule) {
+    return null
   }
 
-  // Handle rule update
-  const handleUpdate = (updatedRule: DataQualityRule) => {
-    // Special validation for date rules
-    if (updatedRule.ruleType?.startsWith("date-") && !updatedRule.column) {
-      toast({
-        title: "Error",
-        description: "Please select a column for the date rule",
-        variant: "destructive",
-      })
-      return
-    }
+  // Check if this is a date rule
+  const isDateRule = rule.ruleType.startsWith("date-")
 
-    console.log("Updating rule with column:", updatedRule.column)
-    onUpdateRule(updatedRule)
-    setOpen(false)
+  if (isDateRule) {
+    // Use the simplified date rule editor for better UX
+    return (
+      <SimplifiedDateRuleEditor
+        rule={rule}
+        tables={tables}
+        datasets={datasets}
+        onSave={onUpdateRule}
+        onCancel={onCancel}
+      />
+    )
   }
 
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(open) => {
-        if (!open) {
-          handleClose()
-        }
-        setOpen(open)
-      }}
-    >
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" onInteractOutside={(e) => e.preventDefault()}>
-        {rule && isDateRule ? (
-          <SimplifiedDateRuleEditor
-            rule={rule}
-            tables={tables}
-            datasets={datasets}
-            onSave={handleUpdate}
-            onCancel={handleClose}
-          />
-        ) : rule ? (
-          <RuleForm
-            initialRule={rule}
-            tables={tables}
-            datasets={datasets}
-            valueLists={valueLists}
-            onSubmit={handleUpdate}
-            onCancel={handleClose}
-          />
-        ) : null}
-      </DialogContent>
-    </Dialog>
-  )
+  // For other rule types, we could add specialized editors here
+  return null
 }

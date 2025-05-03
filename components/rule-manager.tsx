@@ -270,10 +270,6 @@ export function RuleManager({
               <CardTitle>Edit Rule</CardTitle>
             </CardHeader>
             <CardContent>
-              {console.log(
-                "Editing rule in RuleManager:",
-                rules.find((r) => r.id === actualEditingRuleId),
-              )}
               <RuleForm
                 initialRule={rules.find((r) => r.id === actualEditingRuleId)}
                 onSubmit={handleUpdateRule}

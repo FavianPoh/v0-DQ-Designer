@@ -431,6 +431,11 @@ export function RuleForm(props: RuleFormProps) {
       // Special handling for date rules
       if (initialRule.ruleType?.startsWith("date-")) {
         console.log("Date rule detected in RuleForm, column =", initialRule.column)
+
+        // Ensure format parameter is properly loaded for date-format rules
+        if (initialRule.ruleType === "date-format" && initialRule.parameters) {
+          console.log("Date format rule detected, format =", initialRule.parameters.format)
+        }
       }
 
       setRule(ruleCopy)
@@ -508,6 +513,19 @@ export function RuleForm(props: RuleFormProps) {
     }
   }, [initialRule, datasets, tables])
 
+  // Ensure date rules always have a column selected
+  useEffect(() => {
+    if (rule.ruleType?.startsWith("date-") && !rule.column && tableColumns[rule.table]?.length > 0) {
+      console.log("Auto-selecting column for date rule:", tableColumns[rule.table][0])
+      setRule((prev) => ({ ...prev, column: tableColumns[rule.table][0] }))
+
+      // Notify parent about column change
+      if (props.onColumnChange) {
+        props.onColumnChange(tableColumns[rule.table][0])
+      }
+    }
+  }, [rule.ruleType, rule.table, rule.column, tableColumns, props.onColumnChange])
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
     setRule((prev) => ({ ...prev, [name]: value }))
@@ -532,12 +550,30 @@ export function RuleForm(props: RuleFormProps) {
       ruleType: value,
       parameters: {}, // Reset parameters when rule type changes
     }))
+
+    // For date rules, ensure a column is selected
+    if (value.startsWith("date-") && !rule.column && tableColumns[rule.table]?.length > 0) {
+      const firstColumn = tableColumns[rule.table][0]
+      console.log("Setting initial column for date rule:", firstColumn)
+      setRule((prev) => ({
+        ...prev,
+        ruleType: value,
+        column: firstColumn,
+        parameters: {}, // Reset parameters when rule type changes
+      }))
+
+      // Notify parent about column change
+      if (props.onColumnChange) {
+        props.onColumnChange(firstColumn)
+      }
+    }
+
     setConditions([]) // Reset conditions when rule type changes
     setAdditionalConditions([]) // Reset additional conditions when rule type changes
     setCrossTableConditions([]) // Reset cross-table conditions when rule type changes
     setColumnConditions([
       {
-        column: rule.column,
+        column: rule.column || (tableColumns[rule.table]?.length > 0 ? tableColumns[rule.table][0] : ""),
         ruleType: value,
         parameters: {},
         logicalOperator: "AND",
@@ -782,10 +818,45 @@ export function RuleForm(props: RuleFormProps) {
 
       // For date rules, ensure column is not empty
       if (!rule.column) {
-        console.error("Missing column for date rule in handleSubmit")
+        // Try to get column from columnConditions
+        const columnFromConditions = columnConditions.length > 0 ? columnConditions[0].column : null
+
+        // If we have available columns, auto-select the first one
+        if (columnFromConditions) {
+          console.log("Auto-selecting column from conditions:", columnFromConditions)
+          setRule((prev) => ({ ...prev, column: columnFromConditions }))
+
+          // Notify parent about column change
+          if (props.onColumnChange) {
+            props.onColumnChange(columnFromConditions)
+          }
+        } else if (tableColumns[rule.table]?.length > 0) {
+          // If no column in conditions but table has columns, select the first one
+          const firstAvailableColumn = tableColumns[rule.table][0]
+          console.log("Auto-selecting first available column:", firstAvailableColumn)
+          setRule((prev) => ({ ...prev, column: firstAvailableColumn }))
+
+          // Notify parent about column change
+          if (props.onColumnChange) {
+            props.onColumnChange(firstAvailableColumn)
+          }
+        } else {
+          console.error("Missing column for date rule in handleSubmit and no columns available to auto-select")
+          toast({
+            title: "Error",
+            description: "Please select a column for the date rule",
+            variant: "destructive",
+          })
+          return // Prevent submission
+        }
+      }
+
+      // Double check that we now have a column
+      if (!rule.column) {
+        console.error("Still missing column for date rule after auto-selection attempt")
         toast({
           title: "Error",
-          description: "Please select a column for the date rule",
+          description: "Unable to select a column for the date rule. Please try again.",
           variant: "destructive",
         })
         return // Prevent submission
@@ -794,6 +865,25 @@ export function RuleForm(props: RuleFormProps) {
       // Notify parent about column change one more time to ensure it's captured
       if (props.onColumnChange) {
         props.onColumnChange(rule.column)
+      }
+    }
+
+    // Special handling for date-between rules
+    if (rule.ruleType === "date-between") {
+      console.log("Date Between rule submission:", {
+        startDate: rule.parameters.startDate,
+        endDate: rule.parameters.endDate,
+        inclusive: rule.parameters.inclusive,
+      })
+
+      // Ensure startDate and endDate are properly set
+      if (!rule.parameters.startDate || !rule.parameters.endDate) {
+        toast({
+          title: "Error",
+          description: "Please specify both start and end dates for the Date Between rule",
+          variant: "destructive",
+        })
+        return // Prevent submission
       }
     }
 
@@ -1417,18 +1507,75 @@ export function RuleForm(props: RuleFormProps) {
                 onChange={(e) => handleParameterChange("endDate", e.target.value)}
               />
             </div>
+            <div className="flex items-center space-x-2 mt-2">
+              <Checkbox
+                id="inclusive"
+                checked={rule.parameters.inclusive === true}
+                onCheckedChange={(checked) => handleParameterChange("inclusive", checked === true)}
+              />
+              <Label htmlFor="inclusive" className="text-sm font-normal">
+                Include boundary dates (on or between)
+              </Label>
+            </div>
+            {rule.parameters.startDate && rule.parameters.endDate && (
+              <div className="mt-2 p-3 bg-gray-50 rounded-md">
+                <p className="text-sm text-gray-700">
+                  Date must be {rule.parameters.inclusive ? "on or " : ""}between {rule.parameters.startDate} and{" "}
+                  {rule.parameters.endDate}
+                </p>
+              </div>
+            )}
           </>
         )
       case "date-format":
         return (
           <div>
             <Label htmlFor="format">Format</Label>
-            <Input
-              type="text"
-              id="format"
-              value={rule.parameters.format || ""}
-              onChange={(e) => handleParameterChange("format", e.target.value)}
-            />
+            <Select
+              value={rule.parameters.format || "iso"}
+              onValueChange={(value) => handleParameterChange("format", value)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select a date format" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="any">Any Valid Date</SelectItem>
+                <SelectItem value="iso">ISO (YYYY-MM-DD)</SelectItem>
+                <SelectItem value="us">US (MM/DD/YYYY)</SelectItem>
+                <SelectItem value="eu">EU (DD/MM/YYYY)</SelectItem>
+                <SelectItem value="custom">Custom Format</SelectItem>
+              </SelectContent>
+            </Select>
+            {rule.parameters.format === "custom" && (
+              <div className="mt-2">
+                <Label htmlFor="customFormat">Custom Format Pattern</Label>
+                <Input
+                  type="text"
+                  id="customFormat"
+                  value={rule.parameters.customFormat || ""}
+                  onChange={(e) => handleParameterChange("customFormat", e.target.value)}
+                  placeholder="e.g., YYYY/MM/DD"
+                />
+              </div>
+            )}
+            <p className="text-sm text-muted-foreground mt-1">
+              {rule.parameters.format === "any" &&
+                "Checks if the value can be parsed as a valid date without enforcing a specific format."}
+              {rule.parameters.format === "iso" && "Enforces ISO date format (YYYY-MM-DD)."}
+              {rule.parameters.format === "us" && "Enforces US date format (MM/DD/YYYY)."}
+              {rule.parameters.format === "eu" && "Enforces European date format (DD/MM/YYYY)."}
+              {rule.parameters.format === "custom" && "Enforces a custom date format pattern."}
+            </p>
+            <div className="flex items-center space-x-2 mt-3">
+              <Checkbox
+                id="required"
+                checked={rule.parameters.required === true}
+                onCheckedChange={(checked) => handleParameterChange("required", checked === true)}
+              />
+              <Label htmlFor="required" className="text-sm font-normal">
+                Field is required (must be a valid date)
+              </Label>
+            </div>
           </div>
         )
       case "math-operation":
@@ -2172,21 +2319,70 @@ export function RuleForm(props: RuleFormProps) {
             </div>
           </>
         )
+      // Also update the "date-format" case in the renderParameterFields function for consistency
       case "date-format":
         return (
           <div>
             <Label htmlFor={`format-${index}`}>Format</Label>
-            <Input
-              type="text"
-              id={`format-${index}`}
-              value={columnConditions[index]?.parameters?.format || ""}
-              onChange={(e) =>
+            <Select
+              onValueChange={(value) =>
                 handleColumnConditionChange(index, "parameters", {
                   ...columnConditions[index].parameters,
-                  format: e.target.value,
+                  format: value,
                 })
               }
-            />
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select a date format" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="any">Any Valid Date</SelectItem>
+                <SelectItem value="ISO">ISO (YYYY-MM-DD)</SelectItem>
+                <SelectItem value="US">US (MM/DD/YYYY)</SelectItem>
+                <SelectItem value="EU">EU (DD/MM/YYYY)</SelectItem>
+                <SelectItem value="custom">Custom Format</SelectItem>
+              </SelectContent>
+            </Select>
+            {columnConditions[index]?.parameters?.format === "custom" && (
+              <div className="mt-2">
+                <Label htmlFor={`customFormat-${index}`}>Custom Format Pattern</Label>
+                <Input
+                  type="text"
+                  id={`customFormat-${index}`}
+                  value={columnConditions[index]?.parameters?.customFormat || ""}
+                  onChange={(e) =>
+                    handleColumnConditionChange(index, "parameters", {
+                      ...columnConditions[index].parameters,
+                      customFormat: e.target.value,
+                    })
+                  }
+                  placeholder="e.g., YYYY/MM/DD"
+                />
+              </div>
+            )}
+            <p className="text-sm text-muted-foreground mt-1">
+              {columnConditions[index]?.parameters?.format === "any" &&
+                "Checks if the value can be parsed as a valid date without enforcing a specific format."}
+              {columnConditions[index]?.parameters?.format === "ISO" && "Enforces ISO date format (YYYY-MM-DD)."}
+              {columnConditions[index]?.parameters?.format === "US" && "Enforces US date format (MM/DD/YYYY)."}
+              {columnConditions[index]?.parameters?.format === "EU" && "Enforces European date format (DD/MM/YYYY)."}
+              {columnConditions[index]?.parameters?.format === "custom" && "Enforces a custom date format pattern."}
+            </p>
+            <div className="flex items-center space-x-2 mt-3">
+              <Checkbox
+                id={`required-${index}`}
+                checked={columnConditions[index]?.parameters?.required === true}
+                onCheckedChange={(checked) =>
+                  handleColumnConditionChange(index, "parameters", {
+                    ...columnConditions[index].parameters,
+                    required: checked === true,
+                  })
+                }
+              />
+              <Label htmlFor={`required-${index}`} className="text-sm font-normal">
+                Field is required (must be a valid date)
+              </Label>
+            </div>
           </div>
         )
       case "math-operation":

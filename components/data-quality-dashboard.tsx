@@ -376,6 +376,32 @@ export function DataQualityDashboard() {
             return
           }
         }
+
+        // Ensure date parameters are properly formatted
+        if (ruleCopy.ruleType === "date-before" || ruleCopy.ruleType === "date-after") {
+          if (ruleCopy.parameters.compareDate) {
+            // Ensure compareDate is in YYYY-MM-DD format
+            const dateObj = new Date(ruleCopy.parameters.compareDate)
+            if (!isNaN(dateObj.getTime())) {
+              ruleCopy.parameters.compareDate = dateObj.toISOString().split("T")[0]
+            }
+          }
+        } else if (ruleCopy.ruleType === "date-between") {
+          if (ruleCopy.parameters.startDate) {
+            // Ensure startDate is in YYYY-MM-DD format
+            const startDateObj = new Date(ruleCopy.parameters.startDate)
+            if (!isNaN(startDateObj.getTime())) {
+              ruleCopy.parameters.startDate = startDateObj.toISOString().split("T")[0]
+            }
+          }
+          if (ruleCopy.parameters.endDate) {
+            // Ensure endDate is in YYYY-MM-DD format
+            const endDateObj = new Date(ruleCopy.parameters.endDate)
+            if (!isNaN(endDateObj.getTime())) {
+              ruleCopy.parameters.endDate = endDateObj.toISOString().split("T")[0]
+            }
+          }
+        }
       }
 
       const finalRule = {
@@ -865,6 +891,7 @@ export function DataQualityDashboard() {
       if (ruleCopy.ruleType?.startsWith("date-")) {
         console.log("Updating date rule:", ruleCopy)
         console.log("Column value:", ruleCopy.column)
+        console.log("Parameters:", ruleCopy.parameters)
 
         // Ensure column is not empty
         if (!ruleCopy.column) {
@@ -895,7 +922,7 @@ export function DataQualityDashboard() {
             } else if (availableColumns.length > 0) {
               // If no date-like columns, use the first available column
               ruleCopy.column = availableColumns[0]
-              console.log(`Auto-selected first available column: ${ruleCopy.column}`)
+              console.log(`Auto-selected column for date rule: ${ruleCopy.column}`)
 
               toast({
                 title: "Column Auto-Selected",
@@ -919,6 +946,32 @@ export function DataQualityDashboard() {
             })
             setIsSaving(false)
             return
+          }
+        }
+
+        // Ensure date parameters are properly formatted
+        if (ruleCopy.ruleType === "date-before" || ruleCopy.ruleType === "date-after") {
+          if (ruleCopy.parameters.compareDate) {
+            // Ensure compareDate is in YYYY-MM-DD format
+            const dateObj = new Date(ruleCopy.parameters.compareDate)
+            if (!isNaN(dateObj.getTime())) {
+              ruleCopy.parameters.compareDate = dateObj.toISOString().split("T")[0]
+            }
+          }
+        } else if (ruleCopy.ruleType === "date-between") {
+          if (ruleCopy.parameters.startDate) {
+            // Ensure startDate is in YYYY-MM-DD format
+            const startDateObj = new Date(ruleCopy.parameters.startDate)
+            if (!isNaN(startDateObj.getTime())) {
+              ruleCopy.parameters.startDate = startDateObj.toISOString().split("T")[0]
+            }
+          }
+          if (ruleCopy.parameters.endDate) {
+            // Ensure endDate is in YYYY-MM-DD format
+            const endDateObj = new Date(ruleCopy.parameters.endDate)
+            if (!isNaN(endDateObj.getTime())) {
+              ruleCopy.parameters.endDate = endDateObj.toISOString().split("T")[0]
+            }
           }
         }
       }
