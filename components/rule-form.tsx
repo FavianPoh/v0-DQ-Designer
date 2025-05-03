@@ -20,6 +20,7 @@ import type {
 } from "@/lib/types"
 import { JavaScriptExplainer } from "./javascript-explainer"
 import { CrossColumnTestUtility } from "./cross-column-test-utility"
+import { toast } from "@/components/ui/use-toast"
 
 interface RuleFormProps {
   initialRule?: DataQualityRule
@@ -770,18 +771,96 @@ export function RuleForm(props: RuleFormProps) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
 
-    // Ensure logical operators are set before submitting
-    const validatedConditions = ensureLogicalOperators(rule.conditions)
-    const validatedAdditionalConditions = ensureLogicalOperators(rule.additionalConditions)
-    const validatedCrossTableConditions = ensureLogicalOperators(rule.crossTableConditions)
+    // Special handling for date rules
+    if (rule.ruleType?.startsWith("date-")) {
+      console.log("Date rule submission:", {
+        ruleType: rule.ruleType,
+        column: rule.column,
+        primaryColumn: columnConditions.length > 0 ? columnConditions[0].column : null,
+        allColumns: tableColumns[rule.table] || [],
+      })
+
+      // For date rules, ensure column is not empty
+      if (!rule.column) {
+        console.error("Missing column for date rule in handleSubmit")
+        toast({
+          title: "Error",
+          description: "Please select a column for the date rule",
+          variant: "destructive",
+        })
+        return // Prevent submission
+      }
+
+      // Notify parent about column change one more time to ensure it's captured
+      if (props.onColumnChange) {
+        props.onColumnChange(rule.column)
+      }
+    }
+
+    // For reference integrity rules, automatically create a cross-table condition
+    let finalCrossTableConditions = crossTableConditions
+    if (rule.ruleType === "reference-integrity" && rule.parameters.referenceTable && rule.parameters.referenceColumn) {
+      finalCrossTableConditions = [
+        {
+          table: rule.parameters.referenceTable,
+          column: rule.parameters.referenceColumn,
+          operator: "==",
+          value: null, // This will be replaced with the current row's value during validation
+          logicalOperator: "AND",
+        },
+      ]
+    }
+
+    // For composite reference, ensure the parameters include the source and reference columns
+    let finalParameters = { ...rule.parameters }
+    if (rule.ruleType === "composite-reference") {
+      finalParameters = {
+        ...finalParameters,
+        sourceTable: rule.parameters.sourceTable || rule.table,
+        sourceColumns: sourceColumns.filter(Boolean),
+        referenceColumns: referenceColumns.filter(Boolean),
+        orderIndependent: true, // Always set this flag for composite references
+      }
+
+      // For composite reference, use the sourceTable as the primary table
+      const primaryTable = rule.parameters.sourceTable || rule.table
+    }
+
+    // For unique values, ensure the parameters include the unique columns
+    if (rule.ruleType === "unique") {
+      finalParameters = {
+        ...finalParameters,
+        uniqueColumns: uniqueColumns.filter(Boolean),
+      }
+    }
+
+    // Get the primary table and column from the first column condition
+    const primaryTable = columnConditions.length > 0 ? columnConditions[0].table : tables[0] || ""
+    const primaryColumn = columnConditions.length > 0 ? columnConditions[0].column : rule.column || ""
+
+    // Special handling for date rules - double check
+    if (rule.ruleType?.startsWith("date-") && !primaryColumn) {
+      toast({
+        title: "Error",
+        description: "Please select a column for the date rule",
+        variant: "destructive",
+      })
+      return
+    }
 
     const finalRule = {
       ...rule,
-      conditions: validatedConditions,
-      additionalConditions: validatedAdditionalConditions,
-      crossTableConditions: validatedCrossTableConditions,
+      table: primaryTable,
+      column: primaryColumn || rule.column, // Ensure we use the rule.column if primaryColumn is empty
+      parameters: finalParameters,
+      secondaryColumns: selectedSecondaryColumns.length > 0 ? selectedSecondaryColumns : undefined,
+      conditions: rule.ruleType === "multi-column" ? conditions : undefined,
+      additionalConditions: additionalConditions.length > 0 ? additionalConditions : undefined,
+      crossTableConditions: finalCrossTableConditions.length > 0 ? finalCrossTableConditions : undefined,
+      columnConditions: columnConditions.length > 1 ? columnConditions : undefined,
     }
 
+    console.log("Submitting rule with column:", finalRule.column)
     onSubmit(finalRule)
   }
 
@@ -2428,14 +2507,13 @@ export function RuleForm(props: RuleFormProps) {
       </div>
       <div>
         <Label htmlFor="severity">Severity</Label>
-        <Select onValueChange={(value) => handleSelectChange("severity", value)}>
+        <Select value={rule.severity} onValueChange={(value) => handleSelectChange("severity", value)}>
           <SelectTrigger>
             <SelectValue placeholder="Select a severity" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="failure">Failure</SelectItem>
             <SelectItem value="warning">Warning</SelectItem>
-            <SelectItem value="info">Info</SelectItem>
           </SelectContent>
         </Select>
       </div>

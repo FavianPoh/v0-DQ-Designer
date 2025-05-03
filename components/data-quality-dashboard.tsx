@@ -324,13 +324,57 @@ export function DataQualityDashboard() {
         // Ensure column is not empty
         if (!ruleCopy.column) {
           console.error("Missing column for date rule in handleUpdateRule")
-          toast({
-            title: "Error",
-            description: "Column must be specified for date rules",
-            variant: "destructive",
-          })
-          setIsSaving(false)
-          return
+
+          // Try to find a suitable column from the dataset
+          if (ruleCopy.table && datasets[ruleCopy.table]?.length > 0) {
+            const availableColumns = Object.keys(datasets[ruleCopy.table][0])
+
+            // Look for date-like columns
+            const dateColumns = availableColumns.filter(
+              (col) =>
+                col.toLowerCase().includes("date") ||
+                col.toLowerCase().includes("time") ||
+                col.toLowerCase().includes("day"),
+            )
+
+            if (dateColumns.length > 0) {
+              // Use the first date-like column
+              ruleCopy.column = dateColumns[0]
+              console.log(`Auto-selected column for date rule: ${ruleCopy.column}`)
+
+              toast({
+                title: "Column Auto-Selected",
+                description: `Column "${ruleCopy.column}" was automatically selected for this date rule.`,
+                variant: "warning",
+              })
+            } else if (availableColumns.length > 0) {
+              // If no date-like columns, use the first available column
+              ruleCopy.column = availableColumns[0]
+              console.log(`Auto-selected first available column: ${ruleCopy.column}`)
+
+              toast({
+                title: "Column Auto-Selected",
+                description: `Column "${ruleCopy.column}" was automatically selected for this date rule.`,
+                variant: "warning",
+              })
+            } else {
+              toast({
+                title: "Error",
+                description: "Column must be specified for date rules and no columns are available",
+                variant: "destructive",
+              })
+              setIsSaving(false)
+              return
+            }
+          } else {
+            toast({
+              title: "Error",
+              description: "Column must be specified for date rules and no table data is available",
+              variant: "destructive",
+            })
+            setIsSaving(false)
+            return
+          }
         }
       }
 
@@ -825,13 +869,57 @@ export function DataQualityDashboard() {
         // Ensure column is not empty
         if (!ruleCopy.column) {
           console.error("Missing column for date rule in dashboard update")
-          toast({
-            title: "Error",
-            description: "Column must be specified for date rules",
-            variant: "destructive",
-          })
-          setIsSaving(false)
-          return
+
+          // Try to find a suitable column from the dataset
+          if (ruleCopy.table && datasets[ruleCopy.table]?.length > 0) {
+            const availableColumns = Object.keys(datasets[ruleCopy.table][0])
+
+            // Look for date-like columns
+            const dateColumns = availableColumns.filter(
+              (col) =>
+                col.toLowerCase().includes("date") ||
+                col.toLowerCase().includes("time") ||
+                col.toLowerCase().includes("day"),
+            )
+
+            if (dateColumns.length > 0) {
+              // Use the first date-like column
+              ruleCopy.column = dateColumns[0]
+              console.log(`Auto-selected column for date rule: ${ruleCopy.column}`)
+
+              toast({
+                title: "Column Auto-Selected",
+                description: `Column "${ruleCopy.column}" was automatically selected for this date rule.`,
+                variant: "warning",
+              })
+            } else if (availableColumns.length > 0) {
+              // If no date-like columns, use the first available column
+              ruleCopy.column = availableColumns[0]
+              console.log(`Auto-selected first available column: ${ruleCopy.column}`)
+
+              toast({
+                title: "Column Auto-Selected",
+                description: `Column "${ruleCopy.column}" was automatically selected for this date rule.`,
+                variant: "warning",
+              })
+            } else {
+              toast({
+                title: "Error",
+                description: "Column must be specified for date rules and no columns are available",
+                variant: "destructive",
+              })
+              setIsSaving(false)
+              return
+            }
+          } else {
+            toast({
+              title: "Error",
+              description: "Column must be specified for date rules and no table data is available",
+              variant: "destructive",
+            })
+            setIsSaving(false)
+            return
+          }
         }
       }
 

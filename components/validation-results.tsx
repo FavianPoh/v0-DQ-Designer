@@ -30,6 +30,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { RuleForm } from "@/components/rule-form"
 import { Input } from "@/components/ui/input"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { toast } from "@/components/ui/use-toast"
 
 interface ValidationResultsProps {
   results: ValidationResult[]
@@ -1167,15 +1168,66 @@ export function ValidationResults({
                             e.preventDefault()
                             const ruleId = result.ruleId || result.ruleName.match(/\[ID: ([a-zA-Z0-9-]+)\]$/)?.[1] || ""
                             if (ruleId) {
-                              setEditingRuleId(ruleId)
-                              setEditRuleDialogOpen(true)
+                              // Find the rule
+                              const rule = rules.find((r) => r.id === ruleId)
 
-                              // Call onEditRule if provided
-                              if (onEditRule) {
-                                const rule = rules.find((r) => r.id === ruleId)
-                                if (rule) {
+                              if (rule) {
+                                // Special handling for date rules
+                                if (rule.ruleType?.startsWith("date-") && !rule.column) {
+                                  console.log("Date rule missing column:", rule)
+
+                                  // Try to find a suitable column
+                                  if (rule.table && initialDatasets[rule.table]?.length > 0) {
+                                    const availableColumns = Object.keys(initialDatasets[rule.table][0])
+
+                                    // Look for date-like columns
+                                    const dateColumns = availableColumns.filter(
+                                      (col) =>
+                                        col.toLowerCase().includes("date") ||
+                                        col.toLowerCase().includes("time") ||
+                                        col.toLowerCase().includes("day"),
+                                    )
+
+                                    if (dateColumns.length > 0) {
+                                      // Use the first date-like column
+                                      rule.column = dateColumns[0]
+                                      console.log(`Auto-selected column for date rule: ${rule.column}`)
+
+                                      toast({
+                                        title: "Column Auto-Selected",
+                                        description: `Column "${rule.column}" was automatically selected for this date rule.`,
+                                        variant: "warning",
+                                      })
+                                    } else if (availableColumns.length > 0) {
+                                      // If no date-like columns, use the first available column
+                                      rule.column = availableColumns[0]
+                                      console.log(`Auto-selected first available column: ${rule.column}`)
+
+                                      toast({
+                                        title: "Column Auto-Selected",
+                                        description: `Column "${rule.column}" was automatically selected for this date rule.`,
+                                        variant: "warning",
+                                      })
+                                    }
+                                  }
+                                }
+
+                                // Make sure we're passing a complete rule object
+                                console.log("Opening rule editor with rule:", rule)
+                                setEditingRuleId(ruleId)
+                                setEditRuleDialogOpen(true)
+
+                                // Call onEditRule if provided
+                                if (onEditRule) {
                                   onEditRule(rule)
                                 }
+                              } else {
+                                console.error("Rule not found:", ruleId)
+                                toast({
+                                  title: "Error",
+                                  description: "Could not find the rule to edit",
+                                  variant: "destructive",
+                                })
                               }
                             }
                           }}
@@ -1339,6 +1391,8 @@ export function ValidationResults({
                 datasets={initialDatasets}
                 valueLists={valueLists}
                 onSubmit={(updatedRule) => {
+                  // Log the rule being submitted
+                  console.log("Submitting updated rule from ValidationResults:", updatedRule)
                   // Update directly:
                   onRuleClick(updatedRule)
                   setEditRuleDialogOpen(false)

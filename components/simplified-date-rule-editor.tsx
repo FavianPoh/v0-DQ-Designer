@@ -112,6 +112,17 @@ export function SimplifiedDateRuleEditor({ rule, tables, datasets, onSave, onCan
       return
     }
 
+    // Double-check column is selected
+    if (!editedRule.column) {
+      setValidationError("Please select a column for this date rule")
+      toast({
+        title: "Validation Error",
+        description: "Please select a column for the date rule",
+        variant: "destructive",
+      })
+      return
+    }
+
     // Ensure the rule has the ID in the name
     let finalName = editedRule.name
     if (editedRule.id && !finalName.includes(`[ID: ${editedRule.id}]`)) {
