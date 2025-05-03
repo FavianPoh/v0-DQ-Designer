@@ -55,6 +55,7 @@ export function EnhancedRuleForm({ initialRule, tables, onSubmit, onCancel }: En
 
   useEffect(() => {
     if (initialRule) {
+      console.log("Loading initial rule in EnhancedRuleForm:", initialRule)
       setRule(initialRule)
       setSelectedColumns(initialRule.additionalColumns || [])
     }
@@ -80,12 +81,19 @@ export function EnhancedRuleForm({ initialRule, tables, onSubmit, onCancel }: En
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
 
+    // Add validation for date rules
+    if (rule.ruleType.startsWith("date-") && !rule.column) {
+      alert("Please select a column for the date rule")
+      return
+    }
+
     // Add selected columns to the rule if any
     const finalRule = {
       ...rule,
       additionalColumns: selectedColumns.length > 0 ? selectedColumns : undefined,
     }
 
+    console.log("Submitting rule:", finalRule)
     onSubmit(finalRule)
   }
 

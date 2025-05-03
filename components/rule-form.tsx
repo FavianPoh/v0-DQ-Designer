@@ -421,6 +421,7 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
 
   useEffect(() => {
     if (initialRule) {
+      console.log("Loading initial rule:", initialRule)
       setRule(initialRule)
       if (initialRule.secondaryColumns) {
         setSelectedSecondaryColumns(initialRule.secondaryColumns)
@@ -1237,25 +1238,173 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
           </div>
         )
 
-      case "custom":
+      case "date-before":
         return (
-          <div className="space-y-2">
-            <Label htmlFor={`condition-${index}-functionBody`}>Custom Validation Function</Label>
-            <Textarea
-              id={`condition-${index}-functionBody`}
-              value={condition.parameters.functionBody ?? ""}
-              onChange={(e) => handleColumnConditionParameterChange(index, "functionBody", e.target.value)}
-              placeholder="return value !== null && typeof value === 'string' && value.length > 0;"
-              rows={4}
-            />
-            <p className="text-xs text-gray-500">
-              Write a function body that returns true if valid, false if invalid. The function has access to 'value'
-              (the cell value) and 'row' (the entire data row).
-            </p>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor={`condition-${index}-compareDate`}>Before Date</Label>
+              <Input
+                id={`condition-${index}-compareDate`}
+                type="date"
+                value={condition.parameters.compareDate || ""}
+                onChange={(e) => handleColumnConditionParameterChange(index, "compareDate", e.target.value)}
+              />
+              <p className="text-xs text-gray-500">Validates that the date value is before the specified date.</p>
+            </div>
 
-            {condition.parameters.functionBody && (
-              <JavaScriptExplainer code={condition.parameters.functionBody} columnName={condition.column} />
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id={`condition-${index}-inclusive`}
+                checked={condition.parameters.inclusive === true}
+                onCheckedChange={(checked) =>
+                  handleColumnConditionParameterChange(index, "inclusive", checked === true)
+                }
+              />
+              <Label htmlFor={`condition-${index}-inclusive`} className="text-sm font-normal">
+                Include the specified date (on or before)
+              </Label>
+            </div>
+
+            <div className="mt-2 p-3 bg-gray-50 rounded-md">
+              <p className="text-sm text-gray-700">
+                Date must be {condition.parameters.inclusive ? "on or " : ""}before{" "}
+                {condition.parameters.compareDate || "[select date]"}
+              </p>
+            </div>
+          </div>
+        )
+
+      case "date-after":
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor={`condition-${index}-compareDate`}>After Date</Label>
+              <Input
+                id={`condition-${index}-compareDate`}
+                type="date"
+                value={condition.parameters.compareDate || ""}
+                onChange={(e) => handleColumnConditionParameterChange(index, "compareDate", e.target.value)}
+              />
+              <p className="text-xs text-gray-500">Validates that the date value is after the specified date.</p>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id={`condition-${index}-inclusive`}
+                checked={condition.parameters.inclusive === true}
+                onCheckedChange={(checked) =>
+                  handleColumnConditionParameterChange(index, "inclusive", checked === true)
+                }
+              />
+              <Label htmlFor={`condition-${index}-inclusive`} className="text-sm font-normal">
+                Include the specified date (on or after)
+              </Label>
+            </div>
+
+            <div className="mt-2 p-3 bg-gray-50 rounded-md">
+              <p className="text-sm text-gray-700">
+                Date must be {condition.parameters.inclusive ? "on or " : ""}after{" "}
+                {condition.parameters.compareDate || "[select date]"}
+              </p>
+            </div>
+          </div>
+        )
+
+      case "date-between":
+        return (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor={`condition-${index}-startDate`}>Start Date</Label>
+                <Input
+                  id={`condition-${index}-startDate`}
+                  type="date"
+                  value={condition.parameters.startDate || ""}
+                  onChange={(e) => handleColumnConditionParameterChange(index, "startDate", e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor={`condition-${index}-endDate`}>End Date</Label>
+                <Input
+                  id={`condition-${index}-endDate`}
+                  type="date"
+                  value={condition.parameters.endDate || ""}
+                  onChange={(e) => handleColumnConditionParameterChange(index, "endDate", e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id={`condition-${index}-inclusive`}
+                checked={condition.parameters.inclusive === true}
+                onCheckedChange={(checked) =>
+                  handleColumnConditionParameterChange(index, "inclusive", checked === true)
+                }
+              />
+              <Label htmlFor={`condition-${index}-inclusive`} className="text-sm font-normal">
+                Include the boundary dates (on or between)
+              </Label>
+            </div>
+
+            <div className="mt-2 p-3 bg-gray-50 rounded-md">
+              <p className="text-sm text-gray-700">
+                Date must be {condition.parameters.inclusive ? "on or " : ""}between{" "}
+                {condition.parameters.startDate || "[start date]"} and {condition.parameters.endDate || "[end date]"}
+              </p>
+            </div>
+
+            <p className="text-xs text-gray-500">Validates that the date value falls within the specified range.</p>
+          </div>
+        )
+
+      case "date-format":
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor={`condition-${index}-format`}>Date Format</Label>
+              <Select
+                value={condition.parameters.format || "iso"}
+                onValueChange={(value) => handleColumnConditionParameterChange(index, "format", value)}
+              >
+                <SelectTrigger id={`condition-${index}-format`}>
+                  <SelectValue placeholder="Select date format" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="iso">ISO (YYYY-MM-DD)</SelectItem>
+                  <SelectItem value="us">US (MM/DD/YYYY)</SelectItem>
+                  <SelectItem value="eu">EU (DD/MM/YYYY)</SelectItem>
+                  <SelectItem value="custom">Custom Format</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {condition.parameters.format === "custom" && (
+              <div className="space-y-2">
+                <Label htmlFor={`condition-${index}-customFormat`}>Custom Format Pattern</Label>
+                <Input
+                  id={`condition-${index}-customFormat`}
+                  value={condition.parameters.customFormat || ""}
+                  onChange={(e) => handleColumnConditionParameterChange(index, "customFormat", e.target.value)}
+                  placeholder="e.g., YYYY-MM-DD HH:mm:ss"
+                />
+                <p className="text-xs text-gray-500">
+                  Use YYYY for year, MM for month, DD for day, HH for hour, mm for minute, ss for second.
+                </p>
+              </div>
             )}
+
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id={`condition-${index}-required`}
+                checked={condition.parameters.required === true}
+                onCheckedChange={(checked) => handleColumnConditionParameterChange(index, "required", checked === true)}
+              />
+              <Label htmlFor={`condition-${index}-required`} className="text-sm font-normal">
+                Field is required (must be a valid date)
+              </Label>
+            </div>
           </div>
         )
 

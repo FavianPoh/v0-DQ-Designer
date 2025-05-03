@@ -312,10 +312,39 @@ export function DataQualityDashboard() {
         updatedName = `${updatedRule.name} [ID: ${updatedRule.id}]`
       }
 
+      // Special handling for the problematic rule
+      if (updatedRule.id === "4bd3758a-7bd2-444f-9ea7-b7c126957ce0") {
+        console.log("Updating problematic date rule:", updatedRule)
+
+        // Ensure column is not empty
+        if (!updatedRule.column) {
+          toast({
+            title: "Error",
+            description: "Column must be specified for date rules",
+            variant: "destructive",
+          })
+          setIsSaving(false)
+          return
+        }
+      }
+
+      // Ensure column is not empty for any rule
+      if (!updatedRule.column) {
+        toast({
+          title: "Error",
+          description: "Column must be specified for the rule",
+          variant: "destructive",
+        })
+        setIsSaving(false)
+        return
+      }
+
       const finalRule = {
         ...updatedRule,
         name: updatedName,
       }
+
+      console.log("Updating rule:", finalRule)
 
       // Update on server
       const response = await fetch("/api/rules", {

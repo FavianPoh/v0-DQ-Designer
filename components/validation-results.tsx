@@ -97,6 +97,20 @@ export function ValidationResults({
     { key: "severity", label: "Severity" },
   ]
 
+  // Add this near the beginning of the component, after the state declarations
+  useEffect(() => {
+    console.log("ValidationResults - Current validation results:", initialResults)
+    // Log any date-related validation results
+    const dateResults = initialResults.filter(
+      (result) =>
+        result.ruleName.toLowerCase().includes("date") ||
+        (result.message && result.message.toLowerCase().includes("date")),
+    )
+    if (dateResults.length > 0) {
+      console.log("Date-related validation results:", dateResults)
+    }
+  }, [initialResults])
+
   // Sync the showPassingValidations state with the prop
   useEffect(() => {
     setShowPassingValidations(showPassingRules)
