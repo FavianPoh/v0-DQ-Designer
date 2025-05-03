@@ -1165,14 +1165,6 @@ export function DataQualityDashboard() {
             lists={valueLists}
             onAddList={handleAddList}
             onUpdateList={handleUpdateList}
-            isSaving={isSaving}
-          />
-        </TabsContent>
-        <TabsContent value="lists" className="pt-4">
-          <ListManager
-            lists={valueLists}
-            onAddList={handleAddList}
-            onUpdateList={handleUpdateList}
             onDeleteList={handleDeleteList}
             isSaving={isSaving}
           />

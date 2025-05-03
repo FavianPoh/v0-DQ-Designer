@@ -482,8 +482,24 @@ export function validateDataset(
 
       // Special handling for JavaScript formula rules
       if (rule.ruleType === "javascript-formula") {
-        // Get the formula from the rule parameters
-        const formula = rule.parameters.formula
+        // Get the formula from the rule parameters - check both possible parameter names
+        const formula = rule.parameters.formula || rule.parameters.javascriptExpression
+
+        if (!formula) {
+          console.error("JavaScript formula rule missing formula:", rule)
+
+          // Push a validation error for missing formula
+          results.push({
+            rowIndex,
+            table: rule.table,
+            column: rule.column,
+            ruleName: rule.name,
+            message: "JavaScript formula rule is missing a formula expression",
+            severity: rule.severity,
+            ruleId: rule.id,
+          })
+          return
+        }
 
         // Log the formula and row data for debugging
         console.log("Evaluating JavaScript formula:", {
@@ -496,7 +512,7 @@ export function validateDataset(
           },
         })
 
-        // Evaluate the formula
+        // Declare jsFormulaResult before using it
         const jsFormulaResult = validateJavaScriptFormula(row, formula)
 
         // Log the evaluation result
@@ -509,7 +525,7 @@ export function validateDataset(
             refundAmount: row.refundAmount,
             processingFee: row.processingFee,
             calculation:
-              row.amount && row.refundAmount && row.processingFee
+              row.amount !== undefined && row.refundAmount !== undefined && row.processingFee !== undefined
                 ? `${row.amount} - ${row.refundAmount} - ${row.processingFee} = ${row.amount - row.refundAmount - row.processingFee}`
                 : "N/A",
           },
@@ -1492,8 +1508,17 @@ function validateRule(
       }
       break
 
+    // Also update the validateRule function to check both formula and javascriptExpression:
+
+    // Find this case in the switch statement in validateRule:
+    //case "javascript-formula":
+    //  ;({ isValid, message } = validateJavaScriptFormula(row, rule.parameters.formula))
+    //  break
     case "javascript-formula":
-      ;({ isValid, message } = validateJavaScriptFormula(row, rule.parameters.formula))
+      ;({ isValid, message } = validateJavaScriptFormula(
+        row,
+        rule.parameters.formula || rule.parameters.javascriptExpression,
+      ))
       break
 
     case "date-before":
@@ -2435,6 +2460,7 @@ function validateDirectFormula(row: DataRecord, formula?: string): { isValid: bo
 // Completely re-implemented JavaScript formula validation with a safer approach
 function validateJavaScriptFormula(row: DataRecord, formula?: string): { isValid: boolean; message: string } {
   if (!formula) {
+    console.warn("No formula provided for JavaScript formula validation")
     return { isValid: true, message: "" }
   }
 
@@ -2457,8 +2483,19 @@ function validateJavaScriptFormula(row: DataRecord, formula?: string): { isValid
   })
 
   try {
+    // Check for common syntax errors - replace single equals with double equals
+    // This helps catch the common mistake of using = instead of == in conditions
+    let safeFormula = formula
+
+    // Only replace standalone = not part of ==, >=, <= or !=
+    safeFormula = safeFormula.replace(/([^=!<>])=([^=])/g, "$1==$2")
+
     // For common formula patterns, use direct evaluation
-    if (formula.includes("amount") && formula.includes("refundAmount") && formula.includes("processingFee")) {
+    if (
+      safeFormula.includes("amount") &&
+      safeFormula.includes("refundAmount") &&
+      safeFormula.includes("processingFee")
+    ) {
       // Check if we have all the required values
       if (amount === undefined || refundAmount === undefined || processingFee === undefined) {
         console.warn("Missing required values for formula evaluation:", { amount, refundAmount, processingFee })
@@ -2474,7 +2511,7 @@ function validateJavaScriptFormula(row: DataRecord, formula?: string): { isValid
       let comparison: boolean
 
       // Evaluate the formula directly based on common patterns
-      if (formula === "amount - refundAmount - processingFee > 0") {
+      if (safeFormula.match(/amount\s*-\s*refundAmount\s*-\s*processingFee\s*>\s*0/)) {
         calculation = amount - refundAmount - processingFee
         comparison = calculation > 0
         result = comparison
@@ -2492,7 +2529,7 @@ function validateJavaScriptFormula(row: DataRecord, formula?: string): { isValid
             ? "Passed JavaScript formula validation"
             : `JavaScript formula evaluated to false: ${formula} (calculation: ${amount} - ${refundAmount} - ${processingFee} = ${calculation} is NOT > 0)`,
         }
-      } else if (formula === "amount - refundAmount - processingFee < 0") {
+      } else if (safeFormula.match(/amount\s*-\s*refundAmount\s*-\s*processingFee\s*<\s*0/)) {
         calculation = amount - refundAmount - processingFee
         comparison = calculation < 0
         result = comparison
@@ -2510,7 +2547,7 @@ function validateJavaScriptFormula(row: DataRecord, formula?: string): { isValid
             ? "Passed JavaScript formula validation"
             : `JavaScript formula evaluated to false: ${formula} (calculation: ${amount} - ${refundAmount} - ${processingFee} = ${calculation} is NOT < 0)`,
         }
-      } else if (formula === "amount - refundAmount - processingFee >= 0") {
+      } else if (safeFormula.match(/amount\s*-\s*refundAmount\s*-\s*processingFee\s*>=\s*0/)) {
         calculation = amount - refundAmount - processingFee
         comparison = calculation >= 0
         result = comparison
@@ -2528,7 +2565,7 @@ function validateJavaScriptFormula(row: DataRecord, formula?: string): { isValid
             ? "Passed JavaScript formula validation"
             : `JavaScript formula evaluated to false: ${formula} (calculation: ${amount} - ${refundAmount} - ${processingFee} = ${calculation} is NOT >= 0)`,
         }
-      } else if (formula === "amount - refundAmount - processingFee <= 0") {
+      } else if (safeFormula.match(/amount\s*-\s*refundAmount\s*-\s*processingFee\s*<=\s*0/)) {
         calculation = amount - refundAmount - processingFee
         comparison = calculation <= 0
         result = comparison
@@ -2546,69 +2583,42 @@ function validateJavaScriptFormula(row: DataRecord, formula?: string): { isValid
             ? "Passed JavaScript formula validation"
             : `JavaScript formula evaluated to false: ${formula} (calculation: ${amount} - ${refundAmount} - ${processingFee} = ${calculation} is NOT <= 0)`,
         }
-      } else {
-        // For other formulas involving these fields, use a more general approach
-        // Create a safe evaluation context with just the variables we need
-        const evalCode = `
-          const amount = ${amount};
-          const refundAmount = ${refundAmount};
-          const processingFee = ${processingFee};
-          
-          // Calculate and log each step
-          const calculation = amount - refundAmount - processingFee;
-          const result = ${formula};
-          console.log("Formula evaluation:", {
-            formula: "${formula.replace(/"/g, '\\"')}",
-            amount, refundAmount, processingFee,
-            calculation,
-            result
-          });
-          
-          return Boolean(result);
-        `
-
-        console.log("Evaluating with code:", evalCode)
-        const evalFunc = new Function(evalCode)
-        result = evalFunc()
-
-        // Return the actual result of the evaluation
-        return {
-          isValid: result,
-          message: result
-            ? "Passed JavaScript formula validation"
-            : `JavaScript formula evaluated to false: ${formula} (calculation failed)`,
-        }
       }
-    } else {
-      // For other formulas, use a more general approach
-      // Create a safe evaluation context with all row properties
-      const evalCode = `
-        "use strict";
-        // Create variables for all row properties
-        ${Object.entries(row)
-          .map(([key, value]) => `const ${key} = ${JSON.stringify(value)};`)
-          .join("\n")}
-        
-        // Evaluate the formula
-        const result = ${formula};
-        console.log("General formula evaluation:", {
-          formula: "${formula.replace(/"/g, '\\"')}",
-          result: result,
-          rowData: ${JSON.stringify(row)}
-        });
-        
-        return Boolean(result);
-      `
+    }
 
-      console.log("Evaluating general formula with code:", evalCode)
-      const evalFunc = new Function(evalCode)
-      const result = evalFunc()
+    // Use Function constructor to create a function that returns the result of evaluating the formula
+    // This is safer than using eval and provides proper error messages
+    try {
+      // Create a function that has access to row properties as parameters
+      const paramNames = Object.keys(row)
+      const paramValues = paramNames.map((key) => row[key])
+
+      // Create a function that evaluates the formula with the row data
+      const evalFunc = new Function(
+        ...paramNames,
+        `"use strict"; 
+         try { 
+           return Boolean(${safeFormula}); 
+         } catch(err) { 
+           console.error("Formula evaluation error:", err.message); 
+           throw new Error("Invalid formula: " + err.message); 
+         }`,
+      )
+
+      // Execute the function with the row values
+      const result = evalFunc(...paramValues)
+
+      console.log("Formula evaluation result:", result)
 
       return {
         isValid: result,
-        message: result
-          ? "Passed JavaScript formula validation"
-          : `JavaScript formula evaluated to false: ${formula} (general evaluation failed)`,
+        message: result ? "Passed JavaScript formula validation" : `JavaScript formula evaluated to false: ${formula}`,
+      }
+    } catch (error) {
+      console.error("JavaScript formula compilation error:", error)
+      return {
+        isValid: false,
+        message: `Error in JavaScript formula syntax: ${error.message}\nFormula: ${formula}`,
       }
     }
   } catch (error) {
@@ -2952,7 +2962,7 @@ function evaluateSimpleFormula(formula: string, row: DataRecord): any {
 
   // Replace each column name with its actual value from the row
   for (const columnName of columnNames) {
-    // Use regex with word boundaries to avoid partial replacements
+    // Use regex with word boundaries
     const regex = new RegExp(`\\b${columnName}\\b`, "g")
 
     // Get the value for this column
