@@ -101,6 +101,17 @@ export function ValidationResults({
   // Add this near the beginning of the component, after the state declarations
   useEffect(() => {
     console.log("ValidationResults - Current validation results:", initialResults)
+
+    // Log enum-related validation results
+    const enumResults = initialResults.filter((result) => result.ruleName.toLowerCase().includes("enum"))
+    if (enumResults.length > 0) {
+      console.log("Enum validation results:", enumResults)
+    }
+
+    // Log success results count
+    const successResults = initialResults.filter((result) => result.severity === "success")
+    console.log("Success validation results:", successResults.length, successResults)
+
     // Log any date-related validation results
     const dateResults = initialResults.filter(
       (result) =>
@@ -132,7 +143,15 @@ export function ValidationResults({
       initialResults.length,
       "Success results:",
       initialResults.filter((r) => r.severity === "success").length,
+      "Enum results:",
+      initialResults.filter((r) => r.ruleName.toLowerCase().includes("enum")).length,
     )
+
+    // Log all enum-related results for debugging
+    const enumResults = initialResults.filter((r) => r.ruleName.toLowerCase().includes("enum"))
+    if (enumResults.length > 0) {
+      console.log("Enum validation results:", enumResults)
+    }
 
     // First, apply the severity filter based on the showPassingValidations toggle
     let results = initialResults
@@ -791,6 +810,7 @@ export function ValidationResults({
 
   const handleTogglePassingValidations = (checked: boolean) => {
     console.log("Toggle passing validations:", checked)
+    console.log("Success results currently:", initialResults.filter((r) => r.severity === "success").length)
     setShowPassingValidations(checked)
     // Reset the severity filter when toggling passing validations
     setFilterSeverity("all")

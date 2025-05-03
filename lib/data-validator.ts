@@ -1251,7 +1251,12 @@ function validateSingleColumnCondition(
       return validateType(value, condition.parameters.dataType)
 
     case "enum":
-      return validateEnum(value, condition.parameters.allowedValues)
+      // Check if case-insensitive flag is enabled
+      if (condition.parameters.caseInsensitive === true) {
+        return validateEnumCaseInsensitive(value, condition.parameters.allowedValues)
+      } else {
+        return validateEnum(value, condition.parameters.allowedValues)
+      }
 
     case "list":
       return validateList(value, condition.parameters.listId, valueLists)
@@ -1362,7 +1367,11 @@ function validateRule(
       break
 
     case "enum":
-      ;({ isValid, message } = validateEnum(value, rule.parameters.allowedValues))
+      if (rule.parameters.caseInsensitive === true) {
+        ;({ isValid, message } = validateEnumCaseInsensitive(value, rule.parameters.allowedValues))
+      } else {
+        ;({ isValid, message } = validateEnum(value, rule.parameters.allowedValues))
+      }
       break
 
     case "list":
@@ -1964,18 +1973,64 @@ function validateEnum(value: any, allowedValues?: any[]): { isValid: boolean; me
   // Check if allowedValues is actually an array
   if (!Array.isArray(allowedValues)) {
     console.error("validateEnum received non-array allowedValues:", allowedValues)
+
+    // Handle case where allowedValues might be a comma-separated string
+    if (typeof allowedValues === "string") {
+      allowedValues = allowedValues.split(",").map((val) => val.trim())
+      console.log("Converted string to array:", allowedValues)
+    }
     // Convert to array if possible, or use empty array as fallback
-    if (typeof allowedValues === "object") {
+    else if (typeof allowedValues === "object") {
       allowedValues = Object.values(allowedValues)
     } else {
       allowedValues = [allowedValues]
     }
   }
 
+  // Add debug logging for enum validation
+  console.log("Enum validation:", {
+    value,
+    allowedValues,
+    valueType: typeof value,
+    allowedValuesType: typeof allowedValues,
+  })
+
+  // By default, enum validation is case-sensitive
   const isValid = allowedValues.includes(value)
   return {
     isValid,
     message: isValid ? "" : `Value must be one of: ${allowedValues.join(", ")}`,
+  }
+}
+
+// New function to support case-insensitive enum validation
+function validateEnumCaseInsensitive(value: any, allowedValues?: any[]): { isValid: boolean; message: string } {
+  if (!allowedValues || value === null || value === undefined) {
+    return { isValid: true, message: "" }
+  }
+
+  // Check if allowedValues is actually an array
+  if (!Array.isArray(allowedValues)) {
+    // Handle case where allowedValues might be a comma-separated string
+    if (typeof allowedValues === "string") {
+      allowedValues = allowedValues.split(",").map((val) => val.trim())
+    }
+    // Convert to array if possible, or use empty array as fallback
+    else if (typeof allowedValues === "object") {
+      allowedValues = Object.values(allowedValues)
+    } else {
+      allowedValues = [allowedValues]
+    }
+  }
+
+  // For case-insensitive comparison, convert everything to lowercase strings
+  const valueStr = String(value).toLowerCase()
+  const allowedLowercase = allowedValues.map((val) => String(val).toLowerCase())
+
+  const isValid = allowedLowercase.includes(valueStr)
+  return {
+    isValid,
+    message: isValid ? "" : `Value must be one of (case-insensitive): ${allowedValues.join(", ")}`,
   }
 }
 

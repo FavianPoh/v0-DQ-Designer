@@ -1041,13 +1041,25 @@ export function RuleForm(props: RuleFormProps) {
         )
       case "enum":
         return (
-          <div>
-            <Label htmlFor="allowedValues">Allowed Values (comma-separated)</Label>
-            <Textarea
-              id="allowedValues"
-              value={rule.parameters.allowedValues || ""}
-              onChange={(e) => handleParameterChange("allowedValues", e.target.value)}
-            />
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="allowedValues">Allowed Values (comma-separated)</Label>
+              <Textarea
+                id="allowedValues"
+                value={rule.parameters.allowedValues || ""}
+                onChange={(e) => handleParameterChange("allowedValues", e.target.value)}
+              />
+            </div>
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="caseInsensitive"
+                checked={rule.parameters.caseInsensitive === true}
+                onCheckedChange={(checked) => handleParameterChange("caseInsensitive", checked === true)}
+              />
+              <Label htmlFor="caseInsensitive" className="text-sm font-normal">
+                Case insensitive comparison
+              </Label>
+            </div>
           </div>
         )
       case "list":
@@ -1784,18 +1796,35 @@ export function RuleForm(props: RuleFormProps) {
         )
       case "enum":
         return (
-          <div>
-            <Label htmlFor={`allowedValues-${index}`}>Allowed Values (comma-separated)</Label>
-            <Textarea
-              id={`allowedValues-${index}`}
-              value={columnConditions[index]?.parameters?.allowedValues || ""}
-              onChange={(e) =>
-                handleColumnConditionChange(index, "parameters", {
-                  ...columnConditions[index].parameters,
-                  allowedValues: e.target.value,
-                })
-              }
-            />
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor={`allowedValues-${index}`}>Allowed Values (comma-separated)</Label>
+              <Textarea
+                id={`allowedValues-${index}`}
+                value={columnConditions[index]?.parameters?.allowedValues || ""}
+                onChange={(e) =>
+                  handleColumnConditionChange(index, "parameters", {
+                    ...columnConditions[index].parameters,
+                    allowedValues: e.target.value,
+                  })
+                }
+              />
+            </div>
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id={`caseInsensitive-${index}`}
+                checked={columnConditions[index]?.parameters?.caseInsensitive === true}
+                onCheckedChange={(checked) =>
+                  handleColumnConditionChange(index, "parameters", {
+                    ...columnConditions[index].parameters,
+                    caseInsensitive: checked === true,
+                  })
+                }
+              />
+              <Label htmlFor={`caseInsensitive-${index}`} className="text-sm font-normal">
+                Case insensitive comparison
+              </Label>
+            </div>
           </div>
         )
       case "list":
