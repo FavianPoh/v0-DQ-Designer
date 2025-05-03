@@ -44,6 +44,7 @@ export function DataQualityDashboard() {
         const rulesResponse = await fetch("/api/rules")
         if (rulesResponse.ok) {
           const rulesData = await rulesResponse.json()
+          console.log("Successfully loaded rules from server:", rulesData.length, rulesData)
           setRules(rulesData)
         } else {
           const errorData = await rulesResponse.json().catch(() => ({}))
@@ -54,6 +55,7 @@ export function DataQualityDashboard() {
           if (savedRules) {
             try {
               const parsedRules = JSON.parse(savedRules)
+              console.log("Loaded rules from localStorage:", parsedRules.length, parsedRules)
               setRules(parsedRules)
               toast({
                 title: "Loaded from localStorage",
@@ -172,6 +174,40 @@ export function DataQualityDashboard() {
 
     fetchData()
   }, [])
+
+  // Add this code after the useEffect that loads data but before the handleAddRule function
+  useEffect(() => {
+    if (!loading && rules.length === 0) {
+      console.log("No rules found, adding a test JavaScript formula rule")
+
+      // Create a test JavaScript formula rule
+      const testRule = {
+        id: "test-js-formula-rule",
+        name: "Test JavaScript Formula Rule [ID: test-js-formula-rule]",
+        table: "transactions",
+        column: "amount",
+        ruleType: "javascript-formula",
+        parameters: {
+          formula: "amount - refundAmount - processingFee > 0",
+          javascriptExpression: "amount - refundAmount - processingFee > 0",
+        },
+        severity: "warning",
+        enabled: true,
+      }
+
+      // Add the rule to the local state
+      setRules([testRule])
+
+      // Save to localStorage for persistence
+      localStorage.setItem("dataQualityRules", JSON.stringify([testRule]))
+
+      // Notify the user
+      toast({
+        title: "Test Rule Added",
+        description: "A test JavaScript formula rule has been added for validation testing",
+      })
+    }
+  }, [loading, rules.length])
 
   // Update validation results when data changes
   useEffect(() => {

@@ -121,6 +121,26 @@ export function ValidationResults({
     if (dateResults.length > 0) {
       console.log("Date-related validation results:", dateResults)
     }
+
+    // Log JavaScript formula validation results
+    const jsFormulaResults = initialResults.filter(
+      (result) =>
+        result.ruleName.toLowerCase().includes("javascript") ||
+        (result.message && result.message.toLowerCase().includes("javascript")),
+    )
+    if (jsFormulaResults.length > 0) {
+      console.log("JavaScript formula validation results:", jsFormulaResults)
+    }
+
+    // Check for specific formula patterns
+    const amountFormulaResults = initialResults.filter(
+      (result) =>
+        result.message &&
+        (result.message.includes("amount - refundAmount") || result.message.includes("processingFee")),
+    )
+    if (amountFormulaResults.length > 0) {
+      console.log("Amount formula validation results:", amountFormulaResults)
+    }
   }, [initialResults])
 
   // Sync the showPassingValidations state with the prop
@@ -143,15 +163,9 @@ export function ValidationResults({
       initialResults.length,
       "Success results:",
       initialResults.filter((r) => r.severity === "success").length,
-      "Enum results:",
-      initialResults.filter((r) => r.ruleName.toLowerCase().includes("enum")).length,
+      "JavaScript formula results:",
+      initialResults.filter((r) => r.ruleName.toLowerCase().includes("javascript")).length,
     )
-
-    // Log all enum-related results for debugging
-    const enumResults = initialResults.filter((r) => r.ruleName.toLowerCase().includes("enum"))
-    if (enumResults.length > 0) {
-      console.log("Enum validation results:", enumResults)
-    }
 
     // First, apply the severity filter based on the showPassingValidations toggle
     let results = initialResults

@@ -303,6 +303,18 @@ export function validateDataset(
 ): ValidationResult[] {
   const results: ValidationResult[] = []
 
+  // Check if we have rules to process
+  if (!rules || rules.length === 0) {
+    console.warn("No rules to validate - validateDataset was called with empty rules array")
+    return results
+  }
+
+  console.log(
+    "Processing validation with rules:",
+    rules.length,
+    rules.map((r) => r.name),
+  )
+
   // Process each rule
   rules.forEach((rule) => {
     // Skip disabled rules
@@ -466,6 +478,58 @@ export function validateDataset(
             ruleId: rule.id,
           })
         }
+      }
+
+      // Special handling for JavaScript formula rules
+      if (rule.ruleType === "javascript-formula") {
+        // Get the formula from the rule parameters
+        const formula = rule.parameters.formula
+
+        // Log the formula and row data for debugging
+        console.log("Evaluating JavaScript formula:", {
+          formula,
+          rule: rule.name,
+          rowData: {
+            amount: row.amount,
+            refundAmount: row.refundAmount,
+            processingFee: row.processingFee,
+          },
+        })
+
+        // Evaluate the formula
+        const jsFormulaResult = validateJavaScriptFormula(row, formula)
+
+        // Log the evaluation result
+        console.log("JavaScript formula result:", {
+          formula,
+          isValid: jsFormulaResult.isValid,
+          message: jsFormulaResult.message,
+          rowData: {
+            amount: row.amount,
+            refundAmount: row.refundAmount,
+            processingFee: row.processingFee,
+            calculation:
+              row.amount && row.refundAmount && row.processingFee
+                ? `${row.amount} - ${row.refundAmount} - ${row.processingFee} = ${row.amount - row.refundAmount - row.processingFee}`
+                : "N/A",
+          },
+        })
+
+        // Always push a result with the appropriate severity based on the validation result
+        results.push({
+          rowIndex,
+          table: rule.table,
+          column: rule.column,
+          ruleName: rule.name,
+          message: jsFormulaResult.isValid
+            ? "Passed JavaScript formula validation"
+            : jsFormulaResult.message || `JavaScript formula evaluated to false: ${formula}`,
+          severity: jsFormulaResult.isValid ? "success" : rule.severity,
+          ruleId: rule.id,
+        })
+
+        // Skip the rest of the processing for this row since we've already added the result
+        return
       }
     })
   })
@@ -2365,67 +2429,193 @@ function validateDirectFormula(row: DataRecord, formula?: string): { isValid: bo
   }
 }
 
+// Now let's improve the validateJavaScriptFormula function to ensure it correctly evaluates formulas
+// Replace the entire validateJavaScriptFormula function with this improved version:
+
 // Completely re-implemented JavaScript formula validation with a safer approach
 function validateJavaScriptFormula(row: DataRecord, formula?: string): { isValid: boolean; message: string } {
   if (!formula) {
     return { isValid: true, message: "" }
   }
 
+  // Extract the specific values we need for common formulas
+  const amount = row.amount !== undefined ? Number(row.amount) : undefined
+  const refundAmount = row.refundAmount !== undefined ? Number(row.refundAmount) : undefined
+  const processingFee = row.processingFee !== undefined ? Number(row.processingFee) : undefined
+
+  // Log input data for debugging
+  console.log("JavaScript Formula Validation:", {
+    formula,
+    rowData: {
+      amount,
+      refundAmount,
+      processingFee,
+      rawAmount: row.amount,
+      rawRefundAmount: row.refundAmount,
+      rawProcessingFee: row.processingFee,
+    },
+  })
+
   try {
-    console.log("JavaScript formula:", formula)
-
-    // Use the same safer approach with a context object
-    const context: Record<string, any> = {}
-
-    // Add all row values to the context
-    for (const [key, val] of Object.entries(row)) {
-      context[key] = val
-    }
-
-    // Log the context for debugging
-    console.log("JavaScript formula evaluation context:", context)
-
-    // Create a function that takes the context as a parameter
-    // For JavaScript formulas, we need to handle the return statement differently
-    const evalFunc = new Function(
-      "context",
-      `
-      try {
-        with(context) {
-          ${formula}
+    // For common formula patterns, use direct evaluation
+    if (formula.includes("amount") && formula.includes("refundAmount") && formula.includes("processingFee")) {
+      // Check if we have all the required values
+      if (amount === undefined || refundAmount === undefined || processingFee === undefined) {
+        console.warn("Missing required values for formula evaluation:", { amount, refundAmount, processingFee })
+        return {
+          isValid: false,
+          message: `Cannot evaluate formula: missing required values. Found: amount=${amount}, refundAmount=${refundAmount}, processingFee=${processingFee}`,
         }
-      } catch (error) {
-        console.error("JavaScript formula inner evaluation error:", error);
-        throw error;
       }
-      `,
-    )
 
-    // Execute the function with our context
-    const result = evalFunc(context)
-    console.log("JavaScript formula evaluation result:", result)
+      // Calculate the result directly
+      let result: boolean
+      let calculation: number
+      let comparison: boolean
 
-    // Convert the result to a boolean
-    const isValid = Boolean(result)
+      // Evaluate the formula directly based on common patterns
+      if (formula === "amount - refundAmount - processingFee > 0") {
+        calculation = amount - refundAmount - processingFee
+        comparison = calculation > 0
+        result = comparison
 
-    return {
-      isValid,
-      message: isValid ? "" : `JavaScript formula evaluated to false: ${formula}`,
+        console.log("Direct evaluation:", {
+          calculation: `${amount} - ${refundAmount} - ${processingFee} = ${calculation}`,
+          comparison: `${calculation} > 0`,
+          result,
+        })
+
+        // Return the actual result of the comparison
+        return {
+          isValid: result,
+          message: result
+            ? "Passed JavaScript formula validation"
+            : `JavaScript formula evaluated to false: ${formula} (calculation: ${amount} - ${refundAmount} - ${processingFee} = ${calculation} is NOT > 0)`,
+        }
+      } else if (formula === "amount - refundAmount - processingFee < 0") {
+        calculation = amount - refundAmount - processingFee
+        comparison = calculation < 0
+        result = comparison
+
+        console.log("Direct evaluation:", {
+          calculation: `${amount} - ${refundAmount} - ${processingFee} = ${calculation}`,
+          comparison: `${calculation} < 0`,
+          result,
+        })
+
+        // Return the actual result of the comparison
+        return {
+          isValid: result,
+          message: result
+            ? "Passed JavaScript formula validation"
+            : `JavaScript formula evaluated to false: ${formula} (calculation: ${amount} - ${refundAmount} - ${processingFee} = ${calculation} is NOT < 0)`,
+        }
+      } else if (formula === "amount - refundAmount - processingFee >= 0") {
+        calculation = amount - refundAmount - processingFee
+        comparison = calculation >= 0
+        result = comparison
+
+        console.log("Direct evaluation:", {
+          calculation: `${amount} - ${refundAmount} - ${processingFee} = ${calculation}`,
+          comparison: `${calculation} >= 0`,
+          result,
+        })
+
+        // Return the actual result of the comparison
+        return {
+          isValid: result,
+          message: result
+            ? "Passed JavaScript formula validation"
+            : `JavaScript formula evaluated to false: ${formula} (calculation: ${amount} - ${refundAmount} - ${processingFee} = ${calculation} is NOT >= 0)`,
+        }
+      } else if (formula === "amount - refundAmount - processingFee <= 0") {
+        calculation = amount - refundAmount - processingFee
+        comparison = calculation <= 0
+        result = comparison
+
+        console.log("Direct evaluation:", {
+          calculation: `${amount} - ${refundAmount} - ${processingFee} = ${calculation}`,
+          comparison: `${calculation} <= 0`,
+          result,
+        })
+
+        // Return the actual result of the comparison
+        return {
+          isValid: result,
+          message: result
+            ? "Passed JavaScript formula validation"
+            : `JavaScript formula evaluated to false: ${formula} (calculation: ${amount} - ${refundAmount} - ${processingFee} = ${calculation} is NOT <= 0)`,
+        }
+      } else {
+        // For other formulas involving these fields, use a more general approach
+        // Create a safe evaluation context with just the variables we need
+        const evalCode = `
+          const amount = ${amount};
+          const refundAmount = ${refundAmount};
+          const processingFee = ${processingFee};
+          
+          // Calculate and log each step
+          const calculation = amount - refundAmount - processingFee;
+          const result = ${formula};
+          console.log("Formula evaluation:", {
+            formula: "${formula.replace(/"/g, '\\"')}",
+            amount, refundAmount, processingFee,
+            calculation,
+            result
+          });
+          
+          return Boolean(result);
+        `
+
+        console.log("Evaluating with code:", evalCode)
+        const evalFunc = new Function(evalCode)
+        result = evalFunc()
+
+        // Return the actual result of the evaluation
+        return {
+          isValid: result,
+          message: result
+            ? "Passed JavaScript formula validation"
+            : `JavaScript formula evaluated to false: ${formula} (calculation failed)`,
+        }
+      }
+    } else {
+      // For other formulas, use a more general approach
+      // Create a safe evaluation context with all row properties
+      const evalCode = `
+        "use strict";
+        // Create variables for all row properties
+        ${Object.entries(row)
+          .map(([key, value]) => `const ${key} = ${JSON.stringify(value)};`)
+          .join("\n")}
+        
+        // Evaluate the formula
+        const result = ${formula};
+        console.log("General formula evaluation:", {
+          formula: "${formula.replace(/"/g, '\\"')}",
+          result: result,
+          rowData: ${JSON.stringify(row)}
+        });
+        
+        return Boolean(result);
+      `
+
+      console.log("Evaluating general formula with code:", evalCode)
+      const evalFunc = new Function(evalCode)
+      const result = evalFunc()
+
+      return {
+        isValid: result,
+        message: result
+          ? "Passed JavaScript formula validation"
+          : `JavaScript formula evaluated to false: ${formula} (general evaluation failed)`,
+      }
     }
   } catch (error) {
     console.error("JavaScript formula evaluation error:", error)
-
-    // Create a more helpful error message
-    let errorMessage = `Error evaluating JavaScript formula: ${error.message}`
-    errorMessage += "\nFormula: " + formula
-    errorMessage += "\nColumn values:"
-    Object.keys(row).forEach((col) => {
-      errorMessage += `\n  ${col} = ${JSON.stringify(row[col])}`
-    })
-
     return {
       isValid: false,
-      message: errorMessage,
+      message: `Error evaluating JavaScript formula: ${error.message}\nFormula: ${formula}\nRow data: ${JSON.stringify(row)}`,
     }
   }
 }
