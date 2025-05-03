@@ -172,10 +172,10 @@ export function validateDataset(
   return results
 }
 
-// New function to validate column comparison rules
+// Enhanced function to validate column comparison rules
 function validateColumnComparison(row: DataRecord, rowIndex: number, rule: DataQualityRule): ValidationResult | null {
   const { parameters, table, column } = rule
-  const { leftColumn, rightColumn, comparisonOperator } = parameters
+  const { leftColumn, rightColumn, comparisonOperator, allowNull } = parameters
 
   // Ensure we have all required parameters
   if (!leftColumn || !rightColumn || !comparisonOperator) {
@@ -194,43 +194,80 @@ function validateColumnComparison(row: DataRecord, rowIndex: number, rule: DataQ
   const leftValue = row[leftColumn]
   const rightValue = row[rightColumn]
 
-  // Convert string values to numbers if possible
-  const leftNum = typeof leftValue === "string" ? Number.parseFloat(leftValue) : leftValue
-  const rightNum = typeof rightValue === "string" ? Number.parseFloat(rightValue) : rightValue
+  // Handle null values if allowNull is true
+  if (
+    allowNull === true &&
+    (leftValue === null || leftValue === undefined || rightValue === null || rightValue === undefined)
+  ) {
+    // Skip validation if either value is null and allowNull is true
+    return null
+  }
 
-  // Check if both values are numbers
-  if (typeof leftNum !== "number" || isNaN(leftNum) || typeof rightNum !== "number" || isNaN(rightNum)) {
+  // Check for null values if allowNull is false
+  if (leftValue === null || leftValue === undefined || rightValue === null || rightValue === undefined) {
     return {
       rowIndex,
       table,
       column,
       ruleName: rule.name,
-      message: `Cannot compare non-numeric values: ${leftValue} ${comparisonOperator} ${rightValue}`,
+      message: `Cannot compare null values: ${leftColumn}=${leftValue} ${comparisonOperator} ${rightColumn}=${rightValue}`,
       severity: rule.severity,
       ruleId: rule.id,
     }
+  }
+
+  // Try to convert string values to numbers if both can be converted
+  const canConvertLeft = typeof leftValue === "string" && !isNaN(Number(leftValue))
+  const canConvertRight = typeof rightValue === "string" && !isNaN(Number(rightValue))
+
+  // Values to use for comparison
+  let leftCompare = leftValue
+  let rightCompare = rightValue
+
+  // If both values can be converted to numbers, convert them
+  if (canConvertLeft && canConvertRight) {
+    leftCompare = Number(leftValue)
+    rightCompare = Number(rightValue)
+  }
+  // If we're comparing dates, convert to Date objects
+  else if (
+    (leftValue instanceof Date || (typeof leftValue === "string" && !isNaN(Date.parse(leftValue)))) &&
+    (rightValue instanceof Date || (typeof rightValue === "string" && !isNaN(Date.parse(rightValue))))
+  ) {
+    leftCompare = leftValue instanceof Date ? leftValue : new Date(leftValue)
+    rightCompare = rightValue instanceof Date ? rightValue : new Date(rightValue)
+
+    // Convert to timestamps for comparison
+    leftCompare = leftCompare.getTime()
+    rightCompare = rightCompare.getTime()
+  }
+
+  // For string comparisons, ensure both values are strings
+  else if (typeof leftValue === "string" || typeof rightValue === "string") {
+    leftCompare = String(leftValue)
+    rightCompare = String(rightValue)
   }
 
   // Perform the comparison
   let isValid = false
   switch (comparisonOperator) {
     case "==":
-      isValid = leftNum === rightNum
+      isValid = leftCompare === rightCompare
       break
     case "!=":
-      isValid = leftNum !== rightNum
+      isValid = leftCompare !== rightCompare
       break
     case ">":
-      isValid = leftNum > rightNum
+      isValid = leftCompare > rightCompare
       break
     case ">=":
-      isValid = leftNum >= rightNum
+      isValid = leftCompare >= rightCompare
       break
     case "<":
-      isValid = leftNum < rightNum
+      isValid = leftCompare < rightCompare
       break
     case "<=":
-      isValid = leftNum <= rightNum
+      isValid = leftCompare <= rightCompare
       break
     default:
       isValid = false
@@ -243,7 +280,7 @@ function validateColumnComparison(row: DataRecord, rowIndex: number, rule: DataQ
       table,
       column,
       ruleName: rule.name,
-      message: `Column comparison failed: ${leftColumn} (${leftNum}) ${comparisonOperator} ${rightColumn} (${rightNum})`,
+      message: `Column comparison failed: ${leftColumn} (${leftValue}) ${comparisonOperator} ${rightColumn} (${rightValue})`,
       severity: rule.severity,
       ruleId: rule.id,
     }
@@ -932,12 +969,11 @@ function validateRule(
       break
 
     case "contains":
-      ;({ isValid, message } = validateContains(
-        value,
-        rule.parameters.searchString,
-        rule.parameters.matchType,
-        rule.parameters.caseSensitive,
-      ))
+      // Handle both parameter names for backward compatibility
+      const searchString = rule.parameters.searchString || rule.parameters.containsValue
+      const matchType = rule.parameters.matchType || "contains"
+      const caseSensitive = rule.parameters.caseSensitive || false
+      ;({ isValid, message } = validateContains(value, searchString, matchType, caseSensitive))
       break
 
     case "dependency":

@@ -115,6 +115,7 @@ export interface DataQualityRuleParameters {
   leftColumn?: string
   rightColumn?: string
   comparisonOperator?: "==" | "!=" | ">" | ">=" | "<" | "<="
+  allowNull?: boolean // Skip validation if either value is null
 }
 
 export type MathOperationType = "add" | "subtract" | "multiply" | "divide"

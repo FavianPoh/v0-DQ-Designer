@@ -20,6 +20,7 @@ import type {
   ColumnCondition,
 } from "@/lib/types"
 import { JavaScriptExplainer } from "./javascript-explainer"
+import { CrossColumnTestUtility } from "./cross-column-test-utility"
 
 interface RuleFormProps {
   initialRule?: DataQualityRule
@@ -180,6 +181,11 @@ const RULE_TYPE_EXAMPLES: Record<RuleType, { example: string; explanation: strin
     example: "amount - refundAmount - processingFee > 0",
     explanation: "Performs a basic math operation on columns and/or constants, then compares the result to a value.",
   },
+  "column-comparison": {
+    example: "startDate < endDate",
+    explanation:
+      "Compares values between different columns in the same row. Validates the relationship between two columns in the same dataset.",
+  },
 }
 
 // Add this helper function to ensure logical operators are set
@@ -307,6 +313,8 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
     hasColumnsMatch: sourceColumns.filter(Boolean).length === referenceColumns.filter(Boolean).length,
     hasReferenceTable: !!rule.parameters.referenceTable,
   })
+
+  const [showCrossColumnTester, setShowCrossColumnTester] = useState(false)
 
   // Initialize table columns for all tables
   useEffect(() => {
@@ -1086,6 +1094,20 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
           </div>
         )
 
+      case "contains":
+        return (
+          <div className="space-y-2">
+            <Label htmlFor={`condition-${index}-containsValue`}>Contains String</Label>
+            <Input
+              id={`condition-${index}-containsValue`}
+              value={condition.parameters.containsValue ?? ""}
+              onChange={(e) => handleColumnConditionParameterChange(index, "containsValue", e.target.value)}
+              placeholder="Enter text to check for"
+            />
+            <p className="text-xs text-gray-500">Validates that the field value contains the specified string.</p>
+          </div>
+        )
+
       case "list":
         return (
           <div className="space-y-2">
@@ -1149,7 +1171,7 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
               <Label htmlFor={`condition-${index}-operator`}>Comparison Operator</Label>
               <Select
                 value={condition.parameters.operator ?? ">"}
-                onValueChange={(value) => handleColumnConditionParameterChange(index, "operator", value)}
+                onChange={(value) => handleColumnConditionParameterChange(index, "operator", value)}
               >
                 <SelectTrigger id={`condition-${index}-operator`}>
                   <SelectValue placeholder="Select operator" />
@@ -1240,7 +1262,8 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
       case "column-comparison":
         return (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            {/* Column Selection Section */}
+            <div className="grid grid-cols-1 gap-4">
               <div>
                 <Label className="block text-sm font-medium text-gray-700" htmlFor={`condition-${index}-leftColumn`}>
                   Left Column
@@ -1261,6 +1284,36 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+
+            {/* Comparison Operator Section */}
+            <div>
+              <Label
+                className="block text-sm font-medium text-gray-700"
+                htmlFor={`condition-${index}-comparisonOperator`}
+              >
+                Comparison Operator
+              </Label>
+              <Select
+                value={condition.parameters.comparisonOperator || ""}
+                onValueChange={(value) => handleColumnConditionParameterChange(index, "comparisonOperator", value)}
+              >
+                <SelectTrigger id={`condition-${index}-comparisonOperator`}>
+                  <SelectValue placeholder="Select operator" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="==">Equal to (==)</SelectItem>
+                  <SelectItem value="!=">Not equal to (!=)</SelectItem>
+                  <SelectItem value=">">Greater than (&gt;)</SelectItem>
+                  <SelectItem value=">=">Greater than or equal to (&gt;=)</SelectItem>
+                  <SelectItem value="<">Less than (&lt;)</SelectItem>
+                  <SelectItem value="<=">Less than or equal to (&lt;=)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Right Column Selection Section */}
+            <div className="grid grid-cols-1 gap-4">
               <div>
                 <Label className="block text-sm font-medium text-gray-700" htmlFor={`condition-${index}-rightColumn`}>
                   Right Column
@@ -1282,30 +1335,39 @@ export function RuleForm({ initialRule, tables, datasets, valueLists, onSubmit, 
                 </Select>
               </div>
             </div>
-            <div>
-              <Label
-                className="block text-sm font-medium text-gray-700"
-                htmlFor={`condition-${index}-comparisonOperator`}
-              >
-                Comparison Operator
-              </Label>
-              <Select
-                value={condition.parameters.comparisonOperator || ""}
-                onValueChange={(value) => handleColumnConditionParameterChange(index, "comparisonOperator", value)}
-              >
-                <SelectTrigger id={`condition-${index}-comparisonOperator`}>
-                  <SelectValue placeholder="Select operator" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="==">Equal to (==)</SelectItem>
-                  <SelectItem value="!=">Not equal to (!=)</SelectItem>
-                  <SelectItem value="&gt;">Greater than (&gt;)</SelectItem>
-                  <SelectItem value="&gt;=">Greater than or equal to (&gt;=)</SelectItem>
-                  <SelectItem value="&lt;">Less than (&lt;)</SelectItem>
-                  <SelectItem value="&lt;=">Less than or equal to (&lt;=)</SelectItem>
-                </SelectContent>
-              </Select>
+
+            {/* Additional Options */}
+            <div className="mt-4 p-3 bg-gray-50 rounded-md">
+              <div className="flex items-center space-x-2 mb-2">
+                <Checkbox
+                  id={`condition-${index}-allowNull`}
+                  checked={condition.parameters.allowNull === true}
+                  onCheckedChange={(checked) =>
+                    handleColumnConditionParameterChange(index, "allowNull", checked === true)
+                  }
+                />
+                <Label htmlFor={`condition-${index}-allowNull`} className="text-sm font-medium">
+                  Skip validation if any column is null
+                </Label>
+              </div>
+
+              <p className="text-sm text-gray-700">
+                Preview: {condition.parameters.leftColumn || "[Left Column]"}{" "}
+                {condition.parameters.comparisonOperator || "?"} {condition.parameters.rightColumn || "[Right Column]"}
+              </p>
             </div>
+            {/* Right after the preview div */}
+            <div className="mt-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setShowCrossColumnTester(true)}>
+                Test Cross-Column Validation
+              </Button>
+            </div>
+
+            {showCrossColumnTester && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                <CrossColumnTestUtility onClose={() => setShowCrossColumnTester(false)} />
+              </div>
+            )}
           </div>
         )
 
