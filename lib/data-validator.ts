@@ -1211,7 +1211,7 @@ function validateColumnConditions(
   return null // Passed validation
 }
 
-// Helper function to validate a single column condition
+// Also update the validateSingleColumnCondition function to use the correct parameter name
 function validateSingleColumnCondition(
   value: any,
   row: DataRecord,
@@ -1224,22 +1224,23 @@ function validateSingleColumnCondition(
       return validateRequired(value)
 
     case "equals":
-      return validateEquals(value, condition.parameters.compareValue)
+      return validateEquals(value, condition.parameters.value)
 
     case "not-equals":
       return validateNotEquals(value, condition.parameters.compareValue)
 
+    // In the validateSingleColumnCondition function, find the "greater-than" case and update it to use "value" instead of "compareValue"
     case "greater-than":
-      return validateGreaterThan(value, condition.parameters.compareValue)
+      return validateGreaterThan(value, condition.parameters.value)
 
     case "greater-than-equals":
-      return validateGreaterThanEquals(value, condition.parameters.compareValue)
+      return validateGreaterThanEquals(value, condition.parameters.value)
 
     case "less-than":
-      return validateLessThan(value, condition.parameters.compareValue)
+      return validateLessThan(value, condition.parameters.value)
 
     case "less-than-equals":
-      return validateLessThanEquals(value, condition.parameters.compareValue)
+      return validateLessThanEquals(value, condition.parameters.value)
 
     case "range":
       return validateRange(value, condition.parameters.min, condition.parameters.max)
@@ -1325,28 +1326,30 @@ function validateRule(
       ;({ isValid, message } = validateRequired(value))
       break
 
+    // In the validateRule function, find the "equals" case and update it to use "value" instead of "compareValue"
     case "equals":
-      ;({ isValid, message } = validateEquals(value, rule.parameters.compareValue))
+      ;({ isValid, message } = validateEquals(value, rule.parameters.value))
       break
 
     case "not-equals":
       ;({ isValid, message } = validateNotEquals(value, rule.parameters.compareValue))
       break
 
+    // In the validateRule function, find the "greater-than" case and update it to use "value" instead of "compareValue"
     case "greater-than":
-      ;({ isValid, message } = validateGreaterThan(value, rule.parameters.compareValue))
+      ;({ isValid, message } = validateGreaterThan(value, rule.parameters.value))
       break
 
     case "greater-than-equals":
-      ;({ isValid, message } = validateGreaterThanEquals(value, rule.parameters.compareValue))
+      ;({ isValid, message } = validateGreaterThanEquals(value, rule.parameters.value))
       break
 
     case "less-than":
-      ;({ isValid, message } = validateLessThan(value, rule.parameters.compareValue))
+      ;({ isValid, message } = validateLessThan(value, rule.parameters.value))
       break
 
     case "less-than-equals":
-      ;({ isValid, message } = validateLessThanEquals(value, rule.parameters.compareValue))
+      ;({ isValid, message } = validateLessThanEquals(value, rule.parameters.value))
       break
 
     case "range":
@@ -1501,7 +1504,7 @@ function validateRule(
   return null
 }
 
-// New validation functions for the comparison rule types
+// Also update the validateEquals function to use the correct parameter name
 function validateEquals(value: any, compareValue: any): { isValid: boolean; message: string } {
   // Handle type conversion for numeric comparisons
   if (typeof compareValue === "number" && typeof value === "string") {
