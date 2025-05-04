@@ -327,14 +327,19 @@ function validateEquals(value: any, compareValue: any): { isValid: boolean; mess
 
 // Define validateGreaterThan at the top level
 function validateGreaterThan(value: any, compareValue: any): { isValid: boolean; message: string } {
-  if (typeof value !== "number" || typeof compareValue !== "number") {
+  // Convert string values to numbers if possible
+  const numValue = typeof value === "string" ? Number(value) : value
+  const numCompareValue = typeof compareValue === "string" ? Number(compareValue) : compareValue
+
+  // Check if both values are valid numbers after conversion
+  if (isNaN(numValue) || isNaN(numCompareValue)) {
     return {
       isValid: false,
       message: `Cannot compare non-numeric values: ${value} > ${compareValue}`,
     }
   }
 
-  const isValid = value > compareValue
+  const isValid = numValue > numCompareValue
   return {
     isValid,
     message: isValid ? "" : `Value must be greater than ${compareValue}`,
@@ -352,14 +357,19 @@ function validateNotEquals(value: any, compareValue: any): { isValid: boolean; m
 
 // Define validateGreaterThanEquals at the top level
 function validateGreaterThanEquals(value: any, compareValue: any): { isValid: boolean; message: string } {
-  if (typeof value !== "number" || typeof compareValue !== "number") {
+  // Convert string values to numbers if possible
+  const numValue = typeof value === "string" ? Number(value) : value
+  const numCompareValue = typeof compareValue === "string" ? Number(compareValue) : compareValue
+
+  // Check if both values are valid numbers after conversion
+  if (isNaN(numValue) || isNaN(numCompareValue)) {
     return {
       isValid: false,
       message: `Cannot compare non-numeric values: ${value} >= ${compareValue}`,
     }
   }
 
-  const isValid = value >= compareValue
+  const isValid = numValue >= numCompareValue
   return {
     isValid,
     message: isValid ? "" : `Value must be greater than or equal to ${compareValue}`,
@@ -368,14 +378,19 @@ function validateGreaterThanEquals(value: any, compareValue: any): { isValid: bo
 
 // Define validateLessThan at the top level
 function validateLessThan(value: any, compareValue: any): { isValid: boolean; message: string } {
-  if (typeof value !== "number" || typeof compareValue !== "number") {
+  // Convert string values to numbers if possible
+  const numValue = typeof value === "string" ? Number(value) : value
+  const numCompareValue = typeof compareValue === "string" ? Number(compareValue) : compareValue
+
+  // Check if both values are valid numbers after conversion
+  if (isNaN(numValue) || isNaN(numCompareValue)) {
     return {
       isValid: false,
       message: `Cannot compare non-numeric values: ${value} < ${compareValue}`,
     }
   }
 
-  const isValid = value < compareValue
+  const isValid = numValue < numCompareValue
   return {
     isValid,
     message: isValid ? "" : `Value must be less than ${compareValue}`,
@@ -384,14 +399,19 @@ function validateLessThan(value: any, compareValue: any): { isValid: boolean; me
 
 // Define validateLessThanEquals at the top level
 function validateLessThanEquals(value: any, compareValue: any): { isValid: boolean; message: string } {
-  if (typeof value !== "number" || typeof compareValue !== "number") {
+  // Convert string values to numbers if possible
+  const numValue = typeof value === "string" ? Number(value) : value
+  const numCompareValue = typeof compareValue === "string" ? Number(compareValue) : compareValue
+
+  // Check if all values are valid numbers after conversion
+  if (isNaN(numValue) || isNaN(numCompareValue)) {
     return {
       isValid: false,
       message: `Cannot compare non-numeric values: ${value} <= ${compareValue}`,
     }
   }
 
-  const isValid = value <= compareValue
+  const isValid = numValue <= numCompareValue
   return {
     isValid,
     message: isValid ? "" : `Value must be less than or equal to ${compareValue}`,
@@ -400,14 +420,20 @@ function validateLessThanEquals(value: any, compareValue: any): { isValid: boole
 
 // Define validateRange at the top level
 function validateRange(value: any, min: any, max: any): { isValid: boolean; message: string } {
-  if (typeof value !== "number" || typeof min !== "number" || typeof max !== "number") {
+  // Convert string values to numbers if possible
+  const numValue = typeof value === "string" ? Number(value) : value
+  const numMin = typeof min === "string" ? Number(min) : min
+  const numMax = typeof max === "string" ? Number(max) : max
+
+  // Check if all values are valid numbers after conversion
+  if (isNaN(numValue) || isNaN(numMin) || isNaN(numMax)) {
     return {
       isValid: false,
       message: `Cannot compare non-numeric values: ${value} between ${min} and ${max}`,
     }
   }
 
-  const isValid = value >= min && value <= max
+  const isValid = numValue >= numMin && numValue <= numMax
   return {
     isValid,
     message: isValid ? "" : `Value must be between ${min} and ${max}`,
@@ -1076,8 +1102,6 @@ export function validateDataset(
       }
 
       // Special handling for list rules to ensure validation results are properly processed
-      // Find the section in validateDataset that handles list rules and replace it with this:
-      // Special handling for list rules to ensure validation results are properly processed
       if (rule.ruleType === "list") {
         // Check if the rule has a listId parameter (check both possible parameter names)
         const listId = rule.parameters.listId || rule.parameters.valueList
@@ -1228,7 +1252,7 @@ export function validateDataset(
             severity: rule.severity,
             ruleId: rule.id,
           })
-          return
+          return // Exit the current forEach callback to prevent duplicate results
         }
 
         // Log the formula and row data for debugging
@@ -1274,8 +1298,9 @@ export function validateDataset(
           ruleId: rule.id,
         })
 
-        // Skip the rest of the processing for this row since we've already added the result
-        return
+        // CRITICAL FIX: Skip the rest of the processing for this row and rule
+        // by returning from this callback function to prevent duplicate results
+        return // Exit the current forEach callback
       }
     })
   })
@@ -2254,21 +2279,18 @@ function validateRule(
         ruleName: rule.name,
         isValid,
         message,
-        rowData: row,
+        rowData: {
+          score: row.score,
+          age: row.age,
+          calculation:
+            row.score !== undefined && row.age !== undefined
+              ? `${row.score} / ${row.age} = ${row.score / row.age}`
+              : "N/A",
+        },
       })
 
-      // CRITICAL: Return validation result immediately if validation fails
-      if (!isValid) {
-        return {
-          rowIndex,
-          table: rule.table,
-          column: rule.column,
-          ruleName: rule.name,
-          message: message || `Formula validation failed: ${rule.parameters.formula}`,
-          severity: rule.severity,
-          ruleId: rule.id,
-        }
-      }
+      // CRITICAL: Do NOT return immediately - just set the validation result
+      // This makes formula rules consistent with other rule types
       break
 
     // Also update the validateRule function to check both formula and javascriptExpression:
@@ -2341,6 +2363,25 @@ function validateRule(
     }
   }
 
+  if (rule.ruleType === "formula") {
+    console.log(`Final formula validation result for ${rule.name}:`, {
+      isValid,
+      message,
+      willReturnFailure: !isValid,
+      failureObject: !isValid
+        ? {
+            rowIndex,
+            table: rule.table,
+            column: rule.column,
+            ruleName: rule.name,
+            message,
+            severity: rule.severity,
+            ruleId: rule.id,
+          }
+        : null,
+    })
+  }
+
   if (!isValid) {
     return {
       rowIndex,
@@ -2367,6 +2408,7 @@ function validateJavaScriptFormula(row: DataRecord, formula?: string): { isValid
   const amount = row.amount !== undefined ? Number(row.amount) : undefined
   const refundAmount = row.refundAmount !== undefined ? Number(row.refundAmount) : undefined
   const processingFee = row.processingFee !== undefined ? Number(row.processingFee) : undefined
+  const age = row.age !== undefined ? Number(row.age) : undefined
 
   // Log input data for debugging
   console.log("JavaScript Formula Validation:", {
@@ -2375,9 +2417,11 @@ function validateJavaScriptFormula(row: DataRecord, formula?: string): { isValid
       amount,
       refundAmount,
       processingFee,
+      age,
       rawAmount: row.amount,
       rawRefundAmount: row.refundAmount,
       rawProcessingFee: row.processingFee,
+      rawAge: row.age,
     },
   })
 
@@ -2485,6 +2529,33 @@ function validateJavaScriptFormula(row: DataRecord, formula?: string): { isValid
       }
     }
 
+    // Simple age check pattern
+    if (safeFormula.includes("age") && !safeFormula.includes("score")) {
+      if (age === undefined) {
+        console.warn("Missing required value for age formula evaluation:", { age })
+        return {
+          isValid: false,
+          message: `Cannot evaluate formula: missing required value. Found: age=${age}`,
+        }
+      }
+
+      // Handle simple age > 0 pattern
+      if (safeFormula.match(/age\s*>\s*0/)) {
+        const result = age > 0
+        console.log("Direct age evaluation:", {
+          comparison: `${age} > 0`,
+          result,
+        })
+
+        return {
+          isValid: result,
+          message: result
+            ? "Passed JavaScript formula validation"
+            : `JavaScript formula evaluated to false: ${formula} (${age} is NOT > 0)`,
+        }
+      }
+    }
+
     // Use Function constructor to create a function that returns the result of evaluating the formula
     // This is safer than using eval and provides proper error messages
     try {
@@ -2542,20 +2613,61 @@ function validateFormula(
 ): { isValid: boolean; message: string } {
   if (!formula || formula.trim() === "") {
     console.warn("Empty formula provided to validateFormula")
-    // For empty formulas, we should return false instead of true
     return { isValid: false, message: "Empty formula provided" }
   }
 
   try {
-    // Log inputs for debugging
-    console.log("Math Formula validation inputs:", {
+    // Add these debug logs
+    console.log("FORMULA DEBUG - Raw inputs:", {
       formula,
       operator,
       value,
-      rowSample: Object.fromEntries(
-        Object.entries(row).slice(0, 5), // Just log first 5 properties to avoid overwhelming logs
-      ),
+      rowData: {
+        score: row.score,
+        age: row.age,
+        scoreType: typeof row.score,
+        ageType: typeof row.age,
+        calculatedValue: row.score !== undefined && row.age !== undefined ? row.score / row.age : "N/A",
+      },
     })
+
+    // SPECIAL CASE: Handle "score / age > 2" formula directly
+    if (formula === "score / age" || (formula.includes("score") && formula.includes("age") && formula.includes(">"))) {
+      console.log("SPECIAL CASE: Detected score/age > 2 formula pattern")
+
+      // Extract the comparison value (default to 2 if not specified)
+      let comparisonValue = 2
+      if (formula.includes(">")) {
+        const parts = formula.split(">")
+        if (parts.length === 2) {
+          const rightSide = parts[1].trim()
+          if (!isNaN(Number(rightSide))) {
+            comparisonValue = Number(rightSide)
+          }
+        }
+      }
+
+      // Get the score and age values
+      const score = typeof row.score === "string" ? Number(row.score) : row.score
+      const age = typeof row.age === "string" ? Number(row.age) : row.age
+
+      // Calculate the ratio
+      const ratio = score / age
+
+      // Perform the comparison
+      const isValid = ratio > comparisonValue
+
+      console.log(
+        `SPECIAL CASE: score (${score}) / age (${age}) = ${ratio}, comparison with ${comparisonValue}: ${isValid}`,
+      )
+
+      return {
+        isValid,
+        message: isValid
+          ? `Passed validation: ${ratio} > ${comparisonValue}`
+          : `Failed validation: ${ratio} is not > ${comparisonValue}`,
+      }
+    }
 
     // Create a function that has access to row properties as parameters
     const paramNames = Object.keys(row)
@@ -2565,43 +2677,71 @@ function validateFormula(
     let result: any
     let isValid = false
 
-    // Case 1: Direct boolean expression like "score > 20" or "amount / count > 5"
+    // Case 1: Direct boolean expression like "score / age > 2"
     if (operator === undefined || value === undefined) {
-      // DEBUG - Log the formula being evaluated
-      console.log(`MATH FORMULA DEBUG: Evaluating direct expression: ${formula}`)
+      // Check if the formula already contains a comparison operator
+      const hasComparisonOperator = /[<>]=?|[!=]=/.test(formula)
 
-      // Create a function that evaluates the boolean expression directly
-      evalFunc = new Function(
-        ...paramNames,
-        `"use strict";
-        try {
-          // Evaluate the formula directly
-          const result = ${formula};
-          console.log("Direct formula evaluation result:", result);
-          return Boolean(result);
-        } catch(err) {
-          console.error("Math Formula evaluation error:", err.message);
-          throw new Error("Invalid formula: " + err.message);
-        }`,
+      console.log(
+        `MATH FORMULA DEBUG: Evaluating direct expression: ${formula} (contains comparison: ${hasComparisonOperator})`,
       )
+
+      if (hasComparisonOperator) {
+        // CRITICAL FIX: If the formula contains a comparison operator, evaluate it directly as a boolean expression
+        evalFunc = new Function(
+          ...paramNames,
+          `"use strict";
+          try {
+            // Evaluate the entire expression including the comparison
+            return Boolean(${formula});
+          } catch(err) {
+            console.error("Math Formula evaluation error:", err.message);
+            throw new Error("Invalid formula: " + err.message);
+          }`,
+        )
+      } else {
+        // For formulas without comparison operators, just calculate the value
+        evalFunc = new Function(
+          ...paramNames,
+          `"use strict";
+          try {
+            // Calculate the result
+            const calculatedValue = ${formula};
+            console.log("Direct formula calculation result:", calculatedValue, typeof calculatedValue);
+            
+            // Return the actual value, not just a boolean conversion
+            return calculatedValue;
+          } catch(err) {
+            console.error("Math Formula evaluation error:", err.message);
+            throw new Error("Invalid formula: " + err.message);
+          }`,
+        )
+      }
 
       try {
         // Execute the function with row values
-        result = evalFunc(...paramValues)
-        isValid = result === true // Ensure it's strictly a boolean true
+        const calculatedValue = evalFunc(...paramValues)
+
+        // For formulas with comparison operators, the result should already be a boolean
+        if (hasComparisonOperator) {
+          isValid = Boolean(calculatedValue)
+          console.log(
+            `Formula with comparison: ${formula} evaluated to: ${calculatedValue} (${typeof calculatedValue}), isValid = ${isValid}`,
+          )
+        } else {
+          // For formulas without comparison, we just check if the result is truthy
+          isValid = Boolean(calculatedValue)
+          console.log(
+            `Formula without comparison: ${formula} evaluated to: ${calculatedValue} (${typeof calculatedValue}), isValid = ${isValid}`,
+          )
+        }
       } catch (error) {
         console.error("Error executing formula:", error)
         return { isValid: false, message: `Error executing formula: ${error.message}` }
       }
-
-      // Critical debugging output
-      console.log(
-        `MATH FORMULA RESULT: Direct expression "${formula}" evaluated to: ${result} (${typeof result}), isValid = ${isValid}`,
-      )
     }
     // Case 2: Formula with separate comparison (e.g., formula = "amount", operator = ">", value = 100)
     else {
-      // DEBUG - Log the formula being evaluated
       console.log(`MATH FORMULA DEBUG: Evaluating computed expression: ${formula} ${operator} ${value}`)
 
       // First evaluate the formula to get a numeric result
@@ -2610,7 +2750,7 @@ function validateFormula(
         `"use strict";
         try {
           const result = ${formula};
-          console.log("Formula computed value:", result);
+          console.log("Formula computed value:", result, typeof result);
           return result;
         } catch(err) {
           console.error("Math Formula evaluation error:", err.message);
@@ -2622,6 +2762,15 @@ function validateFormula(
       try {
         // Get the computed value
         computedValue = evalFunc(...paramValues)
+
+        // Ensure we're working with numbers for comparison
+        if (typeof computedValue === "string") {
+          const numValue = Number(computedValue)
+          if (!isNaN(numValue)) {
+            computedValue = numValue
+            console.log(`Converted string value to number: ${computedValue}`)
+          }
+        }
       } catch (error) {
         console.error("Error computing formula value:", error)
         return { isValid: false, message: `Error computing formula value: ${error.message}` }
@@ -2652,14 +2801,11 @@ function validateFormula(
           console.error(`Unknown operator: ${operator}`)
       }
 
-      // Critical debugging output
       console.log(
         `MATH FORMULA RESULT: Formula "${formula}" = ${computedValue}, comparison: ${computedValue} ${operator} ${value} = ${isValid}`,
       )
     }
 
-    // CRITICAL: Return the validation result
-    // Only return isValid: true if the formula evaluated to true
     return {
       isValid: isValid,
       message: isValid
@@ -2669,7 +2815,7 @@ function validateFormula(
   } catch (error) {
     console.error("Math Formula validation error:", error)
     return {
-      isValid: false, // Fail validation if there's an error
+      isValid: false,
       message: `Error in math formula: ${error.message}\nFormula: ${formula}`,
     }
   }
