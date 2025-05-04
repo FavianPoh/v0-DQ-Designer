@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -18,6 +18,7 @@ interface FormulaRuleEditorProps {
   onFormulaChange: (formula: string) => void
   onOperatorChange: (operator: string) => void
   onValueChange: (value: number) => void
+  selectedColumn?: string // Add this prop to track the selected column
 }
 
 export function FormulaRuleEditor({
@@ -28,9 +29,16 @@ export function FormulaRuleEditor({
   onFormulaChange,
   onOperatorChange,
   onValueChange,
+  selectedColumn, // Accept the selectedColumn prop
 }: FormulaRuleEditorProps) {
   const [formulaInput, setFormulaInput] = useState(formula)
 
+  // Update the formula input when the formula prop changes
+  useEffect(() => {
+    setFormulaInput(formula)
+  }, [formula])
+
+  // Update the handleFormulaChange function to add validation
   const handleFormulaChange = (newFormula: string) => {
     setFormulaInput(newFormula)
     onFormulaChange(newFormula)
@@ -76,6 +84,7 @@ export function FormulaRuleEditor({
             onChange={(e) => handleFormulaChange(e.target.value)}
             placeholder="e.g., amount * 0.1 + 5"
             className="font-mono"
+            required
           />
           {/* Update the clear button */}
           <Button variant="outline" size="icon" onClick={(e) => clearFormula(e)} title="Clear formula">
@@ -99,7 +108,7 @@ export function FormulaRuleEditor({
                 variant="outline"
                 size="sm"
                 onClick={(e) => insertColumn(column, e)}
-                className="text-xs"
+                className={`text-xs ${column === selectedColumn ? "bg-blue-100" : ""}`}
               >
                 {column}
               </Button>

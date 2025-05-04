@@ -1,13 +1,4 @@
-import type {
-  DataRecord,
-  DataQualityRule,
-  ValidationResult,
-  DataTables,
-  ValueList,
-  Condition,
-  CrossTableCondition,
-  ColumnCondition,
-} from "./types"
+import type { DataRecord, DataQualityRule, ValidationResult, DataTables, ValueList, ColumnCondition } from "./types"
 
 // Add this function at the top of the file
 function debugObject(obj: any, label = "Debug"): void {
@@ -65,6 +56,412 @@ function debugListValidation(value: any, listId: string, list: ValueList | undef
     console.log(`Is value in list: ${isValid}`)
   }
   console.log("============================")
+}
+
+// Define all validation functions at the top level, before they're used
+
+// Define validateList at the top level so it's available to all functions
+function validateList(value: any, listId: any, valueLists: ValueList[]): { isValid: boolean; message: string } {
+  if (!listId) {
+    return { isValid: false, message: "Missing listId parameter" }
+  }
+
+  const list = valueLists.find((l) => l.id === listId)
+
+  if (!list) {
+    return { isValid: false, message: `List with ID "${listId}" not found` }
+  }
+
+  const stringValue = String(value)
+  const isValid = list.values.includes(stringValue)
+
+  return {
+    isValid,
+    message: isValid ? "" : `Value must be one of the values in the "${list.name}" list`,
+  }
+}
+
+// Define validateEnum at the top level
+function validateEnum(value: any, allowedValues: any[]): { isValid: boolean; message: string } {
+  const isValid = allowedValues.includes(value)
+  return {
+    isValid,
+    message: isValid ? "" : `Value must be one of: ${allowedValues.join(", ")}`,
+  }
+}
+
+// Define validateEnumCaseInsensitive at the top level
+function validateEnumCaseInsensitive(value: any, allowedValues: any[]): { isValid: boolean; message: string } {
+  if (typeof value !== "string") {
+    return { isValid: false, message: "Value must be a string for case-insensitive enum validation" }
+  }
+
+  const lowerCaseValue = value.toLowerCase()
+  const isValid = allowedValues.map((v) => String(v).toLowerCase()).includes(lowerCaseValue)
+
+  return {
+    isValid,
+    message: isValid ? "" : `Value must be one of: ${allowedValues.join(", ")} (case-insensitive)`,
+  }
+}
+
+// Define validateContains at the top level
+function validateContains(
+  value: any,
+  searchString: any,
+  matchType: any,
+  caseSensitive: any,
+): { isValid: boolean; message: string } {
+  if (typeof value !== "string" || typeof searchString !== "string") {
+    return { isValid: false, message: "Both value and search string must be strings" }
+  }
+
+  let isValid = false
+  let message = ""
+
+  if (caseSensitive === true) {
+    if (matchType === "starts-with") {
+      isValid = value.startsWith(searchString)
+    } else if (matchType === "ends-with") {
+      isValid = value.endsWith(searchString)
+    } else {
+      isValid = value.includes(searchString)
+    }
+  } else {
+    const lowerCaseValue = value.toLowerCase()
+    const lowerCaseSearchString = searchString.toLowerCase()
+
+    if (matchType === "starts-with") {
+      isValid = lowerCaseValue.startsWith(lowerCaseSearchString)
+    } else if (matchType === "ends-with") {
+      isValid = lowerCaseValue.endsWith(lowerCaseSearchString)
+    } else {
+      isValid = lowerCaseValue.includes(lowerCaseSearchString)
+    }
+  }
+
+  message = isValid ? "" : `Value must contain "${searchString}"`
+
+  return {
+    isValid,
+    message,
+  }
+}
+
+// Define validateDependency at the top level
+function validateDependency(value: any, dependsOnValue: any, condition: any): { isValid: boolean; message: string } {
+  let isValid = true
+  let message = ""
+
+  if (condition === "required") {
+    isValid = dependsOnValue !== null && dependsOnValue !== undefined && dependsOnValue !== ""
+    message = isValid ? "" : "This field is required because another field has a value"
+  } else {
+    isValid = true
+  }
+
+  return {
+    isValid,
+    message,
+  }
+}
+
+// Define validateMultiColumn at the top level
+function validateMultiColumn(
+  row: DataRecord,
+  conditions: any[],
+  datasets: DataTables,
+  valueLists: ValueList[],
+): { isValid: boolean; message: string } {
+  let isValid = true
+  let message = ""
+
+  for (const condition of conditions) {
+    const columnValue = row[condition.column]
+    const conditionResult = validateSingleColumnCondition(columnValue, row, condition, datasets, valueLists)
+
+    if (!conditionResult.isValid) {
+      isValid = false
+      message = conditionResult.message
+      break
+    }
+  }
+
+  return {
+    isValid,
+    message,
+  }
+}
+
+// Define validateLookup at the top level
+function validateLookup(
+  row: DataRecord,
+  column: any,
+  lookupTable: any,
+  lookupColumn: any,
+  validation: any,
+  datasets: DataTables,
+): { isValid: boolean; message: string } {
+  if (!lookupTable || !lookupColumn || !validation) {
+    return { isValid: false, message: "Missing lookup parameters" }
+  }
+
+  const tableData = datasets[lookupTable]
+
+  if (!tableData) {
+    return { isValid: false, message: `Lookup table "${lookupTable}" not found` }
+  }
+
+  const value = row[column]
+  const found = tableData.some((item) => item[lookupColumn] == value)
+
+  let isValid = false
+  let message = ""
+
+  if (validation === "must-exist") {
+    isValid = found
+    message = isValid ? "" : `Value must exist in lookup table "${lookupTable}" column "${lookupColumn}"`
+  } else {
+    isValid = !found
+    message = isValid ? "" : `Value must not exist in lookup table "${lookupTable}" column "${lookupColumn}"`
+  }
+
+  return {
+    isValid,
+    message,
+  }
+}
+
+// Define validateCustom at the top level
+function validateCustom(
+  value: any,
+  row: DataRecord,
+  functionBody: any,
+  datasets: DataTables,
+): { isValid: boolean; message: string } {
+  try {
+    // Create a function that has access to row properties as parameters
+    const paramNames = Object.keys(row)
+    const paramValues = paramNames.map((key) => row[key])
+
+    // Create a function that evaluates the custom logic with the row data
+    const evalFunc = new Function(
+      ...paramNames,
+      `"use strict"; 
+       try { 
+         return Boolean(${functionBody}); 
+       } catch(err) { 
+         console.error("Custom function evaluation error:", err.message); 
+         throw new Error("Invalid custom function: " + err.message); 
+       }`,
+    )
+
+    // Execute the function with the row values
+    const result = evalFunc(...paramValues)
+
+    return {
+      isValid: result,
+      message: result ? "" : "Custom validation failed",
+    }
+  } catch (error) {
+    console.error("Custom function evaluation error:", error)
+    return {
+      isValid: false,
+      message: `Error evaluating custom function: ${error.message}\nFunction: ${functionBody}`,
+    }
+  }
+}
+
+// Define validateDirectFormula at the top level
+function validateDirectFormula(row: DataRecord, formula: string): { isValid: boolean; message: string } {
+  try {
+    // Create a function that has access to row properties as parameters
+    const paramNames = Object.keys(row)
+    const paramValues = paramNames.map((key) => row[key])
+
+    // Create a function that evaluates the formula with the row data
+    const evalFunc = new Function(
+      ...paramNames,
+      `"use strict"; 
+       try { 
+         return Boolean(${formula}); 
+       } catch(err) { 
+         console.error("Formula evaluation error:", err.message); 
+         throw new Error("Invalid formula: " + err.message); 
+       }`,
+    )
+
+    // Execute the function with the row values
+    const result = evalFunc(...paramValues)
+
+    return {
+      isValid: result,
+      message: result ? "" : `Formula evaluated to false: ${formula}`,
+    }
+  } catch (error) {
+    console.error("Formula evaluation error:", error)
+    return {
+      isValid: false,
+      message: `Error evaluating formula: ${error.message}\nFormula: ${formula}`,
+    }
+  }
+}
+
+// Define validateRequired at the top level
+function validateRequired(value: any): { isValid: boolean; message: string } {
+  const isValid = value !== null && value !== undefined && value !== ""
+  return {
+    isValid,
+    message: isValid ? "" : "Value is required",
+  }
+}
+
+// Define validateEquals at the top level
+function validateEquals(value: any, compareValue: any): { isValid: boolean; message: string } {
+  const isValid = value == compareValue
+  return {
+    isValid,
+    message: isValid ? "" : `Value must equal ${compareValue}`,
+  }
+}
+
+// Define validateGreaterThan at the top level
+function validateGreaterThan(value: any, compareValue: any): { isValid: boolean; message: string } {
+  if (typeof value !== "number" || typeof compareValue !== "number") {
+    return {
+      isValid: false,
+      message: `Cannot compare non-numeric values: ${value} > ${compareValue}`,
+    }
+  }
+
+  const isValid = value > compareValue
+  return {
+    isValid,
+    message: isValid ? "" : `Value must be greater than ${compareValue}`,
+  }
+}
+
+// Define validateNotEquals at the top level
+function validateNotEquals(value: any, compareValue: any): { isValid: boolean; message: string } {
+  const isValid = value != compareValue
+  return {
+    isValid,
+    message: isValid ? "" : `Value must not equal ${compareValue}`,
+  }
+}
+
+// Define validateGreaterThanEquals at the top level
+function validateGreaterThanEquals(value: any, compareValue: any): { isValid: boolean; message: string } {
+  if (typeof value !== "number" || typeof compareValue !== "number") {
+    return {
+      isValid: false,
+      message: `Cannot compare non-numeric values: ${value} >= ${compareValue}`,
+    }
+  }
+
+  const isValid = value >= compareValue
+  return {
+    isValid,
+    message: isValid ? "" : `Value must be greater than or equal to ${compareValue}`,
+  }
+}
+
+// Define validateLessThan at the top level
+function validateLessThan(value: any, compareValue: any): { isValid: boolean; message: string } {
+  if (typeof value !== "number" || typeof compareValue !== "number") {
+    return {
+      isValid: false,
+      message: `Cannot compare non-numeric values: ${value} < ${compareValue}`,
+    }
+  }
+
+  const isValid = value < compareValue
+  return {
+    isValid,
+    message: isValid ? "" : `Value must be less than ${compareValue}`,
+  }
+}
+
+// Define validateLessThanEquals at the top level
+function validateLessThanEquals(value: any, compareValue: any): { isValid: boolean; message: string } {
+  if (typeof value !== "number" || typeof compareValue !== "number") {
+    return {
+      isValid: false,
+      message: `Cannot compare non-numeric values: ${value} <= ${compareValue}`,
+    }
+  }
+
+  const isValid = value <= compareValue
+  return {
+    isValid,
+    message: isValid ? "" : `Value must be less than or equal to ${compareValue}`,
+  }
+}
+
+// Define validateRange at the top level
+function validateRange(value: any, min: any, max: any): { isValid: boolean; message: string } {
+  if (typeof value !== "number" || typeof min !== "number" || typeof max !== "number") {
+    return {
+      isValid: false,
+      message: `Cannot compare non-numeric values: ${value} between ${min} and ${max}`,
+    }
+  }
+
+  const isValid = value >= min && value <= max
+  return {
+    isValid,
+    message: isValid ? "" : `Value must be between ${min} and ${max}`,
+  }
+}
+
+// Define validateRegex at the top level
+function validateRegex(value: any, pattern: any): { isValid: boolean; message: string } {
+  try {
+    const regex = new RegExp(pattern)
+    const isValid = regex.test(value)
+    return {
+      isValid,
+      message: isValid ? "" : `Value must match regex pattern: ${pattern}`,
+    }
+  } catch (e) {
+    return {
+      isValid: false,
+      message: `Invalid regex pattern: ${pattern}`,
+    }
+  }
+}
+
+// Define validateType at the top level
+function validateType(value: any, dataType: any): { isValid: boolean; message: string } {
+  let isValid = false
+  let message = ""
+
+  switch (dataType) {
+    case "string":
+      isValid = typeof value === "string"
+      message = isValid ? "" : "Value must be a string"
+      break
+    case "number":
+      isValid = typeof value === "number" && !isNaN(value)
+      message = isValid ? "" : "Value must be a number"
+      break
+    case "boolean":
+      isValid = typeof value === "boolean"
+      message = isValid ? "" : "Value must be a boolean"
+      break
+    case "date":
+      isValid = value instanceof Date && !isNaN(value.getTime())
+      message = isValid ? "" : "Value must be a date"
+      break
+    default:
+      isValid = false
+      message = `Unknown data type: ${dataType}`
+  }
+
+  return {
+    isValid,
+    message,
+  }
 }
 
 // Replace the validateDateBefore function with this simpler version
@@ -314,6 +711,30 @@ function validateDateBetween(
       message: `Error comparing dates: ${e.message}`,
     }
   }
+}
+
+// Define validateDateFormat at the top level
+function validateDateFormat(
+  value: any,
+  format: any,
+  customFormat: any,
+  required?: boolean,
+): { isValid: boolean; message: string } {
+  if (!value) {
+    return { isValid: !required, message: required ? "Date is required" : "" }
+  }
+
+  if (value instanceof Date) {
+    return { isValid: true, message: "" }
+  }
+
+  if (typeof value !== "string") {
+    return { isValid: false, message: "Value must be a string" }
+  }
+
+  // Implement date format validation logic here
+  // This is a placeholder, replace with actual validation
+  return { isValid: true, message: "" }
 }
 
 // Update the validateDateRuleWithSafeguards function to ensure it's correctly handling the validation results
@@ -1784,7 +2205,7 @@ function validateRule(
       break
 
     case "multi-column":
-      ;({ isValid, message } = validateMultiColumn(row, rule.conditions || []))
+      ;({ isValid, message } = validateMultiColumn(row, rule.conditions || [], datasets, valueLists))
       break
 
     case "lookup":
@@ -1802,7 +2223,19 @@ function validateRule(
       ;({ isValid, message } = validateCustom(value, row, rule.parameters.functionBody, datasets))
       break
 
+    // Add or modify the validateFormula function to handle the new searchString parameter
+    // Find the validateFormula function and update it to properly handle direct boolean expressions
+    // Replace the existing validateFormula function with this improved version:
     case "formula":
+      // Log formula rule details
+      console.log("Processing formula rule:", {
+        ruleName: rule.name,
+        formula: rule.parameters.formula,
+        useComparison: rule.parameters.useComparison,
+        operator: rule.parameters.operator,
+        value: rule.parameters.value,
+      })
+
       // Check if we're using comparison or direct boolean evaluation
       if (rule.parameters.useComparison === true && rule.parameters.operator && rule.parameters.value !== undefined) {
         // Use comparison operator
@@ -1813,8 +2246,28 @@ function validateRule(
           rule.parameters.value,
         ))
       } else {
-        // Direct boolean evaluation
-        ;({ isValid, message } = validateDirectFormula(row, rule.parameters.formula))
+        // Direct boolean evaluation (like "score / age > 2")
+        ;({ isValid, message } = validateFormula(row, rule.parameters.formula))
+      }
+
+      console.log("Formula rule validation result:", {
+        ruleName: rule.name,
+        isValid,
+        message,
+        rowData: row,
+      })
+
+      // CRITICAL: Return validation result immediately if validation fails
+      if (!isValid) {
+        return {
+          rowIndex,
+          table: rule.table,
+          column: rule.column,
+          ruleName: rule.name,
+          message: message || `Formula validation failed: ${rule.parameters.formula}`,
+          severity: rule.severity,
+          ruleId: rule.id,
+        }
       }
       break
 
@@ -1872,7 +2325,7 @@ function validateRule(
 
   // If the primary rule passes, check additional conditions if they exist
   if (isValid && rule.additionalConditions && rule.additionalConditions.length > 0) {
-    const additionalResult = validateMultiColumn(row, rule.additionalConditions)
+    const additionalResult = validateMultiColumn(row, rule.additionalConditions, datasets, valueLists)
     isValid = additionalResult.isValid
     if (!isValid) {
       message = additionalResult.message
@@ -1902,910 +2355,6 @@ function validateRule(
 
   return null
 }
-
-// Also update the validateEquals function to use the correct parameter name
-function validateEquals(value: any, compareValue: any): { isValid: boolean; message: string } {
-  // Handle type conversion for numeric comparisons
-  if (typeof compareValue === "number" && typeof value === "string") {
-    const numValue = Number(value)
-    if (!isNaN(numValue)) {
-      value = numValue
-    }
-  }
-
-  const isValid = value == compareValue
-  return {
-    isValid,
-    message: isValid ? "" : `Value must equal ${compareValue}`,
-  }
-}
-
-function validateNotEquals(value: any, compareValue: any): { isValid: boolean; message: string } {
-  // Handle type conversion for numeric comparisons
-  if (typeof compareValue === "number" && typeof value === "string") {
-    const numValue = Number(value)
-    if (!isNaN(numValue)) {
-      value = numValue
-    }
-  }
-
-  const isValid = value != compareValue
-  return {
-    isValid,
-    message: isValid ? "" : `Value must not equal ${compareValue}`,
-  }
-}
-
-function validateGreaterThan(value: any, compareValue: any): { isValid: boolean; message: string } {
-  // Handle type conversion for numeric comparisons
-  if (typeof value === "string") {
-    const numValue = Number(value)
-    if (!isNaN(numValue)) {
-      value = numValue
-    }
-  }
-  if (typeof compareValue === "string") {
-    const numValue = Number(compareValue)
-    if (!isNaN(numValue)) {
-      compareValue = numValue
-    }
-  }
-
-  if (typeof value !== "number" || typeof compareValue !== "number") {
-    return {
-      isValid: false,
-      message: `Cannot compare non-numeric values: ${value} > ${compareValue}`,
-    }
-  }
-
-  const isValid = value > compareValue
-  return {
-    isValid,
-    message: isValid ? "" : `Value must be greater than ${compareValue}`,
-  }
-}
-
-function validateGreaterThanEquals(value: any, compareValue: any): { isValid: boolean; message: string } {
-  // Handle type conversion for numeric comparisons
-  if (typeof value === "string") {
-    const numValue = Number(value)
-    if (!isNaN(numValue)) {
-      value = numValue
-    }
-  }
-  if (typeof compareValue === "string") {
-    const numValue = Number(compareValue)
-    if (!isNaN(numValue)) {
-      compareValue = numValue
-    }
-  }
-
-  if (typeof value !== "number" || typeof compareValue !== "number") {
-    return {
-      isValid: false,
-      message: `Cannot compare non-numeric values: ${value} >= ${compareValue}`,
-    }
-  }
-
-  const isValid = value >= compareValue
-  return {
-    isValid,
-    message: isValid ? "" : `Value must be greater than or equal to ${compareValue}`,
-  }
-}
-
-function validateLessThan(value: any, compareValue: any): { isValid: boolean; message: string } {
-  // Handle type conversion for numeric comparisons
-  if (typeof value === "string") {
-    const numValue = Number(value)
-    if (!isNaN(numValue)) {
-      value = numValue
-    }
-  }
-  if (typeof compareValue === "string") {
-    const numValue = Number(compareValue)
-    if (!isNaN(numValue)) {
-      compareValue = numValue
-    }
-  }
-
-  if (typeof value !== "number" || typeof compareValue !== "number") {
-    return {
-      isValid: false,
-      message: `Cannot compare non-numeric values: ${value} < ${compareValue}`,
-    }
-  }
-
-  const isValid = value < compareValue
-  return {
-    isValid,
-    message: isValid ? "" : `Value must be less than ${compareValue}`,
-  }
-}
-
-function validateLessThanEquals(value: any, compareValue: any): { isValid: boolean; message: string } {
-  // Handle type conversion for numeric comparisons
-  if (typeof value === "string") {
-    const numValue = Number(value)
-    if (!isNaN(numValue)) {
-      value = numValue
-    }
-  }
-  if (typeof compareValue === "string") {
-    const numValue = Number(compareValue)
-    if (!isNaN(numValue)) {
-      compareValue = numValue
-    }
-  }
-
-  if (typeof value !== "number" || typeof compareValue !== "number") {
-    return {
-      isValid: false,
-      message: `Cannot compare non-numeric values: ${value} <= ${compareValue}`,
-    }
-  }
-
-  const isValid = value <= compareValue
-  return {
-    isValid,
-    message: isValid ? "" : `Value must be less than or equal to ${compareValue}`,
-  }
-}
-
-// Function for validating cross-table conditions
-function validateCrossTableConditions(
-  row: DataRecord,
-  conditions: CrossTableCondition[],
-  datasets: DataTables,
-): { isValid: boolean; message: string } {
-  if (!conditions || conditions.length === 0) {
-    return { isValid: true, message: "" }
-  }
-
-  // Start with the first condition
-  const firstCondition = conditions[0]
-  let result: { isValid: boolean; message: string }
-
-  // Check if the referenced table exists
-  if (!datasets[firstCondition.table]) {
-    return { isValid: false, message: `Referenced table ${firstCondition.table} not found` }
-  }
-
-  // For cross-table conditions, we need to check if ANY row in the referenced table meets the condition
-  // This is a common pattern for cross-table validation
-  const tableData = datasets[firstCondition.table]
-
-  // Evaluate the first condition against all rows in the referenced table
-  let foundMatch = false
-  for (const targetRow of tableData) {
-    result = evaluateCondition(targetRow[firstCondition.column], firstCondition)
-    if (result.isValid) {
-      foundMatch = true
-      break
-    }
-  }
-
-  let isValid = foundMatch
-  let message = foundMatch
-    ? ""
-    : `No matching record found in ${firstCondition.table} for condition on ${firstCondition.column}`
-
-  // Process subsequent conditions with their logical operators
-  for (let i = 1; i < conditions.length; i++) {
-    const prevCondition = conditions[i - 1]
-    const currentCondition = conditions[i]
-    const logicalOp = prevCondition.logicalOperator || "AND"
-
-    // Check if the referenced table exists
-    if (!datasets[currentCondition.table]) {
-      return { isValid: false, message: `Referenced table ${currentCondition.table} not found` }
-    }
-
-    // Evaluate the current condition against all rows in its referenced table
-    const tableData = datasets[currentCondition.table]
-    foundMatch = false
-
-    for (const targetRow of tableData) {
-      result = evaluateCondition(targetRow[currentCondition.column], currentCondition)
-      if (result.isValid) {
-        foundMatch = true
-        break
-      }
-    }
-
-    if (logicalOp === "AND") {
-      isValid = isValid && foundMatch
-      if (!foundMatch) {
-        message = `No matching record found in ${currentCondition.table} for condition on ${currentCondition.column}`
-      }
-    } else {
-      // OR
-      isValid = isValid || foundMatch
-      if (isValid) {
-        message = ""
-      } else {
-        message = `No matching record found in ${currentCondition.table} for condition on ${currentCondition.column}`
-      }
-    }
-  }
-
-  return { isValid, message }
-}
-
-// Function for validating multi-column rules with AND/OR logic
-function validateMultiColumn(row: DataRecord, conditions: Condition[]): { isValid: boolean; message: string } {
-  if (!conditions || conditions.length === 0) {
-    return { isValid: true, message: "" }
-  }
-
-  // Start with the first condition
-  let result = evaluateCondition(row[conditions[0].column], conditions[0])
-  let isValid = result.isValid
-  let message = result.message
-
-  // Process subsequent conditions with their logical operators
-  for (let i = 1; i < conditions.length; i++) {
-    const prevCondition = conditions[i - 1]
-    const currentCondition = conditions[i]
-    const logicalOp = prevCondition.logicalOperator || "AND"
-
-    result = evaluateCondition(row[currentCondition.column], currentCondition)
-
-    if (logicalOp === "AND") {
-      isValid = isValid && result.isValid
-      if (!result.isValid) {
-        message = result.message
-      }
-    } else {
-      // OR
-      isValid = isValid || result.isValid
-      if (isValid) {
-        message = ""
-      } else {
-        message = result.message
-      }
-    }
-  }
-
-  return { isValid, message }
-}
-
-// Helper function to evaluate a single condition
-function evaluateCondition(value: any, condition: Condition): { isValid: boolean; message: string } {
-  const { operator, value: expectedValue, column } = condition
-
-  // Special handling for blank checks
-  if (operator === "is-blank") {
-    const isBlank = value === null || value === undefined || value === ""
-    return {
-      isValid: isBlank,
-      message: isBlank ? "" : `${column} should be blank`,
-    }
-  }
-
-  if (operator === "is-not-blank") {
-    const isNotBlank = value !== null && value !== undefined && value !== ""
-    return {
-      isValid: isNotBlank,
-      message: isNotBlank ? "" : `${column} should not be blank`,
-    }
-  }
-
-  switch (operator) {
-    case "==":
-      return {
-        isValid: value == expectedValue,
-        message: value == expectedValue ? "" : `${column} should equal ${expectedValue}`,
-      }
-    case "!=":
-      return {
-        isValid: value != expectedValue,
-        message: value != expectedValue ? "" : `${column} should not equal ${expectedValue}`,
-      }
-    case ">":
-      return {
-        isValid: value > expectedValue,
-        message: value > expectedValue ? "" : `${column} should be greater than ${expectedValue}`,
-      }
-    case ">=":
-      return {
-        isValid: value >= expectedValue,
-        message: value >= expectedValue ? "" : `${column} should be greater than or equal to ${expectedValue}`,
-      }
-    case "<":
-      return {
-        isValid: value < expectedValue,
-        message: value < expectedValue ? "" : `${column} should be less than ${expectedValue}`,
-      }
-    case "<=":
-      return {
-        isValid: value <= expectedValue,
-        message: value <= expectedValue ? "" : `${column} should be less than or equal to ${expectedValue}`,
-      }
-    case "contains":
-      return {
-        isValid: typeof value === "string" && value.includes(String(expectedValue)),
-        message:
-          typeof value === "string" && value.includes(String(expectedValue))
-            ? ""
-            : `${column} should contain ${expectedValue}`,
-      }
-    case "not-contains":
-      return {
-        isValid: typeof value === "string" && !value.includes(String(expectedValue)),
-        message:
-          typeof value === "string" && !value.includes(String(expectedValue))
-            ? ""
-            : `${column} should not contain ${expectedValue}`,
-      }
-    case "starts-with":
-      return {
-        isValid: typeof value === "string" && value.startsWith(String(expectedValue)),
-        message:
-          typeof value === "string" && value.startsWith(String(expectedValue))
-            ? ""
-            : `${column} should start with ${expectedValue}`,
-      }
-    case "ends-with":
-      return {
-        isValid: typeof value === "string" && value.endsWith(String(expectedValue)),
-        message:
-          typeof value === "string" && value.endsWith(String(expectedValue))
-            ? ""
-            : `${column} should end with ${expectedValue}`,
-      }
-    case "matches":
-      try {
-        const regex = new RegExp(String(expectedValue))
-        const matches = typeof value === "string" && regex.test(value)
-        return {
-          isValid: matches,
-          message: matches ? "" : `${column} should match pattern ${expectedValue}`,
-        }
-      } catch (error) {
-        return { isValid: false, message: `Invalid regex pattern: ${error}` }
-      }
-    default:
-      return { isValid: true, message: "" }
-  }
-}
-
-function validateRequired(value: any): { isValid: boolean; message: string } {
-  const isValid = value !== null && value !== undefined && value !== ""
-  return {
-    isValid,
-    message: isValid ? "" : "Field is required",
-  }
-}
-
-function validateRange(value: any, min?: number, max?: number): { isValid: boolean; message: string } {
-  if (value === null || value === undefined) {
-    return { isValid: true, message: "" }
-  }
-
-  if (typeof value !== "number") {
-    return {
-      isValid: false,
-      message: `Value must be a number, got ${typeof value}`,
-    }
-  }
-
-  let isValid = true
-  let message = ""
-
-  if (min !== undefined && value < min) {
-    isValid = false
-    message = `Value ${value} is less than minimum ${min}`
-  } else if (max !== undefined && value > max) {
-    isValid = false
-    message = `Value ${value} is greater than maximum ${max}`
-  }
-
-  return { isValid, message }
-}
-
-function validateRegex(value: any, pattern?: string): { isValid: boolean; message: string } {
-  if (!pattern || value === null || value === undefined) {
-    return { isValid: true, message: "" }
-  }
-
-  if (typeof value !== "string") {
-    return {
-      isValid: false,
-      message: `Value must be a string for regex validation, got ${typeof value}`,
-    }
-  }
-
-  try {
-    const regex = new RegExp(pattern)
-    const isValid = regex.test(value)
-    return {
-      isValid,
-      message: isValid ? "" : `Value does not match pattern ${pattern}`,
-    }
-  } catch (error) {
-    return {
-      isValid: false,
-      message: `Invalid regex pattern: ${error}`,
-    }
-  }
-}
-
-function validateType(value: any, expectedType?: string): { isValid: boolean; message: string } {
-  if (!expectedType || value === null || value === undefined) {
-    return { isValid: true, message: "" }
-  }
-
-  let isValid = false
-
-  switch (expectedType) {
-    case "string":
-      isValid = typeof value === "string"
-      break
-    case "number":
-      isValid = typeof value === "number"
-      break
-    case "boolean":
-      isValid = typeof value === "boolean"
-      break
-    case "date":
-      isValid = value instanceof Date
-      break
-    case "object":
-      isValid = typeof value === "object" && value !== null && !(value instanceof Date) && !Array.isArray(value)
-      break
-    case "array":
-      isValid = Array.isArray(value)
-      break
-    default:
-      isValid = true
-  }
-
-  return {
-    isValid,
-    message: isValid ? "" : `Expected type ${expectedType}, got ${typeof value}`,
-  }
-}
-
-function validateEnum(value: any, allowedValues?: any[]): { isValid: boolean; message: string } {
-  if (!allowedValues || value === null || value === undefined) {
-    return { isValid: true, message: "" }
-  }
-
-  // Check if allowedValues is actually an array
-  if (!Array.isArray(allowedValues)) {
-    console.error("validateEnum received non-array allowedValues:", allowedValues)
-
-    // Handle case where allowedValues might be a comma-separated string
-    if (typeof allowedValues === "string") {
-      allowedValues = allowedValues.split(",").map((val) => val.trim())
-      console.log("Converted string to array:", allowedValues)
-    }
-    // Convert to array if possible, or use empty array as fallback
-    else if (typeof allowedValues === "object") {
-      allowedValues = Object.values(allowedValues)
-    } else {
-      allowedValues = [allowedValues]
-    }
-  }
-
-  // Add debug logging for enum validation
-  console.log("Enum validation:", {
-    value,
-    allowedValues,
-    valueType: typeof value,
-    allowedValuesType: typeof allowedValues,
-  })
-
-  // By default, enum validation is case-sensitive
-  const isValid = allowedValues.includes(value)
-  return {
-    isValid,
-    message: isValid ? "" : `Value must be one of: ${allowedValues.join(", ")}`,
-  }
-}
-
-// New function to support case-insensitive enum validation
-function validateEnumCaseInsensitive(value: any, allowedValues?: any[]): { isValid: boolean; message: string } {
-  if (!allowedValues || value === null || value === undefined) {
-    return { isValid: true, message: "" }
-  }
-
-  // Check if allowedValues is actually an array
-  if (!Array.isArray(allowedValues)) {
-    // Handle case where allowedValues might be a comma-separated string
-    if (typeof allowedValues === "string") {
-      allowedValues = allowedValues.split(",").map((val) => val.trim())
-    }
-    // Convert to array if possible, or use empty array as fallback
-    else if (typeof allowedValues === "object") {
-      allowedValues = Object.values(allowedValues)
-    } else {
-      allowedValues = [allowedValues]
-    }
-  }
-
-  // For case-insensitive comparison, convert everything to lowercase strings
-  const valueStr = String(value).toLowerCase()
-  const allowedLowercase = allowedValues.map((val) => String(val).toLowerCase())
-
-  const isValid = allowedLowercase.includes(valueStr)
-  return {
-    isValid,
-    message: isValid ? "" : `Value must be one of (case-insensitive): ${allowedValues.join(", ")}`,
-  }
-}
-
-// Find the validateList function and replace it with this improved version
-// In the validateList function, update the parameter handling to check for both listId and valueList
-// This will ensure compatibility with rules created through different interfaces
-
-function validateList(
-  value: any,
-  listId?: string,
-  valueLists: ValueList[] = [],
-): { isValid: boolean; message: string } {
-  // Log the validation attempt for debugging
-  console.log("validateList called with:", { value, listId, valueType: typeof value })
-
-  // Log available lists
-  console.log(
-    "Available value lists:",
-    valueLists.length,
-    valueLists.map((list) => ({ id: list.id, name: list.name, valueCount: list.values.length })),
-  )
-
-  // Check for both listId and valueList parameter names for backward compatibility
-  const effectiveListId = listId || null
-
-  if (!effectiveListId) {
-    console.log("Skipping list validation - no listId provided")
-    return { isValid: false, message: "List ID is required for validation" }
-  }
-
-  // Skip validation for null/undefined/empty values unless required is specified
-  if (value === null || value === undefined || value === "") {
-    console.log("Skipping list validation - empty value")
-    return { isValid: true, message: "" }
-  }
-
-  const list = valueLists.find((l) => l.id === effectiveListId)
-  if (!list) {
-    console.warn(`List with ID ${effectiveListId} not found`)
-    return { isValid: false, message: `List with ID ${effectiveListId} not found` }
-  }
-
-  // Convert value to string for comparison
-  const stringValue = String(value)
-
-  // Log the validation details
-  console.log("List validation details:", {
-    listName: list.name,
-    listValues: list.values,
-    valueToCheck: stringValue,
-  })
-
-  // Perform the validation check
-  const isValid = list.values.includes(stringValue)
-
-  // Log the result
-  console.log(`List validation result for "${stringValue}": ${isValid ? "PASS" : "FAIL"}`)
-
-  return {
-    isValid,
-    message: isValid ? "" : `Value "${stringValue}" must be one of the values in the "${list.name}" list`,
-  }
-}
-
-function validateDependency(
-  value: any,
-  dependsOnValue: any,
-  condition?: string,
-): { isValid: boolean; message: string } {
-  if (!condition) {
-    return { isValid: true, message: "" }
-  }
-
-  try {
-    // Create a function from the condition string
-    const evalFunc = new Function("value", "dependsOnValue", `return ${condition};`)
-
-    const isValid = evalFunc(value, dependsOnValue)
-    return {
-      isValid,
-      message: isValid ? "" : `Dependency condition not met: ${condition}`,
-    }
-  } catch (error) {
-    return {
-      isValid: false,
-      message: `Invalid dependency condition: ${error}`,
-    }
-  }
-}
-
-function validateLookup(
-  row: any,
-  column: string,
-  lookupTable?: string,
-  lookupColumn?: string,
-  validation?: string,
-  datasets?: DataTables,
-): { isValid: boolean; message: string } {
-  if (!lookupTable || !lookupColumn || !datasets) {
-    return { isValid: true, message: "" }
-  }
-
-  const lookupData = datasets[lookupTable]
-  if (!lookupData || lookupData.length === 0) {
-    return { isValid: false, message: `Lookup table ${lookupTable} not found or empty` }
-  }
-
-  // Extract all values from the lookup column
-  const lookupValues = lookupData.map((r) => r[lookupColumn])
-
-  if (validation) {
-    try {
-      // Create a function from the validation string
-      const validationFunc = new Function("value", "lookupValues", "column", `return ${validation};`)
-
-      // Validate
-      const isValid = validationFunc(row, lookupValues, column)
-      return {
-        isValid,
-        message: isValid ? "" : `Lookup validation failed: ${validation}`,
-      }
-    } catch (error) {
-      return {
-        isValid: false,
-        message: `Invalid lookup validation: ${error}`,
-      }
-    }
-  } else {
-    // Default validation: check if the value exists in the lookup values
-    const isValid = lookupValues.includes(row[column])
-    return {
-      isValid,
-      message: isValid ? "" : `Value not found in lookup table ${lookupTable}, column ${lookupColumn}`,
-    }
-  }
-}
-
-function validateCustom(
-  value: any,
-  row: any,
-  functionBody?: string,
-  datasets?: DataTables,
-): { isValid: boolean; message: string } {
-  if (!functionBody) {
-    return { isValid: true, message: "" }
-  }
-
-  try {
-    // Create a function from the function body
-    const customFunc = new Function("value", "row", "datasets", functionBody)
-
-    // Execute the custom validation function
-    const result = customFunc(value, row, datasets)
-
-    // Handle different return types
-    if (typeof result === "boolean") {
-      return {
-        isValid: result,
-        message: result ? "" : "Custom validation failed",
-      }
-    } else if (typeof result === "object" && result !== null) {
-      return {
-        isValid: result.isValid !== undefined ? result.isValid : true,
-        message: result.message || (result.isValid ? "" : "Custom validation failed"),
-      }
-    } else {
-      return {
-        isValid: Boolean(result),
-        message: Boolean(result) ? "" : "Custom validation failed",
-      }
-    }
-  } catch (error) {
-    return {
-      isValid: false,
-      message: `Error in custom validation: ${error}`,
-    }
-  }
-}
-
-// Add or modify the validateContains function to handle the new searchString parameter
-
-function validateContains(
-  value: any,
-  searchString?: string,
-  matchType: "contains" | "not-contains" | "starts-with" | "ends-with" | "exact" = "contains",
-  caseSensitive = false,
-): { isValid: boolean; message: string } {
-  if (!searchString || value === null || value === undefined) {
-    return { isValid: true, message: "" }
-  }
-
-  if (typeof value !== "string") {
-    return {
-      isValid: false,
-      message: `Value must be a string for contains validation, got ${typeof value}`,
-    }
-  }
-
-  const stringValue = String(value)
-  let valueToCheck = stringValue
-  let searchTerm = searchString
-
-  // Handle case sensitivity
-  if (!caseSensitive) {
-    valueToCheck = stringValue.toLowerCase()
-    searchTerm = searchString.toLowerCase()
-  }
-
-  let isValid = false
-  let message = ""
-
-  switch (matchType) {
-    case "contains":
-      isValid = valueToCheck.includes(searchTerm)
-      message = isValid ? "" : `Value must contain: "${searchString}"`
-      break
-    case "not-contains":
-      isValid = !valueToCheck.includes(searchTerm)
-      message = isValid ? "" : `Value must not contain: "${searchString}"`
-      break
-    case "starts-with":
-      isValid = valueToCheck.startsWith(searchTerm)
-      message = isValid ? "" : `Value must start with: "${searchString}"`
-      break
-    case "ends-with":
-      isValid = valueToCheck.endsWith(searchTerm)
-      message = isValid ? "" : `Value must end with: "${searchString}"`
-      break
-    case "exact":
-      isValid = valueToCheck === searchTerm
-      message = isValid ? "" : `Value must exactly match: "${searchString}"`
-      break
-    default:
-      isValid = valueToCheck.includes(searchTerm)
-      message = isValid ? "" : `Value must contain: "${searchString}"`
-  }
-
-  return { isValid, message }
-}
-
-// Simple and direct formula validation function
-function validateFormula(
-  row: DataRecord,
-  formula?: string,
-  operator?: string,
-  value?: number,
-): { isValid: boolean; message: string } {
-  if (!formula || operator === undefined || value === undefined) {
-    return { isValid: true, message: "" }
-  }
-
-  try {
-    console.log("Formula with comparison:", formula, operator, value)
-
-    // Calculate the formula result by directly substituting values
-    const result = evaluateSimpleFormula(formula, row)
-    console.log("Formula evaluation result:", result)
-
-    // Compare the result with the expected value using the specified operator
-    let isValid = false
-    switch (operator) {
-      case "==":
-        isValid = result === value
-        break
-      case "!=":
-        isValid = result !== value
-        break
-      case ">":
-        isValid = result > value
-        break
-      case ">=":
-        isValid = result >= value
-        break
-      case "<":
-        isValid = result < value
-        break
-      case "<=":
-        isValid = result <= value
-        break
-      default:
-        isValid = false
-    }
-
-    // Create a detailed message for failed validations
-    let detailedMessage = ""
-    if (!isValid) {
-      detailedMessage = `Formula result ${result} ${operator} ${value} is false`
-      detailedMessage += "\nColumn values:"
-      Object.keys(row).forEach((col) => {
-        if (formula.includes(col)) {
-          detailedMessage += `\n  ${col} = ${JSON.stringify(row[col])}`
-        }
-      })
-    }
-
-    return {
-      isValid,
-      message: isValid ? "" : detailedMessage,
-    }
-  } catch (error) {
-    console.error("Formula comparison evaluation error:", error)
-
-    // Create a more helpful error message
-    let errorMessage = `Error evaluating formula: ${error.message}`
-    errorMessage += "\nFormula: " + formula
-    errorMessage += "\nColumn values:"
-    Object.keys(row).forEach((col) => {
-      if (formula.includes(col)) {
-        errorMessage += `\n  ${col} = ${JSON.stringify(row[col])}`
-      }
-    })
-
-    return {
-      isValid: false,
-      message: errorMessage,
-    }
-  }
-}
-
-// Simple and direct boolean formula validation
-function validateDirectFormula(row: DataRecord, formula?: string): { isValid: boolean; message: string } {
-  if (!formula) {
-    return { isValid: true, message: "" }
-  }
-
-  try {
-    console.log("Direct formula:", formula)
-
-    // For direct formulas, we evaluate the expression and convert to boolean
-    const result = evaluateSimpleFormula(formula, row)
-    console.log("Direct formula evaluation result:", result)
-
-    // Convert the result to a boolean
-    const boolResult = Boolean(result)
-
-    // Create a detailed message for failed validations
-    let detailedMessage = ""
-    if (!boolResult) {
-      detailedMessage = `Formula evaluated to false: ${formula} (Result: ${result})`
-      detailedMessage += "\nColumn values:"
-      Object.keys(row).forEach((col) => {
-        if (formula.includes(col)) {
-          detailedMessage += `\n  ${col} = ${JSON.stringify(row[col])}`
-        }
-      })
-    }
-
-    return {
-      isValid: boolResult,
-      message: boolResult ? "" : detailedMessage,
-    }
-  } catch (error) {
-    console.error("Direct formula evaluation error:", error)
-
-    // Create a more helpful error message
-    let errorMessage = `Error evaluating formula: ${error.message}`
-    errorMessage += "\nFormula: " + formula
-    errorMessage += "\nColumn values:"
-    Object.keys(row).forEach((col) => {
-      if (formula.includes(col)) {
-        errorMessage += `\n  ${col} = ${JSON.stringify(row[col])}`
-      }
-    })
-
-    return {
-      isValid: false,
-      message: errorMessage,
-    }
-  }
-}
-
-// Now let's improve the validateJavaScriptFormula function to ensure it correctly evaluates formulas
-// Replace the entire validateJavaScriptFormula function with this improved version:
 
 // Completely re-implemented JavaScript formula validation with a safer approach
 function validateJavaScriptFormula(row: DataRecord, formula?: string): { isValid: boolean; message: string } {
@@ -2968,155 +2517,210 @@ function validateJavaScriptFormula(row: DataRecord, formula?: string): { isValid
       console.error("JavaScript formula compilation error:", error)
       return {
         isValid: false,
-        message: `Error in JavaScript formula syntax: ${error.message}\nFormula: ${formula}`,
+        message: `Error in JavaScript formula syntax: ${error.message}
+Formula: ${formula}`,
       }
     }
   } catch (error) {
     console.error("JavaScript formula evaluation error:", error)
     return {
       isValid: false,
-      message: `Error evaluating JavaScript formula: ${error.message}\nFormula: ${formula}\nRow data: ${JSON.stringify(row)}`,
+      message: `Error evaluating JavaScript formula: ${error.message}
+Formula: ${formula}
+Row data: ${JSON.stringify(row)}`,
     }
   }
 }
 
-// Add these functions to handle date validation
-
-function validateDateFormat(
-  value: any,
-  format?: string,
-  customFormat?: string,
-  required?: boolean,
+// Also add the missing validateFormula function
+// Improved validateFormula function with better debugging and error handling
+function validateFormula(
+  row: DataRecord,
+  formula?: string,
+  operator?: string,
+  value?: number,
 ): { isValid: boolean; message: string } {
-  console.log("validateDateFormat called with:", { value, format, customFormat, required })
-
-  if (value === null || value === undefined || value === "") {
-    // If the field is required, empty values are invalid
-    if (required === true) {
-      return { isValid: false, message: "Field is required and must be a valid date" }
-    }
-    return { isValid: true, message: "" }
+  if (!formula || formula.trim() === "") {
+    console.warn("Empty formula provided to validateFormula")
+    // For empty formulas, we should return false instead of true
+    return { isValid: false, message: "Empty formula provided" }
   }
 
-  // For Date objects, we're checking if they would format correctly
-  if (value instanceof Date) {
-    if (isNaN(value.getTime())) {
-      return {
-        isValid: false,
-        message: "Date is invalid",
+  try {
+    // Log inputs for debugging
+    console.log("Math Formula validation inputs:", {
+      formula,
+      operator,
+      value,
+      rowSample: Object.fromEntries(
+        Object.entries(row).slice(0, 5), // Just log first 5 properties to avoid overwhelming logs
+      ),
+    })
+
+    // Create a function that has access to row properties as parameters
+    const paramNames = Object.keys(row)
+    const paramValues = paramNames.map((key) => row[key])
+
+    let evalFunc: Function
+    let result: any
+    let isValid = false
+
+    // Case 1: Direct boolean expression like "score > 20" or "amount / count > 5"
+    if (operator === undefined || value === undefined) {
+      // DEBUG - Log the formula being evaluated
+      console.log(`MATH FORMULA DEBUG: Evaluating direct expression: ${formula}`)
+
+      // Create a function that evaluates the boolean expression directly
+      evalFunc = new Function(
+        ...paramNames,
+        `"use strict";
+        try {
+          // Evaluate the formula directly
+          const result = ${formula};
+          console.log("Direct formula evaluation result:", result);
+          return Boolean(result);
+        } catch(err) {
+          console.error("Math Formula evaluation error:", err.message);
+          throw new Error("Invalid formula: " + err.message);
+        }`,
+      )
+
+      try {
+        // Execute the function with row values
+        result = evalFunc(...paramValues)
+        isValid = result === true // Ensure it's strictly a boolean true
+      } catch (error) {
+        console.error("Error executing formula:", error)
+        return { isValid: false, message: `Error executing formula: ${error.message}` }
       }
+
+      // Critical debugging output
+      console.log(
+        `MATH FORMULA RESULT: Direct expression "${formula}" evaluated to: ${result} (${typeof result}), isValid = ${isValid}`,
+      )
+    }
+    // Case 2: Formula with separate comparison (e.g., formula = "amount", operator = ">", value = 100)
+    else {
+      // DEBUG - Log the formula being evaluated
+      console.log(`MATH FORMULA DEBUG: Evaluating computed expression: ${formula} ${operator} ${value}`)
+
+      // First evaluate the formula to get a numeric result
+      evalFunc = new Function(
+        ...paramNames,
+        `"use strict";
+        try {
+          const result = ${formula};
+          console.log("Formula computed value:", result);
+          return result;
+        } catch(err) {
+          console.error("Math Formula evaluation error:", err.message);
+          throw new Error("Invalid formula: " + err.message);
+        }`,
+      )
+
+      let computedValue
+      try {
+        // Get the computed value
+        computedValue = evalFunc(...paramValues)
+      } catch (error) {
+        console.error("Error computing formula value:", error)
+        return { isValid: false, message: `Error computing formula value: ${error.message}` }
+      }
+
+      // Now compare with the expected value
+      switch (operator) {
+        case "==":
+          isValid = computedValue == value
+          break
+        case "!=":
+          isValid = computedValue != value
+          break
+        case ">":
+          isValid = computedValue > value
+          break
+        case ">=":
+          isValid = computedValue >= value
+          break
+        case "<":
+          isValid = computedValue < value
+          break
+        case "<=":
+          isValid = computedValue <= value
+          break
+        default:
+          isValid = false
+          console.error(`Unknown operator: ${operator}`)
+      }
+
+      // Critical debugging output
+      console.log(
+        `MATH FORMULA RESULT: Formula "${formula}" = ${computedValue}, comparison: ${computedValue} ${operator} ${value} = ${isValid}`,
+      )
     }
 
-    // Date objects are always valid for format checking
-    return { isValid: true, message: "" }
-  }
-
-  // If it's not a Date object, check if it's a string in the right format
-  if (typeof value !== "string") {
+    // CRITICAL: Return the validation result
+    // Only return isValid: true if the formula evaluated to true
     return {
-      isValid: false,
-      message: `Value must be a string for format validation, got ${typeof value}: ${value}`,
+      isValid: isValid,
+      message: isValid
+        ? ""
+        : `Math formula validation failed: ${formula}${operator !== undefined ? ` ${operator} ${value}` : ""}`,
     }
-  }
-
-  // If format is "any", just check if the string can be parsed as a valid date
-  if (format === "any") {
-    const date = new Date(value)
-    const isValid = !isNaN(date.getTime())
+  } catch (error) {
+    console.error("Math Formula validation error:", error)
     return {
-      isValid,
-      message: isValid ? "" : "Value must be a valid date",
+      isValid: false, // Fail validation if there's an error
+      message: `Error in math formula: ${error.message}\nFormula: ${formula}`,
     }
-  }
-
-  let regex: RegExp
-  let formatDescription: string
-
-  switch (format) {
-    case "iso":
-      regex = /^\d{4}-\d{2}-\d{2}$/
-      formatDescription = "YYYY-MM-DD"
-      break
-    case "us":
-      regex = /^\d{1,2}\/\d{1,2}\/\d{4}$/
-      formatDescription = "MM/DD/YYYY"
-      break
-    case "eu":
-      regex = /^\d{1,2}\/\d{1,2}\/\d{4}$/
-      formatDescription = "DD/MM/YYYY"
-      break
-    case "custom":
-      if (!customFormat) {
-        return {
-          isValid: false,
-          message: "Custom format not specified",
-        }
-      }
-      // Convert the custom format to a regex
-      // This is a simplified version - a real implementation would be more complex
-      const regexStr = customFormat
-        .replace(/YYYY/g, "\\d{4}")
-        .replace(/MM/g, "\\d{2}")
-        .replace(/DD/g, "\\d{2}")
-        .replace(/HH/g, "\\d{2}")
-        .replace(/mm/g, "\\d{2}")
-        .replace(/ss/g, "\\d{2}")
-      regex = new RegExp(`^${regexStr}$`)
-      formatDescription = customFormat
-      break
-    default:
-      return {
-        isValid: false,
-        message: `Unknown format: ${format}`,
-      }
-  }
-
-  const isValid = regex.test(value)
-
-  console.log("validateDateFormat result:", { isValid, regex: regex.toString(), value })
-
-  return {
-    isValid,
-    message: isValid ? "" : `Date must be in ${formatDescription} format`,
   }
 }
 
-// Helper function to evaluate a formula by directly substituting values
-function evaluateSimpleFormula(formula: string, row: DataRecord): any {
-  // Create a copy of the formula that we'll modify
-  let processedFormula = formula
+// Remove the evaluateSimpleFormula function as we're now using a more direct approach
+const validateCrossTableConditions = (
+  row: DataRecord,
+  crossTableConditions: any[],
+  datasets: DataTables,
+): { isValid: boolean; message: string } => {
+  let isValid = true
+  let message = ""
 
-  // Get all column names from the row
-  const columnNames = Object.keys(row)
+  for (const condition of crossTableConditions) {
+    const { table, column, operator, value } = condition
 
-  // Sort column names by length (descending) to avoid partial replacements
-  columnNames.sort((a, b) => b.length - a.length)
+    // Check if the table exists
+    if (!datasets[table]) {
+      return { isValid: false, message: `Table "${table}" not found` }
+    }
 
-  // Replace each column name with its actual value from the row
-  for (const columnName of columnNames) {
-    // Use regex with word boundaries
-    const regex = new RegExp(`\\b${columnName}\\b`, "g")
+    // Find the first row in the table that matches the condition
+    const matchingRow = datasets[table].find((tableRow) => {
+      const tableValue = tableRow[column]
 
-    // Get the value for this column
-    const value = row[columnName]
+      switch (operator) {
+        case "==":
+          return tableValue == value
+        case "!=":
+          return tableValue != value
+        case ">":
+          return tableValue > value
+        case ">=":
+          return tableValue >= value
+        case "<":
+          return tableValue < value
+        case "<=":
+          return tableValue <= value
+        default:
+          return false
+      }
+    })
 
-    // Replace the column name with its literal value
-    if (typeof value === "string") {
-      // For strings, wrap in quotes
-      processedFormula = processedFormula.replace(regex, JSON.stringify(value))
-    } else if (value === null || value === undefined) {
-      // For null/undefined, use null
-      processedFormula = processedFormula.replace(regex, "null")
-    } else {
-      // For numbers, booleans, etc. use the value directly
-      processedFormula = processedFormula.replace(regex, String(value))
+    // If no matching row is found, the condition is not valid
+    if (!matchingRow) {
+      isValid = false
+      message = `No matching row found in table "${table}" for condition: ${column} ${operator} ${value}`
+      break
     }
   }
 
-  console.log("Processed formula:", processedFormula)
-
-  // Evaluate the processed formula
-  // We use new Function to evaluate the expression in a safe context
-  const evalFunc = new Function(`return (${processedFormula});`)
-  return evalFunc()
+  return { isValid, message }
 }

@@ -31,6 +31,7 @@ export function FormulaSyntaxEditor({
   onFormulaChange,
   onUseComparisonChange,
   onOperatorChange,
+  onValueChange,
   data,
 }: SyntaxDrivenFormulaEditorProps) {
   const [formulaInput, setFormulaInput] = useState(formula)
@@ -156,7 +157,7 @@ export function FormulaSyntaxEditor({
             <Input
               id="value"
               type="number"
-              value={value}
+              value={String(value)}
               onChange={(e) => onValueChange(Number(e.target.value))}
               placeholder="e.g., 100"
             />

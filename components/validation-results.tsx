@@ -98,6 +98,31 @@ export function ValidationResults({
     { key: "severity", label: "Severity" },
   ]
 
+  // Add a specific debug section for formula rules to help diagnose issues
+  // Add this near the beginning of the component, after the state declarations
+
+  useEffect(() => {
+    // Log formula-related validation results
+    const formulaResults = initialResults.filter(
+      (result) =>
+        result.ruleName.toLowerCase().includes("formula") ||
+        rules.some((r) => r.id === result.ruleId && r.ruleType === "formula"),
+    )
+
+    if (formulaResults.length > 0) {
+      console.log("Math Formula validation results:", formulaResults)
+
+      // Check for specific formula patterns
+      const scoreAgeResults = formulaResults.filter(
+        (result) => result.message && result.message.includes("score") && result.message.includes("age"),
+      )
+
+      if (scoreAgeResults.length > 0) {
+        console.log("Score/age formula validation results:", scoreAgeResults)
+      }
+    }
+  }, [initialResults, rules])
+
   // Add this near the beginning of the component, after the state declarations
   useEffect(() => {
     console.log("ValidationResults - Current validation results:", initialResults)
@@ -122,7 +147,7 @@ export function ValidationResults({
       console.log("Date-related validation results:", dateResults)
     }
 
-    // Log JavaScript formula validation results
+    // Formula rule validation result
     const jsFormulaResults = initialResults.filter(
       (result) =>
         result.ruleName.toLowerCase().includes("javascript") ||
@@ -130,6 +155,17 @@ export function ValidationResults({
     )
     if (jsFormulaResults.length > 0) {
       console.log("JavaScript formula validation results:", jsFormulaResults)
+    }
+
+    // Add below it this additional debugging code for math formula rules
+    // Log Math Formula validation results
+    const mathFormulaResults = initialResults.filter(
+      (result) =>
+        result.ruleName.toLowerCase().includes("math formula") ||
+        (result.message && result.message.toLowerCase().includes("math formula")),
+    )
+    if (mathFormulaResults.length > 0) {
+      console.log("Math Formula validation results:", mathFormulaResults)
     }
 
     // Check for specific formula patterns

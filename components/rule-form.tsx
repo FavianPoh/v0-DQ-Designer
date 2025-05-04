@@ -21,6 +21,7 @@ import type {
 import { JavaScriptExplainer } from "./javascript-explainer"
 import { CrossColumnTestUtility } from "./cross-column-test-utility"
 import { toast } from "@/components/ui/use-toast"
+import { FormulaRuleEditor } from "./formula-rule-editor"
 
 interface RuleFormProps {
   initialRule?: DataQualityRule
@@ -1104,12 +1105,15 @@ export function RuleForm(props: RuleFormProps) {
       case "formula":
         return (
           <div>
-            <Label htmlFor="expression">Expression</Label>
-            <Input
-              type="text"
-              id="expression"
-              value={rule.parameters.expression || ""}
-              onChange={(e) => handleParameterChange("expression", e.target.value)}
+            <FormulaRuleEditor
+              columns={tableColumns[rule.table] || []}
+              formula={rule.parameters.formula || ""}
+              operator={rule.parameters.operator || "=="}
+              value={rule.parameters.value || 0}
+              onFormulaChange={(formula) => handleParameterChange("formula", formula)}
+              onOperatorChange={(operator) => handleParameterChange("operator", operator)}
+              onValueChange={(value) => handleParameterChange("value", value)}
+              selectedColumn={rule.column} // Pass the selected column
             />
           </div>
         )
