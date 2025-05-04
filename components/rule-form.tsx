@@ -1066,7 +1066,10 @@ export function RuleForm(props: RuleFormProps) {
         return (
           <div>
             <Label htmlFor="valueList">Value List</Label>
-            <Select onValueChange={(value) => handleParameterChange("valueList", value)}>
+            <Select
+              value={rule.parameters.valueList || ""}
+              onValueChange={(value) => handleParameterChange("valueList", value)}
+            >
               <SelectTrigger>
                 <SelectValue placeholder="Select a value list" />
               </SelectTrigger>
@@ -1078,6 +1081,12 @@ export function RuleForm(props: RuleFormProps) {
                 ))}
               </SelectContent>
             </Select>
+            {rule.parameters.valueList && (
+              <div className="mt-2 text-sm text-muted-foreground">
+                Selected list:{" "}
+                {valueLists.find((list) => list.id === rule.parameters.valueList)?.name || "Unknown list"}
+              </div>
+            )}
           </div>
         )
       case "contains":
@@ -1832,6 +1841,7 @@ export function RuleForm(props: RuleFormProps) {
           <div>
             <Label htmlFor={`valueList-${index}`}>Value List</Label>
             <Select
+              value={columnConditions[index]?.parameters?.valueList || ""}
               onValueChange={(value) =>
                 handleColumnConditionChange(index, "parameters", {
                   ...columnConditions[index].parameters,
@@ -1850,6 +1860,13 @@ export function RuleForm(props: RuleFormProps) {
                 ))}
               </SelectContent>
             </Select>
+            {columnConditions[index]?.parameters?.valueList && (
+              <div className="mt-2 text-sm text-muted-foreground">
+                Selected list:{" "}
+                {valueLists.find((list) => list.id === columnConditions[index]?.parameters?.valueList)?.name ||
+                  "Unknown list"}
+              </div>
+            )}
           </div>
         )
       case "contains":
@@ -2658,7 +2675,7 @@ export function RuleForm(props: RuleFormProps) {
       </div>
       <div>
         <Label htmlFor="table">Table</Label>
-        <Select onValueChange={(value) => handleSelectChange("table", value)}>
+        <Select value={rule.table} onValueChange={(value) => handleSelectChange("table", value)}>
           <SelectTrigger>
             <SelectValue placeholder="Select a table" />
           </SelectTrigger>
@@ -2674,6 +2691,7 @@ export function RuleForm(props: RuleFormProps) {
       <div>
         <Label htmlFor="column">Column</Label>
         <Select
+          value={rule.column}
           onValueChange={(value) => {
             handleSelectChange("column", value)
             if (props.onColumnChange) {
@@ -2695,7 +2713,7 @@ export function RuleForm(props: RuleFormProps) {
       </div>
       <div>
         <Label htmlFor="ruleType">Rule Type</Label>
-        <Select onValueChange={handleRuleTypeChange}>
+        <Select value={rule.ruleType} onValueChange={handleRuleTypeChange}>
           <SelectTrigger>
             <SelectValue placeholder="Select a rule type" />
           </SelectTrigger>

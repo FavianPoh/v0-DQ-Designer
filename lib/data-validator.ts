@@ -53,7 +53,161 @@ function debugDateBetweenRule(rule: DataQualityRule, value: any, result: { isVal
 }
 
 // Add this function to the data-validator.ts file, near the top with the other debug functions
+function debugListValidation(value: any, listId: string, list: ValueList | undefined, isValid: boolean) {
+  console.log("=== List Validation Debug ===")
+  console.log(`Value to validate: ${value} (${typeof value})`)
+  console.log(`List ID: ${listId}`)
+  console.log(`List found: ${list ? "Yes" : "No"}`)
+  if (list) {
+    console.log(`List name: ${list.name}`)
+    console.log(`List values: ${list.values.join(", ")}`)
+    console.log(`Value converted to string: "${String(value)}"`)
+    console.log(`Is value in list: ${isValid}`)
+  }
+  console.log("============================")
+}
 
+// First, let's update the validateDateBefore function to fix the comparison logic and avoid modifying original dates
+function validateDateBefore(
+  value: any,
+  compareDate?: string,
+  inclusive?: boolean,
+): { isValid: boolean; message: string } {
+  console.log("validateDateBefore called with:", { value, compareDate, inclusive })
+
+  if (value === null || value === undefined || value === "") {
+    return { isValid: true, message: "" }
+  }
+
+  // Parse the value date
+  let dateValue: Date | null = null
+  if (value instanceof Date) {
+    dateValue = new Date(value.getTime())
+  } else if (typeof value === "string") {
+    dateValue = new Date(value)
+  } else {
+    return {
+      isValid: false,
+      message: `Value must be a valid date, got ${typeof value}: ${value}`,
+    }
+  }
+
+  if (isNaN(dateValue.getTime())) {
+    return {
+      isValid: false,
+      message: `Value must be a valid date, got invalid date: ${value}`,
+    }
+  }
+
+  if (!compareDate) {
+    return { isValid: true, message: "" }
+  }
+
+  // Parse the compare date
+  const compareDateObj = new Date(compareDate)
+  if (isNaN(compareDateObj.getTime())) {
+    return {
+      isValid: false,
+      message: `Compare date is invalid: ${compareDate}`,
+    }
+  }
+
+  // Set both dates to midnight for date-only comparison
+  const valueDate = new Date(dateValue.getFullYear(), dateValue.getMonth(), dateValue.getDate())
+  const targetDate = new Date(compareDateObj.getFullYear(), compareDateObj.getMonth(), compareDateObj.getDate())
+
+  // Compare timestamps
+  const isValid = inclusive ? valueDate.getTime() <= targetDate.getTime() : valueDate.getTime() < targetDate.getTime()
+
+  const formattedDate = valueDate.toISOString().split("T")[0]
+  const formattedCompareDate = targetDate.toISOString().split("T")[0]
+
+  console.log("Date comparison:", {
+    valueDate: formattedDate,
+    compareDate: formattedCompareDate,
+    valueTimestamp: valueDate.getTime(),
+    compareTimestamp: targetDate.getTime(),
+    inclusive,
+    isValid,
+  })
+
+  return {
+    isValid,
+    message: isValid ? "" : `Date ${formattedDate} must be ${inclusive ? "on or " : ""}before ${formattedCompareDate}`,
+  }
+}
+
+// Next, let's update the validateDateAfter function with similar fixes
+function validateDateAfter(
+  value: any,
+  compareDate?: string,
+  inclusive?: boolean,
+): { isValid: boolean; message: string } {
+  console.log("validateDateAfter called with:", { value, compareDate, inclusive })
+
+  if (value === null || value === undefined || value === "") {
+    return { isValid: true, message: "" }
+  }
+
+  // Parse the value date
+  let dateValue: Date | null = null
+  if (value instanceof Date) {
+    dateValue = new Date(value.getTime())
+  } else if (typeof value === "string") {
+    dateValue = new Date(value)
+  } else {
+    return {
+      isValid: false,
+      message: `Value must be a valid date, got ${typeof value}: ${value}`,
+    }
+  }
+
+  if (isNaN(dateValue.getTime())) {
+    return {
+      isValid: false,
+      message: `Value must be a valid date, got invalid date: ${value}`,
+    }
+  }
+
+  if (!compareDate) {
+    return { isValid: true, message: "" }
+  }
+
+  // Parse the compare date
+  const compareDateObj = new Date(compareDate)
+  if (isNaN(compareDateObj.getTime())) {
+    return {
+      isValid: false,
+      message: `Compare date is invalid: ${compareDate}`,
+    }
+  }
+
+  // Set both dates to midnight for date-only comparison
+  const valueDate = new Date(dateValue.getFullYear(), dateValue.getMonth(), dateValue.getDate())
+  const targetDate = new Date(compareDateObj.getFullYear(), compareDateObj.getMonth(), compareDateObj.getDate())
+
+  // Compare timestamps
+  const isValid = inclusive ? valueDate.getTime() >= targetDate.getTime() : valueDate.getTime() > targetDate.getTime()
+
+  const formattedDate = valueDate.toISOString().split("T")[0]
+  const formattedCompareDate = targetDate.toISOString().split("T")[0]
+
+  console.log("Date comparison:", {
+    valueDate: formattedDate,
+    compareDate: formattedCompareDate,
+    valueTimestamp: valueDate.getTime(),
+    compareTimestamp: targetDate.getTime(),
+    inclusive,
+    isValid,
+  })
+
+  return {
+    isValid,
+    message: isValid ? "" : `Date ${formattedDate} must be ${inclusive ? "on or " : ""}after ${formattedCompareDate}`,
+  }
+}
+
+// Now let's update the validateDateRuleWithSafeguards function to ensure it's correctly handling the validation results
 function validateDateRuleWithSafeguards(
   row: DataRecord,
   rowIndex: number,
@@ -67,7 +221,7 @@ function validateDateRuleWithSafeguards(
     column: rule.column,
     ruleType: rule.ruleType,
     parameters: rule.parameters,
-    severity: rule.severity, // Log severity to ensure it's being passed correctly
+    severity: rule.severity,
   })
 
   // Create a deep copy of the rule to avoid any reference issues
@@ -125,160 +279,59 @@ function validateDateRuleWithSafeguards(
     }
   }
 
-  // Convert value to Date if it's not already
-  let dateValue: Date | null = null
-
-  if (value instanceof Date) {
-    dateValue = new Date(value) // Create a copy to avoid modifying the original
-  } else if (typeof value === "string" && value.trim() !== "") {
-    try {
-      dateValue = new Date(value)
-      if (isNaN(dateValue.getTime())) {
-        console.error(`Invalid date string: "${value}"`)
-        dateValue = null
-      } else {
-        console.log(`Successfully parsed date string: "${value}" to:`, dateValue)
-      }
-    } catch (e) {
-      console.error(`Error parsing date string: "${value}"`, e)
-      dateValue = null
-    }
-  }
-
-  // For required date fields, null/undefined/empty is invalid
-  const isRequired = ruleCopy.parameters.required === true
-
-  if (!dateValue) {
-    if (isRequired) {
-      return {
-        rowIndex,
-        table: ruleCopy.table,
-        column: ruleCopy.column,
-        ruleName: ruleCopy.name,
-        message: "Date is required and must be valid",
-        severity: ruleCopy.severity,
-        ruleId: ruleCopy.id,
-      }
-    } else {
-      // If date is null/undefined/empty and not required, skip validation
-      return null
-    }
-  }
-
-  let isValid = true
-  let message = ""
+  let validationResult: { isValid: boolean; message: string } = { isValid: true, message: "" }
 
   switch (ruleCopy.ruleType) {
     case "date-before":
-      if (!ruleCopy.parameters.compareDate) {
-        isValid = true
-        message = "No compare date specified"
-      } else {
-        const compareDate = new Date(ruleCopy.parameters.compareDate)
-        console.log(`Comparing date ${dateValue} with ${compareDate}`)
-
-        // Create copies to avoid modifying the original dates
-        const dateValueCopy = new Date(dateValue.getTime())
-        const compareDateCopy = new Date(compareDate.getTime())
-
-        // Normalize dates to remove time components for consistent comparison
-        const dateValueTime = new Date(dateValueCopy.setHours(0, 0, 0, 0)).getTime()
-        const compareDateTime = new Date(compareDateCopy.setHours(0, 0, 0, 0)).getTime()
-
-        const inclusive = ruleCopy.parameters.inclusive === true
-        isValid = inclusive ? dateValueTime <= compareDateTime : dateValueTime < compareDateTime
-
-        console.log(`Date comparison: ${dateValueTime} ${inclusive ? "<=" : "<"} ${compareDateTime} = ${isValid}`)
-
-        if (!isValid) {
-          message = `Date must be ${inclusive ? "on or " : ""}before ${ruleCopy.parameters.compareDate}`
-        }
-      }
+      console.log("Validating date-before rule:", {
+        value,
+        compareDate: ruleCopy.parameters.compareDate,
+        inclusive: ruleCopy.parameters.inclusive,
+      })
+      validationResult = validateDateBefore(value, ruleCopy.parameters.compareDate, ruleCopy.parameters.inclusive)
       break
 
     case "date-after":
-      if (!ruleCopy.parameters.compareDate) {
-        isValid = true
-        message = "No compare date specified"
-      } else {
-        const compareDate = new Date(ruleCopy.parameters.compareDate)
-        console.log(`Comparing date ${dateValue} with ${compareDate}`)
-
-        // Create copies to avoid modifying the original dates
-        const dateValueCopy = new Date(dateValue.getTime())
-        const compareDateCopy = new Date(compareDate.getTime())
-
-        // Normalize dates to remove time components for consistent comparison
-        const dateValueTime = new Date(dateValueCopy.setHours(0, 0, 0, 0)).getTime()
-        const compareDateTime = new Date(compareDateCopy.setHours(0, 0, 0, 0)).getTime()
-
-        const inclusive = ruleCopy.parameters.inclusive === true
-        isValid = inclusive ? dateValueTime >= compareDateTime : dateValueTime > compareDateTime
-
-        console.log(`Date comparison: ${dateValueTime} ${inclusive ? ">=" : ">"} ${compareDateTime} = ${isValid}`)
-
-        if (!isValid) {
-          message = `Date must be ${inclusive ? "on or " : ""}after ${ruleCopy.parameters.compareDate}`
-        }
-      }
+      console.log("Validating date-after rule:", {
+        value,
+        compareDate: ruleCopy.parameters.compareDate,
+        inclusive: ruleCopy.parameters.inclusive,
+      })
+      validationResult = validateDateAfter(value, ruleCopy.parameters.compareDate, ruleCopy.parameters.inclusive)
       break
 
     case "date-between":
-      if (!ruleCopy.parameters.startDate || !ruleCopy.parameters.endDate) {
-        isValid = true
-        message = "Start or end date not specified"
-      } else {
-        const startDate = new Date(ruleCopy.parameters.startDate)
-        const endDate = new Date(ruleCopy.parameters.endDate)
-        console.log(`Checking if date ${dateValue} is between ${startDate} and ${endDate}`)
-
-        // Create copies to avoid modifying the original dates
-        const dateValueCopy = new Date(dateValue.getTime())
-        const startDateCopy = new Date(startDate.getTime())
-        const endDateCopy = new Date(endDate.getTime())
-
-        // Normalize dates to remove time components for consistent comparison
-        const dateValueTime = new Date(dateValueCopy.setHours(0, 0, 0, 0)).getTime()
-        const startDateTime = new Date(startDateCopy.setHours(0, 0, 0, 0)).getTime()
-        const endDateTime = new Date(endDateCopy.setHours(0, 0, 0, 0)).getTime()
-
-        const inclusive = ruleCopy.parameters.inclusive === true
-
-        isValid = inclusive
-          ? dateValueTime >= startDateTime && dateValueTime <= endDateTime
-          : dateValueTime > startDateTime && dateValueTime < endDateTime
-
-        console.log(
-          `Date between check: ${startDateTime} ${inclusive ? "<=" : "<"} ${dateValueTime} ${
-            inclusive ? "<=" : "<"
-          } ${endDateTime} = ${isValid}`,
-        )
-
-        if (!isValid) {
-          message = `Date must be ${inclusive ? "on or " : ""}between ${ruleCopy.parameters.startDate} and ${ruleCopy.parameters.endDate}`
-        }
-      }
+      validationResult = validateDateBetween(
+        value,
+        ruleCopy.parameters.startDate,
+        ruleCopy.parameters.endDate,
+        ruleCopy.parameters.inclusive,
+      )
       break
 
     case "date-format":
-      // For date objects, format is always valid
-      isValid = true
+      validationResult = validateDateFormat(
+        value,
+        ruleCopy.parameters.format,
+        ruleCopy.parameters.customFormat,
+        ruleCopy.parameters.required,
+      )
       break
 
     default:
-      isValid = true
+      validationResult = { isValid: true, message: "" }
   }
 
-  console.log(`Date rule validation result: ${isValid ? "PASS" : "FAIL"}, message: ${message}`)
+  console.log(`Date rule validation result:`, validationResult)
 
   // If validation fails, return a validation result with the appropriate severity
-  if (!isValid) {
+  if (!validationResult.isValid) {
     return {
       rowIndex,
       table: ruleCopy.table,
       column: ruleCopy.column,
       ruleName: ruleCopy.name,
-      message,
+      message: validationResult.message,
       severity: ruleCopy.severity,
       ruleId: ruleCopy.id,
     }
@@ -325,6 +378,19 @@ export function validateDataset(
     // Add debug info for date rules
     if (rule.ruleType.startsWith("date-")) {
       debugObject(rule, `Date Rule: ${rule.name}`)
+    }
+
+    // Add debug info for list rules
+    if (rule.ruleType === "list") {
+      debugObject(rule, `List Rule: ${rule.name}`)
+      console.log(`List rule parameters:`, rule.parameters)
+
+      // Check if the list exists
+      const listId = rule.parameters.listId
+      const list = valueLists.find((l) => l.id === listId)
+      console.log(
+        `List found: ${list ? "Yes" : "No"}, List name: ${list?.name || "N/A"}, Values count: ${list?.values?.length || 0}`,
+      )
     }
 
     const tableData = datasets[rule.table]
@@ -477,6 +543,141 @@ export function validateDataset(
             severity: "success",
             ruleId: rule.id,
           })
+        }
+      }
+
+      // Special handling for list rules to ensure validation results are properly processed
+      // Find the section in validateDataset that handles list rules and replace it with this:
+      // Special handling for list rules to ensure validation results are properly processed
+      if (rule.ruleType === "list") {
+        // Check if the rule has a listId parameter (check both possible parameter names)
+        const listId = rule.parameters.listId || rule.parameters.valueList
+
+        if (listId) {
+          const list = valueLists.find((l) => l.id === listId)
+
+          if (list) {
+            const value = row[rule.column]
+
+            // Skip validation for null/undefined/empty values unless required is true
+            if (value === null || value === undefined || value === "") {
+              if (rule.parameters.required === true) {
+                // Override any previous result for this rule with a failure
+                const existingResultIndex = results.findIndex(
+                  (r) =>
+                    r.rowIndex === rowIndex &&
+                    r.table === rule.table &&
+                    r.column === rule.column &&
+                    r.ruleName === rule.name,
+                )
+
+                const failureResult = {
+                  rowIndex,
+                  table: rule.table,
+                  column: rule.column,
+                  ruleName: rule.name,
+                  message: `Value is required and must be one of the values in the "${list.name}" list`,
+                  severity: rule.severity,
+                  ruleId: rule.id,
+                }
+
+                if (existingResultIndex >= 0) {
+                  results[existingResultIndex] = failureResult
+                } else {
+                  results.push(failureResult)
+                }
+              }
+              // If not required, we can skip further validation
+            } else {
+              // Only validate non-empty values
+              const stringValue = String(value)
+              const isInList = list.values.includes(stringValue)
+
+              // Debug the list validation
+              debugListValidation(value, listId, list, isInList)
+
+              // If the value is not in the list, make sure we have a failure result
+              if (!isInList) {
+                // Override any previous result for this rule
+                const existingResultIndex = results.findIndex(
+                  (r) =>
+                    r.rowIndex === rowIndex &&
+                    r.table === rule.table &&
+                    r.column === rule.column &&
+                    r.ruleName === rule.name,
+                )
+
+                const failureResult = {
+                  rowIndex,
+                  table: rule.table,
+                  column: rule.column,
+                  ruleName: rule.name,
+                  message: `Value "${stringValue}" must be one of the values in the "${list.name}" list`,
+                  severity: rule.severity,
+                  ruleId: rule.id,
+                }
+
+                if (existingResultIndex >= 0) {
+                  results[existingResultIndex] = failureResult
+                } else {
+                  results.push(failureResult)
+                }
+
+                console.log(`Added list validation failure for ${rule.name}:`, failureResult)
+              }
+            }
+          } else {
+            // List not found - report an error
+            const existingResultIndex = results.findIndex(
+              (r) =>
+                r.rowIndex === rowIndex &&
+                r.table === rule.table &&
+                r.column === rule.column &&
+                r.ruleName === rule.name,
+            )
+
+            const errorResult = {
+              rowIndex,
+              table: rule.table,
+              column: rule.column,
+              ruleName: rule.name,
+              message: `List with ID "${listId}" not found`,
+              severity: "failure",
+              ruleId: rule.id,
+            }
+
+            if (existingResultIndex >= 0) {
+              results[existingResultIndex] = errorResult
+            } else {
+              results.push(errorResult)
+            }
+
+            console.log(`List not found error for ${rule.name}:`, errorResult)
+          }
+        } else {
+          // Missing listId parameter - report an error
+          const existingResultIndex = results.findIndex(
+            (r) =>
+              r.rowIndex === rowIndex && r.table === rule.table && r.column === rule.column && r.ruleName === rule.name,
+          )
+
+          const errorResult = {
+            rowIndex,
+            table: rule.table,
+            column: rule.column,
+            ruleName: rule.name,
+            message: `List validation rule is missing a listId parameter`,
+            severity: "failure",
+            ruleId: rule.id,
+          }
+
+          if (existingResultIndex >= 0) {
+            results[existingResultIndex] = errorResult
+          } else {
+            results.push(errorResult)
+          }
+
+          console.log(`Missing listId parameter error for ${rule.name}:`, errorResult)
         }
       }
 
@@ -947,22 +1148,9 @@ function validateDateRule(row: DataRecord, rowIndex: number, rule: DataQualityRu
         isValid = true
         message = "No compare date specified"
       } else {
-        const compareDate = new Date(rule.parameters.compareDate)
-
-        // Create copies to avoid modifying the original dates
-        const dateValueCopy = new Date(dateValue.getTime())
-        const compareDateCopy = new Date(compareDate.getTime())
-
-        // Normalize dates to remove time components for consistent comparison
-        const dateValueTime = new Date(dateValueCopy.setHours(0, 0, 0, 0)).getTime()
-        const compareDateTime = new Date(compareDateCopy.setHours(0, 0, 0, 0)).getTime()
-
-        const inclusive = rule.parameters.inclusive === true
-        isValid = inclusive ? dateValueTime <= compareDateTime : dateValueTime < compareDateTime
-
-        if (!isValid) {
-          message = `Date must be ${inclusive ? "on or " : ""}before ${rule.parameters.compareDate}`
-        }
+        const result = validateDateBefore(value, rule.parameters.compareDate, rule.parameters.inclusive)
+        isValid = result.isValid
+        message = result.message
       }
       break
 
@@ -971,22 +1159,9 @@ function validateDateRule(row: DataRecord, rowIndex: number, rule: DataQualityRu
         isValid = true
         message = "No compare date specified"
       } else {
-        const compareDate = new Date(rule.parameters.compareDate)
-
-        // Create copies to avoid modifying the original dates
-        const dateValueCopy = new Date(dateValue.getTime())
-        const compareDateCopy = new Date(compareDate.getTime())
-
-        // Normalize dates to remove time components for consistent comparison
-        const dateValueTime = new Date(dateValueCopy.setHours(0, 0, 0, 0)).getTime()
-        const compareDateTime = new Date(compareDateCopy.setHours(0, 0, 0, 0)).getTime()
-
-        const inclusive = rule.parameters.inclusive === true
-        isValid = inclusive ? dateValueTime >= compareDateTime : dateValueTime > compareDateTime
-
-        if (!isValid) {
-          message = `Date must be ${inclusive ? "on or " : ""}after ${rule.parameters.compareDate}`
-        }
+        const result = validateDateAfter(value, rule.parameters.compareDate, rule.parameters.inclusive)
+        isValid = result.isValid
+        message = result.message
       }
       break
 
@@ -995,28 +1170,14 @@ function validateDateRule(row: DataRecord, rowIndex: number, rule: DataQualityRu
         isValid = true
         message = "Start or end date not specified"
       } else {
-        const startDate = new Date(rule.parameters.startDate)
-        const endDate = new Date(rule.parameters.endDate)
-
-        // Create copies to avoid modifying the original dates
-        const dateValueCopy = new Date(dateValue.getTime())
-        const startDateCopy = new Date(startDate.getTime())
-        const endDateCopy = new Date(endDate.getTime())
-
-        // Normalize dates to remove time components for consistent comparison
-        const dateValueTime = new Date(dateValueCopy.setHours(0, 0, 0, 0)).getTime()
-        const startDateTime = new Date(startDateCopy.setHours(0, 0, 0, 0)).getTime()
-        const endDateTime = new Date(endDateCopy.setHours(0, 0, 0, 0)).getTime()
-
-        const inclusive = rule.parameters.inclusive === true
-
-        isValid = inclusive
-          ? dateValueTime >= startDateTime && dateValueTime <= endDateTime
-          : dateValueTime > startDateTime && dateValueTime < endDateTime
-
-        if (!isValid) {
-          message = `Date must be ${inclusive ? "on or " : ""}between ${rule.parameters.startDate} and ${rule.parameters.endDate}`
-        }
+        const result = validateDateBetween(
+          value,
+          rule.parameters.startDate,
+          rule.parameters.endDate,
+          rule.parameters.inclusive,
+        )
+        isValid = result.isValid
+        message = result.message
       }
       break
 
@@ -1044,8 +1205,16 @@ function validateDateRule(row: DataRecord, rowIndex: number, rule: DataQualityRu
     }
   }
 
-  // For successful validations, return null to follow the pattern of other validation functions
-  return null
+  // For successful validations, return a success result
+  return {
+    rowIndex,
+    table: rule.table,
+    column: rule.column,
+    ruleName: rule.name,
+    message: "Passed date validation",
+    severity: "success",
+    ruleId: rule.id,
+  }
 }
 
 // New function to validate composite reference rules
@@ -1339,8 +1508,10 @@ function validateSingleColumnCondition(
         return validateEnum(value, condition.parameters.allowedValues)
       }
 
+    // Also update the validateSingleColumnCondition function to handle both parameter names
+    // Find the "list" case in the switch statement and update it:
     case "list":
-      return validateList(value, condition.parameters.listId, valueLists)
+      return validateList(value, condition.parameters.listId || condition.parameters.valueList, valueLists)
 
     case "contains":
       return validateContains(
@@ -1395,6 +1566,25 @@ function validateRule(
     debugRule(rule, "Date Rule Debug - validateRule")
     console.log(`Row data for column ${rule.column}:`, row[rule.column])
     console.log(`All row data:`, row)
+  }
+
+  // Add specific debugging for list rules
+  if (rule.ruleType === "list") {
+    debugRule(rule, "List Rule Debug - validateRule")
+    console.log(`Row data for column ${rule.column}:`, row[rule.column])
+
+    // Check if the list exists
+    const listId = rule.parameters.listId
+    if (listId) {
+      const list = valueLists.find((l) => l.id === listId)
+      if (list) {
+        console.log(`List found: ${list.name}, Values: ${list.values.join(", ")}`)
+      } else {
+        console.log(`List with ID ${listId} not found!`)
+      }
+    } else {
+      console.log(`No listId parameter found in rule!`)
+    }
   }
 
   let isValid = true
@@ -1457,8 +1647,19 @@ function validateRule(
       }
       break
 
+    // Finally, update the validateRule function to handle both parameter names
+    // Find the "list" case in the switch statement and update it:
     case "list":
-      ;({ isValid, message } = validateList(value, rule.parameters.listId, valueLists))
+      const listResult = validateList(value, rule.parameters.listId || rule.parameters.valueList, valueLists)
+      isValid = listResult.isValid
+      message = listResult.message
+
+      // Log the list validation result
+      console.log(`List rule validation (${rule.name}): ${isValid ? "PASS" : "FAIL"}`, {
+        value,
+        listId: rule.parameters.listId || rule.parameters.valueList,
+        message,
+      })
       break
 
     case "contains":
@@ -2126,24 +2327,64 @@ function validateEnumCaseInsensitive(value: any, allowedValues?: any[]): { isVal
   }
 }
 
+// Find the validateList function and replace it with this improved version
+// In the validateList function, update the parameter handling to check for both listId and valueList
+// This will ensure compatibility with rules created through different interfaces
+
 function validateList(
   value: any,
   listId?: string,
   valueLists: ValueList[] = [],
 ): { isValid: boolean; message: string } {
-  if (!listId || value === null || value === undefined || value === "") {
+  // Log the validation attempt for debugging
+  console.log("validateList called with:", { value, listId, valueType: typeof value })
+
+  // Log available lists
+  console.log(
+    "Available value lists:",
+    valueLists.length,
+    valueLists.map((list) => ({ id: list.id, name: list.name, valueCount: list.values.length })),
+  )
+
+  // Check for both listId and valueList parameter names for backward compatibility
+  const effectiveListId = listId || null
+
+  if (!effectiveListId) {
+    console.log("Skipping list validation - no listId provided")
+    return { isValid: false, message: "List ID is required for validation" }
+  }
+
+  // Skip validation for null/undefined/empty values unless required is specified
+  if (value === null || value === undefined || value === "") {
+    console.log("Skipping list validation - empty value")
     return { isValid: true, message: "" }
   }
 
-  const list = valueLists.find((l) => l.id === listId)
+  const list = valueLists.find((l) => l.id === effectiveListId)
   if (!list) {
-    return { isValid: false, message: `List with ID ${listId} not found` }
+    console.warn(`List with ID ${effectiveListId} not found`)
+    return { isValid: false, message: `List with ID ${effectiveListId} not found` }
   }
 
-  const isValid = list.values.includes(String(value))
+  // Convert value to string for comparison
+  const stringValue = String(value)
+
+  // Log the validation details
+  console.log("List validation details:", {
+    listName: list.name,
+    listValues: list.values,
+    valueToCheck: stringValue,
+  })
+
+  // Perform the validation check
+  const isValid = list.values.includes(stringValue)
+
+  // Log the result
+  console.log(`List validation result for "${stringValue}": ${isValid ? "PASS" : "FAIL"}`)
+
   return {
     isValid,
-    message: isValid ? "" : `Value must be one of the values in the "${list.name}" list`,
+    message: isValid ? "" : `Value "${stringValue}" must be one of the values in the "${list.name}" list`,
   }
 }
 
@@ -2631,145 +2872,6 @@ function validateJavaScriptFormula(row: DataRecord, formula?: string): { isValid
 }
 
 // Add these functions to handle date validation
-function validateDateBefore(
-  value: any,
-  compareDate?: string,
-  inclusive?: boolean,
-): { isValid: boolean; message: string } {
-  console.log("validateDateBefore called with:", { value, compareDate, inclusive })
-
-  if (value === null || value === undefined || value === "") {
-    return { isValid: true, message: "" }
-  }
-
-  // Convert value to Date if it's not already
-  let dateValue: Date
-  if (value instanceof Date) {
-    dateValue = new Date(value) // Create a copy to avoid modifying the original
-  } else if (typeof value === "string") {
-    // Try to parse the date string
-    dateValue = new Date(value)
-  } else {
-    return {
-      isValid: false,
-      message: `Value must be a valid date, got ${typeof value}: ${value}`,
-    }
-  }
-
-  if (isNaN(dateValue.getTime())) {
-    return {
-      isValid: false,
-      message: `Value must be a valid date, got invalid date: ${value}`,
-    }
-  }
-
-  if (!compareDate) {
-    return { isValid: true, message: "" }
-  }
-
-  const targetDate = new Date(compareDate)
-
-  if (isNaN(targetDate.getTime())) {
-    return {
-      isValid: false,
-      message: `Compare date is invalid: ${compareDate}`,
-    }
-  }
-
-  // Create copies to avoid modifying the original dates
-  const dateValueCopy = new Date(dateValue.getTime())
-  const targetDateCopy = new Date(targetDate.getTime())
-
-  // Normalize dates to remove time components for consistent comparison
-  const dateValueTime = new Date(dateValueCopy.setHours(0, 0, 0, 0)).getTime()
-  const targetDateTime = new Date(targetDateCopy.setHours(0, 0, 0, 0)).getTime()
-
-  const isValid = inclusive ? dateValueTime <= targetDateTime : dateValueTime < targetDateTime
-
-  const formattedDate = dateValue.toISOString().split("T")[0]
-
-  console.log("validateDateBefore result:", {
-    isValid,
-    dateValue: dateValue.toISOString(),
-    targetDate: targetDate.toISOString(),
-    comparison: `${dateValueTime} ${inclusive ? "<=" : "<"} ${targetDateTime}`,
-  })
-
-  return {
-    isValid,
-    message: isValid ? "" : `Date ${formattedDate} must be ${inclusive ? "on or " : ""}before ${compareDate}`,
-  }
-}
-
-function validateDateAfter(
-  value: any,
-  compareDate?: string,
-  inclusive?: boolean,
-): { isValid: boolean; message: string } {
-  console.log("validateDateAfter called with:", { value, compareDate, inclusive })
-
-  if (value === null || value === undefined || value === "") {
-    return { isValid: true, message: "" }
-  }
-
-  // Convert value to Date if it's not already
-  let dateValue: Date
-  if (value instanceof Date) {
-    dateValue = new Date(value) // Create a copy to avoid modifying the original
-  } else if (typeof value === "string") {
-    // Try to parse the date string
-    dateValue = new Date(value)
-  } else {
-    return {
-      isValid: false,
-      message: `Value must be a valid date, got ${typeof value}: ${value}`,
-    }
-  }
-
-  if (isNaN(dateValue.getTime())) {
-    return {
-      isValid: false,
-      message: `Value must be a valid date, got invalid date: ${value}`,
-    }
-  }
-
-  if (!compareDate) {
-    return { isValid: true, message: "" }
-  }
-
-  const targetDate = new Date(compareDate)
-
-  if (isNaN(targetDate.getTime())) {
-    return {
-      isValid: false,
-      message: `Compare date is invalid: ${compareDate}`,
-    }
-  }
-
-  // Create copies to avoid modifying the original dates
-  const dateValueCopy = new Date(dateValue.getTime())
-  const targetDateCopy = new Date(targetDate.getTime())
-
-  // Normalize dates to remove time components for consistent comparison
-  const dateValueTime = new Date(dateValueCopy.setHours(0, 0, 0, 0)).getTime()
-  const targetDateTime = new Date(targetDateCopy.setHours(0, 0, 0, 0)).getTime()
-
-  const isValid = inclusive ? dateValueTime >= targetDateTime : dateValueTime > targetDateTime
-
-  const formattedDate = dateValue.toISOString().split("T")[0]
-
-  console.log("validateDateAfter result:", {
-    isValid,
-    dateValue: dateValue.toISOString(),
-    targetDate: targetDate.toISOString(),
-    comparison: `${dateValueTime} ${inclusive ? ">=" : ">"} ${targetDateTime}`,
-  })
-
-  return {
-    isValid,
-    message: isValid ? "" : `Date ${formattedDate} must be ${inclusive ? "on or " : ""}after ${compareDate}`,
-  }
-}
 
 function validateDateBetween(
   value: any,

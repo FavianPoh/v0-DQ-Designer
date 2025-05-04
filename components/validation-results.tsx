@@ -141,7 +141,17 @@ export function ValidationResults({
     if (amountFormulaResults.length > 0) {
       console.log("Amount formula validation results:", amountFormulaResults)
     }
-  }, [initialResults])
+
+    // Log list validation results
+    const listResults = initialResults.filter(
+      (result) =>
+        result.ruleName.toLowerCase().includes("list") ||
+        rules.some((r) => r.id === result.ruleId && r.ruleType === "list"),
+    )
+    if (listResults.length > 0) {
+      console.log("List validation results:", listResults)
+    }
+  }, [initialResults, rules])
 
   // Sync the showPassingValidations state with the prop
   useEffect(() => {
@@ -823,8 +833,12 @@ export function ValidationResults({
   }, [initialResults])
 
   const handleTogglePassingValidations = (checked: boolean) => {
-    console.log("Toggle passing validations:", checked)
-    console.log("Success results currently:", initialResults.filter((r) => r.severity === "success").length)
+    console.log(
+      "Toggle passing validations:",
+      checked,
+      "Current passing results count:",
+      initialResults.filter((r) => r.severity === "success").length,
+    )
     setShowPassingValidations(checked)
     // Reset the severity filter when toggling passing validations
     setFilterSeverity("all")
