@@ -67,147 +67,256 @@ function debugListValidation(value: any, listId: string, list: ValueList | undef
   console.log("============================")
 }
 
-// First, let's update the validateDateBefore function to fix the comparison logic and avoid modifying original dates
+// Replace the validateDateBefore function with this simpler version
 function validateDateBefore(
   value: any,
   compareDate?: string,
   inclusive?: boolean,
 ): { isValid: boolean; message: string } {
-  console.log("validateDateBefore called with:", { value, compareDate, inclusive })
+  console.log("FIXED validateDateBefore called with:", {
+    value: value instanceof Date ? value.toISOString() : value,
+    compareDate,
+    inclusive,
+  })
 
+  // Skip validation for empty values
   if (value === null || value === undefined || value === "") {
     return { isValid: true, message: "" }
   }
 
-  // Parse the value date
-  let dateValue: Date | null = null
-  if (value instanceof Date) {
-    dateValue = new Date(value.getTime())
-  } else if (typeof value === "string") {
-    dateValue = new Date(value)
-  } else {
-    return {
-      isValid: false,
-      message: `Value must be a valid date, got ${typeof value}: ${value}`,
-    }
-  }
-
-  if (isNaN(dateValue.getTime())) {
-    return {
-      isValid: false,
-      message: `Value must be a valid date, got invalid date: ${value}`,
-    }
-  }
-
+  // Skip validation if no compare date
   if (!compareDate) {
     return { isValid: true, message: "" }
   }
 
-  // Parse the compare date
-  const compareDateObj = new Date(compareDate)
-  if (isNaN(compareDateObj.getTime())) {
+  try {
+    // Parse dates
+    const valueDate = new Date(value)
+    const compareDateObj = new Date(compareDate)
+
+    // Check if dates are valid
+    if (isNaN(valueDate.getTime()) || isNaN(compareDateObj.getTime())) {
+      console.log("Invalid date(s):", { value, compareDate })
+      return {
+        isValid: false,
+        message: `Invalid date(s): value=${value}, compareDate=${compareDate}`,
+      }
+    }
+
+    // Get date-only strings (YYYY-MM-DD)
+    const valueDateStr = valueDate.toISOString().split("T")[0]
+    const compareDateStr = compareDateObj.toISOString().split("T")[0]
+
+    // Create new Date objects from strings to remove time component
+    const valueOnlyDate = new Date(valueDateStr)
+    const compareOnlyDate = new Date(compareDateStr)
+
+    // Simple comparison
+    const valueTime = valueOnlyDate.getTime()
+    const compareTime = compareOnlyDate.getTime()
+
+    // Determine if valid based on inclusive flag
+    let isValid = inclusive ? valueTime <= compareTime : valueTime < compareTime
+
+    console.log("Date comparison (before):", {
+      valueDate: valueDateStr,
+      compareDate: compareDateStr,
+      valueTime,
+      compareTime,
+      inclusive,
+      isValid,
+    })
+
+    // IMPORTANT: Force a failure for testing if dates are in wrong order
+    if (valueTime > compareTime) {
+      console.log("FORCING FAILURE: Date is after compare date")
+      isValid = false
+    }
+
+    return {
+      isValid,
+      message: isValid ? "" : `Date ${valueDateStr} must be ${inclusive ? "on or " : ""}before ${compareDateStr}`,
+    }
+  } catch (e) {
+    console.error("Error in validateDateBefore:", e)
     return {
       isValid: false,
-      message: `Compare date is invalid: ${compareDate}`,
+      message: `Error comparing dates: ${e.message}`,
     }
-  }
-
-  // Set both dates to midnight for date-only comparison
-  const valueDate = new Date(dateValue.getFullYear(), dateValue.getMonth(), dateValue.getDate())
-  const targetDate = new Date(compareDateObj.getFullYear(), compareDateObj.getMonth(), compareDateObj.getDate())
-
-  // Compare timestamps
-  const isValid = inclusive ? valueDate.getTime() <= targetDate.getTime() : valueDate.getTime() < targetDate.getTime()
-
-  const formattedDate = valueDate.toISOString().split("T")[0]
-  const formattedCompareDate = targetDate.toISOString().split("T")[0]
-
-  console.log("Date comparison:", {
-    valueDate: formattedDate,
-    compareDate: formattedCompareDate,
-    valueTimestamp: valueDate.getTime(),
-    compareTimestamp: targetDate.getTime(),
-    inclusive,
-    isValid,
-  })
-
-  return {
-    isValid,
-    message: isValid ? "" : `Date ${formattedDate} must be ${inclusive ? "on or " : ""}before ${formattedCompareDate}`,
   }
 }
 
-// Next, let's update the validateDateAfter function with similar fixes
+// Replace the validateDateAfter function with this simpler version
 function validateDateAfter(
   value: any,
   compareDate?: string,
   inclusive?: boolean,
 ): { isValid: boolean; message: string } {
-  console.log("validateDateAfter called with:", { value, compareDate, inclusive })
+  console.log("FIXED validateDateAfter called with:", {
+    value: value instanceof Date ? value.toISOString() : value,
+    compareDate,
+    inclusive,
+  })
 
+  // Skip validation for empty values
   if (value === null || value === undefined || value === "") {
     return { isValid: true, message: "" }
   }
 
-  // Parse the value date
-  let dateValue: Date | null = null
-  if (value instanceof Date) {
-    dateValue = new Date(value.getTime())
-  } else if (typeof value === "string") {
-    dateValue = new Date(value)
-  } else {
-    return {
-      isValid: false,
-      message: `Value must be a valid date, got ${typeof value}: ${value}`,
-    }
-  }
-
-  if (isNaN(dateValue.getTime())) {
-    return {
-      isValid: false,
-      message: `Value must be a valid date, got invalid date: ${value}`,
-    }
-  }
-
+  // Skip validation if no compare date
   if (!compareDate) {
     return { isValid: true, message: "" }
   }
 
-  // Parse the compare date
-  const compareDateObj = new Date(compareDate)
-  if (isNaN(compareDateObj.getTime())) {
+  try {
+    // Parse dates
+    const valueDate = new Date(value)
+    const compareDateObj = new Date(compareDate)
+
+    // Check if dates are valid
+    if (isNaN(valueDate.getTime()) || isNaN(compareDateObj.getTime())) {
+      console.log("Invalid date(s):", { value, compareDate })
+      return {
+        isValid: false,
+        message: `Invalid date(s): value=${value}, compareDate=${compareDate}`,
+      }
+    }
+
+    // Get date-only strings (YYYY-MM-DD)
+    const valueDateStr = valueDate.toISOString().split("T")[0]
+    const compareDateStr = compareDateObj.toISOString().split("T")[0]
+
+    // Create new Date objects from strings to remove time component
+    const valueOnlyDate = new Date(valueDateStr)
+    const compareOnlyDate = new Date(compareDateStr)
+
+    // Simple comparison
+    const valueTime = valueOnlyDate.getTime()
+    const compareTime = compareOnlyDate.getTime()
+
+    // Determine if valid based on inclusive flag
+    let isValid = inclusive ? valueTime >= compareTime : valueTime > compareTime
+
+    console.log("Date comparison (after):", {
+      valueDate: valueDateStr,
+      compareDate: compareDateStr,
+      valueTime,
+      compareTime,
+      inclusive,
+      isValid,
+    })
+
+    // IMPORTANT: Force a failure for testing if dates are in wrong order
+    if (valueTime < compareTime) {
+      console.log("FORCING FAILURE: Date is before compare date")
+      isValid = false
+    }
+
+    return {
+      isValid,
+      message: isValid ? "" : `Date ${valueDateStr} must be ${inclusive ? "on or " : ""}after ${compareDateStr}`,
+    }
+  } catch (e) {
+    console.error("Error in validateDateAfter:", e)
     return {
       isValid: false,
-      message: `Compare date is invalid: ${compareDate}`,
+      message: `Error comparing dates: ${e.message}`,
     }
-  }
-
-  // Set both dates to midnight for date-only comparison
-  const valueDate = new Date(dateValue.getFullYear(), dateValue.getMonth(), dateValue.getDate())
-  const targetDate = new Date(compareDateObj.getFullYear(), compareDateObj.getMonth(), compareDateObj.getDate())
-
-  // Compare timestamps
-  const isValid = inclusive ? valueDate.getTime() >= targetDate.getTime() : valueDate.getTime() > targetDate.getTime()
-
-  const formattedDate = valueDate.toISOString().split("T")[0]
-  const formattedCompareDate = targetDate.toISOString().split("T")[0]
-
-  console.log("Date comparison:", {
-    valueDate: formattedDate,
-    compareDate: formattedCompareDate,
-    valueTimestamp: valueDate.getTime(),
-    compareTimestamp: targetDate.getTime(),
-    inclusive,
-    isValid,
-  })
-
-  return {
-    isValid,
-    message: isValid ? "" : `Date ${formattedDate} must be ${inclusive ? "on or " : ""}after ${formattedCompareDate}`,
   }
 }
 
-// Now let's update the validateDateRuleWithSafeguards function to ensure it's correctly handling the validation results
+// Replace the validateDateBetween function with this simpler version
+function validateDateBetween(
+  value: any,
+  startDate?: string,
+  endDate?: string,
+  inclusive?: boolean,
+): { isValid: boolean; message: string } {
+  console.log("FIXED validateDateBetween called with:", {
+    value: value instanceof Date ? value.toISOString() : value,
+    startDate,
+    endDate,
+    inclusive,
+  })
+
+  // Skip validation for empty values
+  if (value === null || value === undefined || value === "") {
+    return { isValid: true, message: "" }
+  }
+
+  // Skip validation if no start or end date
+  if (!startDate || !endDate) {
+    return { isValid: true, message: "" }
+  }
+
+  try {
+    // Parse dates
+    const valueDate = new Date(value)
+    const startDateObj = new Date(startDate)
+    const endDateObj = new Date(endDate)
+
+    // Check if dates are valid
+    if (isNaN(valueDate.getTime()) || isNaN(startDateObj.getTime()) || isNaN(endDateObj.getTime())) {
+      console.log("Invalid date(s):", { value, startDate, endDate })
+      return {
+        isValid: false,
+        message: `Invalid date(s): value=${value}, startDate=${startDate}, endDate=${endDate}`,
+      }
+    }
+
+    // Get date-only strings (YYYY-MM-DD)
+    const valueDateStr = valueDate.toISOString().split("T")[0]
+    const startDateStr = startDateObj.toISOString().split("T")[0]
+    const endDateStr = endDateObj.toISOString().split("T")[0]
+
+    // Create new Date objects from strings to remove time component
+    const valueOnlyDate = new Date(valueDateStr)
+    const startOnlyDate = new Date(startDateStr)
+    const endOnlyDate = new Date(endDateStr)
+
+    // Simple comparison
+    const valueTime = valueOnlyDate.getTime()
+    const startTime = startOnlyDate.getTime()
+    const endTime = endOnlyDate.getTime()
+
+    // Determine if valid based on inclusive flag
+    let isValid = inclusive
+      ? valueTime >= startTime && valueTime <= endTime
+      : valueTime > startTime && valueTime < endTime
+
+    console.log("Date comparison (between):", {
+      valueDate: valueDateStr,
+      startDate: startDateStr,
+      endDate: endDateStr,
+      valueTime,
+      startTime,
+      endTime,
+      inclusive,
+      isValid,
+    })
+
+    // IMPORTANT: Force a failure for testing if dates are outside range
+    if (valueTime < startTime || valueTime > endTime) {
+      console.log("FORCING FAILURE: Date is outside range")
+      isValid = false
+    }
+
+    return {
+      isValid,
+      message: isValid
+        ? ""
+        : `Date ${valueDateStr} must be ${inclusive ? "on or " : ""}between ${startDateStr} and ${endDateStr}`,
+    }
+  } catch (e) {
+    console.error("Error in validateDateBetween:", e)
+    return {
+      isValid: false,
+      message: `Error comparing dates: ${e.message}`,
+    }
+  }
+}
+
+// Update the validateDateRuleWithSafeguards function to ensure it's correctly handling the validation results
 function validateDateRuleWithSafeguards(
   row: DataRecord,
   rowIndex: number,
@@ -224,54 +333,51 @@ function validateDateRuleWithSafeguards(
     severity: rule.severity,
   })
 
-  // Create a deep copy of the rule to avoid any reference issues
-  const ruleCopy = JSON.parse(JSON.stringify(rule))
-
   // CRITICAL: Check if column is defined
-  if (!ruleCopy.column) {
-    console.error(`CRITICAL ERROR: Missing column for date rule: ${ruleCopy.name} [ID: ${ruleCopy.id}]`)
+  if (!rule.column) {
+    console.error(`CRITICAL ERROR: Missing column for date rule: ${rule.name} [ID: ${rule.id}]`)
     return {
       rowIndex,
-      table: ruleCopy.table,
+      table: rule.table,
       column: "",
-      ruleName: ruleCopy.name,
+      ruleName: rule.name,
       message: `Configuration error: Missing column name for date rule`,
       severity: "failure",
-      ruleId: ruleCopy.id,
+      ruleId: rule.id,
     }
   }
 
   // Check if column exists in the row
-  if (!(ruleCopy.column in row)) {
-    console.error(`Column "${ruleCopy.column}" not found in row for rule: ${ruleCopy.name} [ID: ${ruleCopy.id}]`)
+  if (!(rule.column in row)) {
+    console.error(`Column "${rule.column}" not found in row for rule: ${rule.name} [ID: ${rule.id}]`)
     console.log("Available columns:", Object.keys(row))
     return {
       rowIndex,
-      table: ruleCopy.table,
-      column: ruleCopy.column,
-      ruleName: ruleCopy.name,
-      message: `Column "${ruleCopy.column}" not found in data`,
-      severity: ruleCopy.severity,
-      ruleId: ruleCopy.id,
+      table: rule.table,
+      column: rule.column,
+      ruleName: rule.name,
+      message: `Column "${rule.column}" not found in data`,
+      severity: rule.severity || "warning",
+      ruleId: rule.id,
     }
   }
 
-  const value = row[ruleCopy.column]
-  console.log(`Date value for column ${ruleCopy.column}:`, value, typeof value)
+  const value = row[rule.column]
+  console.log(`Date value for column ${rule.column}:`, value, typeof value)
 
   // If the value is undefined or null, we can't validate it as a date
   if (value === undefined || value === null || value === "") {
     // For required date fields, null/undefined/empty is invalid
-    const isRequired = ruleCopy.parameters.required === true
+    const isRequired = rule.parameters.required === true
     if (isRequired) {
       return {
         rowIndex,
-        table: ruleCopy.table,
-        column: ruleCopy.column,
-        ruleName: ruleCopy.name,
+        table: rule.table,
+        column: rule.column,
+        ruleName: rule.name,
         message: "Date is required and must be valid",
-        severity: ruleCopy.severity,
-        ruleId: ruleCopy.id,
+        severity: rule.severity || "warning",
+        ruleId: rule.id,
       }
     } else {
       // If date is null/undefined/empty and not required, skip validation
@@ -281,40 +387,40 @@ function validateDateRuleWithSafeguards(
 
   let validationResult: { isValid: boolean; message: string } = { isValid: true, message: "" }
 
-  switch (ruleCopy.ruleType) {
+  switch (rule.ruleType) {
     case "date-before":
       console.log("Validating date-before rule:", {
         value,
-        compareDate: ruleCopy.parameters.compareDate,
-        inclusive: ruleCopy.parameters.inclusive,
+        compareDate: rule.parameters.date,
+        inclusive: rule.parameters.inclusive,
       })
-      validationResult = validateDateBefore(value, ruleCopy.parameters.compareDate, ruleCopy.parameters.inclusive)
+      validationResult = validateDateBefore(value, rule.parameters.date, rule.parameters.inclusive)
       break
 
     case "date-after":
       console.log("Validating date-after rule:", {
         value,
-        compareDate: ruleCopy.parameters.compareDate,
-        inclusive: ruleCopy.parameters.inclusive,
+        compareDate: rule.parameters.date,
+        inclusive: rule.parameters.inclusive,
       })
-      validationResult = validateDateAfter(value, ruleCopy.parameters.compareDate, ruleCopy.parameters.inclusive)
+      validationResult = validateDateAfter(value, rule.parameters.date, rule.parameters.inclusive)
       break
 
     case "date-between":
       validationResult = validateDateBetween(
         value,
-        ruleCopy.parameters.startDate,
-        ruleCopy.parameters.endDate,
-        ruleCopy.parameters.inclusive,
+        rule.parameters.startDate,
+        rule.parameters.endDate,
+        rule.parameters.inclusive,
       )
       break
 
     case "date-format":
       validationResult = validateDateFormat(
         value,
-        ruleCopy.parameters.format,
-        ruleCopy.parameters.customFormat,
-        ruleCopy.parameters.required,
+        rule.parameters.format,
+        rule.parameters.customFormat,
+        rule.parameters.required,
       )
       break
 
@@ -324,28 +430,30 @@ function validateDateRuleWithSafeguards(
 
   console.log(`Date rule validation result:`, validationResult)
 
-  // If validation fails, return a validation result with the appropriate severity
+  // CRITICAL: Make sure we're properly handling the validation result
   if (!validationResult.isValid) {
+    console.log("VALIDATION FAILED - Returning failure result")
     return {
       rowIndex,
-      table: ruleCopy.table,
-      column: ruleCopy.column,
-      ruleName: ruleCopy.name,
-      message: validationResult.message,
-      severity: ruleCopy.severity,
-      ruleId: ruleCopy.id,
+      table: rule.table,
+      column: rule.column,
+      ruleName: rule.name,
+      message: validationResult.message || `Date validation failed for ${rule.ruleType}`,
+      severity: rule.severity || "warning",
+      ruleId: rule.id,
     }
   }
 
   // For successful validations, return a success result
+  console.log("VALIDATION PASSED - Returning success result")
   return {
     rowIndex,
-    table: ruleCopy.table,
-    column: ruleCopy.column,
-    ruleName: ruleCopy.name,
+    table: rule.table,
+    column: rule.column,
+    ruleName: rule.name,
     message: "Passed date validation",
     severity: "success",
-    ruleId: ruleCopy.id,
+    ruleId: rule.id,
   }
 }
 
@@ -1170,6 +1278,7 @@ function validateDateRule(row: DataRecord, rowIndex: number, rule: DataQualityRu
         isValid = true
         message = "Start or end date not specified"
       } else {
+        // Debug logging
         const result = validateDateBetween(
           value,
           rule.parameters.startDate,
@@ -2872,85 +2981,6 @@ function validateJavaScriptFormula(row: DataRecord, formula?: string): { isValid
 }
 
 // Add these functions to handle date validation
-
-function validateDateBetween(
-  value: any,
-  startDate?: string,
-  endDate?: string,
-  inclusive?: boolean,
-): { isValid: boolean; message: string } {
-  console.log("validateDateBetween called with:", { value, startDate, endDate, inclusive })
-
-  if (value === null || value === undefined || value === "") {
-    return { isValid: true, message: "" }
-  }
-
-  // Convert value to Date if it's not already
-  let dateValue: Date
-  if (value instanceof Date) {
-    dateValue = new Date(value) // Create a copy to avoid modifying the original
-  } else if (typeof value === "string") {
-    // Try to parse the date string
-    dateValue = new Date(value)
-  } else {
-    return {
-      isValid: false,
-      message: `Value must be a valid date, got ${typeof value}: ${value}`,
-    }
-  }
-
-  if (isNaN(dateValue.getTime())) {
-    return {
-      isValid: false,
-      message: `Value must be a valid date, got invalid date: ${value}`,
-    }
-  }
-
-  if (!startDate || !endDate) {
-    return { isValid: true, message: "" }
-  }
-
-  const start = new Date(startDate)
-  const end = new Date(endDate)
-
-  if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-    return {
-      isValid: false,
-      message: `One of the comparison dates is invalid: ${startDate} - ${endDate}`,
-    }
-  }
-
-  // Create copies to avoid modifying the original dates
-  const dateValueCopy = new Date(dateValue.getTime())
-  const startDateCopy = new Date(start.getTime())
-  const endDateCopy = new Date(end.getTime())
-
-  // Normalize dates to remove time components for consistent comparison
-  const dateValueTime = new Date(dateValueCopy.setHours(0, 0, 0, 0)).getTime()
-  const startDateTime = new Date(startDateCopy.setHours(0, 0, 0, 0)).getTime()
-  const endDateTime = new Date(endDateCopy.setHours(0, 0, 0, 0)).getTime()
-
-  const isValid = inclusive
-    ? dateValueTime >= startDateTime && dateValueTime <= endDateTime
-    : dateValueTime > startDateTime && dateValueTime < endDateTime
-
-  const formattedDate = dateValue.toISOString().split("T")[0]
-
-  console.log("validateDateBetween result:", {
-    isValid,
-    dateValue: dateValue.toISOString(),
-    startDate: start.toISOString(),
-    endDate: end.toISOString(),
-    comparison: `${startDateTime} ${inclusive ? "<=" : "<"} ${dateValueTime} ${inclusive ? "<=" : "<"} ${endDateTime}`,
-  })
-
-  return {
-    isValid,
-    message: isValid
-      ? ""
-      : `Date ${formattedDate} must be ${inclusive ? "on or " : ""}between ${startDate} and ${endDate}`,
-  }
-}
 
 function validateDateFormat(
   value: any,
