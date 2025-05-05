@@ -425,21 +425,16 @@ export function RuleForm(props: RuleFormProps) {
   useEffect(() => {
     if (initialRule) {
       console.log("Loading initial rule in RuleForm:", initialRule)
+      console.log("Initial rule column:", initialRule.column)
 
       // Create a deep copy to avoid reference issues
       const ruleCopy = JSON.parse(JSON.stringify(initialRule))
 
-      // Special handling for date rules
-      if (initialRule.ruleType?.startsWith("date-")) {
-        console.log("Date rule detected in RuleForm, column =", initialRule.column)
-
-        // Ensure format parameter is properly loaded for date-format rules
-        if (initialRule.ruleType === "date-format" && initialRule.parameters) {
-          console.log("Date format rule detected, format =", initialRule.parameters.format)
-        }
-      }
-
-      setRule(ruleCopy)
+      // Ensure column is explicitly set
+      setRule({
+        ...ruleCopy,
+        column: ruleCopy.column || "",
+      })
 
       if (initialRule.secondaryColumns) {
         setSelectedSecondaryColumns(initialRule.secondaryColumns)
@@ -476,41 +471,31 @@ export function RuleForm(props: RuleFormProps) {
         ])
       }
 
-      // Initialize composite reference columns
+      // Properly initialize sourceColumns and referenceColumns for composite-reference rules
       if (initialRule.ruleType === "composite-reference") {
-        const sourceColumnsFromRule = initialRule.parameters.sourceColumns || [initialRule.column || ""]
-        const referenceColumnsFromRule = initialRule.parameters.referenceColumns || []
-        const sourceTableFromRule = initialRule.parameters.sourceTable || initialRule.table || ""
+        // Initialize source columns from parameters
+        if (initialRule.parameters.sourceColumns && initialRule.parameters.sourceColumns.length > 0) {
+          console.log("Setting source columns from rule:", initialRule.parameters.sourceColumns)
+          setSourceColumns(initialRule.parameters.sourceColumns)
+        } else {
+          // Default to the primary column if no source columns are specified
+          setSourceColumns([initialRule.column || ""])
+        }
 
-        setSourceColumns(sourceColumnsFromRule)
-        setReferenceColumns(referenceColumnsFromRule)
-
-        // Ensure these are also in the rule parameters
-        setRule((prev) => ({
-          ...prev,
-          parameters: {
-            ...prev.parameters,
-            sourceTable: sourceTableFromRule,
-            sourceColumns: sourceColumnsFromRule,
-            referenceColumns: referenceColumnsFromRule,
-          },
-        }))
+        // Initialize reference columns from parameters
+        if (initialRule.parameters.referenceColumns && initialRule.parameters.referenceColumns.length > 0) {
+          console.log("Setting reference columns from rule:", initialRule.parameters.referenceColumns)
+          setReferenceColumns(initialRule.parameters.referenceColumns)
+        } else {
+          setReferenceColumns([])
+        }
       }
 
-      // Initialize unique columns
-      if (initialRule.ruleType === "unique") {
-        const uniqueColumnsFromRule = initialRule.parameters.uniqueColumns || [initialRule.column || ""]
-        setUniqueColumns(uniqueColumnsFromRule)
-
-        // Ensure these are also in the rule parameters
-        setRule((prev) => ({
-          ...prev,
-          parameters: {
-            ...prev.parameters,
-            uniqueColumns: uniqueColumnsFromRule,
-          },
-        }))
-      }
+      // Log the rule state after setting it
+      console.log("Rule state after loading initial rule:", {
+        ...ruleCopy,
+        column: ruleCopy.column || "",
+      })
     }
   }, [initialRule, datasets, tables])
 
@@ -691,9 +676,18 @@ export function RuleForm(props: RuleFormProps) {
     setRule((prev) => ({ ...prev, columnConditions: updatedConditions }))
   }
 
-  const handleSourceColumnChange = (index: number, value: string) => {
+  // Find the handleAddSourceColumn function and update it to prevent form submission
+  const handleAddSourceColumn = (e?: React.MouseEvent) => {
+    // Prevent the default form submission if an event is provided
+    if (e) {
+      e.preventDefault()
+    }
+    setSourceColumns((prev) => [...prev, ""])
+  }
+
+  const handleRemoveSourceColumn = (index: number) => {
     const updatedSourceColumns = [...sourceColumns]
-    updatedSourceColumns[index] = value
+    updatedSourceColumns.splice(index, 1)
     setSourceColumns(updatedSourceColumns)
 
     // Update the rule parameters as well
@@ -709,13 +703,9 @@ export function RuleForm(props: RuleFormProps) {
     setFormDebug((prev) => ({ ...prev, hasSourceColumns: updatedSourceColumns.filter(Boolean).length > 0 }))
   }
 
-  const handleAddSourceColumn = () => {
-    setSourceColumns((prev) => [...prev, ""])
-  }
-
-  const handleRemoveSourceColumn = (index: number) => {
+  const handleSourceColumnChange = (index: number, value: string) => {
     const updatedSourceColumns = [...sourceColumns]
-    updatedSourceColumns.splice(index, 1)
+    updatedSourceColumns[index] = value
     setSourceColumns(updatedSourceColumns)
 
     // Update the rule parameters as well
@@ -749,7 +739,12 @@ export function RuleForm(props: RuleFormProps) {
     setFormDebug((prev) => ({ ...prev, hasReferenceColumns: updatedReferenceColumns.filter(Boolean).length > 0 }))
   }
 
-  const handleAddReferenceColumn = () => {
+  // Find the handleAddReferenceColumn function and update it to prevent form submission
+  const handleAddReferenceColumn = (e?: React.MouseEvent) => {
+    // Prevent the default form submission if an event is provided
+    if (e) {
+      e.preventDefault()
+    }
     setReferenceColumns((prev) => [...prev, ""])
   }
 
@@ -1233,6 +1228,7 @@ export function RuleForm(props: RuleFormProps) {
             <div>
               <Label htmlFor="sourceTable">Source Table</Label>
               <Select
+                value={rule.parameters.sourceTable || rule.table}
                 onValueChange={(value) => {
                   handleParameterChange("sourceTable", value)
                 }}
@@ -1254,6 +1250,7 @@ export function RuleForm(props: RuleFormProps) {
               {sourceColumns.map((column, index) => (
                 <div key={index} className="flex items-center space-x-2">
                   <Select
+                    value={column}
                     onValueChange={(value) => {
                       handleSourceColumnChange(index, value)
                     }}
@@ -1276,7 +1273,12 @@ export function RuleForm(props: RuleFormProps) {
                   )}
                 </div>
               ))}
-              <Button variant="ghost" size="sm" onClick={handleAddSourceColumn}>
+              {/* Update the "Add Source Column" button in the composite-reference case of renderRuleTypeSpecificFields */}
+              {/* Find this line: */}
+              {/* <Button variant="ghost" size="sm" onClick={handleAddSourceColumn}> */}
+
+              {/* Replace it with: */}
+              <Button variant="ghost" size="sm" onClick={(e) => handleAddSourceColumn(e)} type="button">
                 <Plus className="h-4 w-4 mr-2" />
                 Add Source Column
               </Button>
@@ -1287,6 +1289,7 @@ export function RuleForm(props: RuleFormProps) {
             <div>
               <Label htmlFor="referenceTable">Reference Table</Label>
               <Select
+                value={rule.parameters.referenceTable || ""}
                 onValueChange={(value) => {
                   handleParameterChange("referenceTable", value)
                   setFormDebug((prev) => ({ ...prev, hasReferenceTable: !!value }))
@@ -1313,6 +1316,7 @@ export function RuleForm(props: RuleFormProps) {
                 {referenceColumns.map((column, index) => (
                   <div key={index} className="flex items-center space-x-2">
                     <Select
+                      value={column}
                       onValueChange={(value) => {
                         handleReferenceColumnChange(index, value)
                       }}
@@ -1335,7 +1339,12 @@ export function RuleForm(props: RuleFormProps) {
                     )}
                   </div>
                 ))}
-                <Button variant="ghost" size="sm" onClick={handleAddReferenceColumn}>
+                {/* Update the "Add Reference Column" button in the composite-reference case of renderRuleTypeSpecificFields */}
+                {/* Find this line: */}
+                {/* <Button variant="ghost" size="sm" onClick={handleAddReferenceColumn}> */}
+
+                {/* Replace it with: */}
+                <Button variant="ghost" size="sm" onClick={(e) => handleAddReferenceColumn(e)} type="button">
                   <Plus className="h-4 w-4 mr-2" />
                   Add Reference Column
                 </Button>

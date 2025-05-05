@@ -82,54 +82,133 @@ function validateList(value: any, listId: any, valueLists: ValueList[]): { isVal
 }
 
 // Define validateEnum at the top level
-function validateEnum(value: any, allowedValues: any[]): { isValid: boolean; message: string } {
-  const isValid = allowedValues.includes(value)
+function validateEnum(value: any, allowedValues: any): { isValid: boolean; message: string } {
+  // Ensure allowedValues is an array
+  if (!Array.isArray(allowedValues)) {
+    console.error("validateEnum received non-array allowedValues:", allowedValues)
+    // Convert to array if possible, or use empty array
+    allowedValues = allowedValues ? [allowedValues] : []
+  }
+
+  // Add detailed logging to help diagnose issues
+  console.log("Enum validation:", {
+    value: value,
+    valueType: typeof value,
+    allowedValues: allowedValues,
+    stringifiedValue: String(value),
+  })
+
+  // Try both direct comparison and string comparison
+  const isDirectMatch = allowedValues.includes(value)
+  const isStringMatch = allowedValues.some((v) => String(v) === String(value))
+  const isValid = isDirectMatch || isStringMatch
+
+  console.log("Enum validation result:", {
+    isDirectMatch,
+    isStringMatch,
+    isValid,
+  })
+
   return {
     isValid,
-    message: isValid ? "" : `Value must be one of: ${allowedValues.join(", ")}`,
+    message: isValid ? "" : `Value "${value}" must be one of: ${allowedValues.join(", ")}`,
   }
 }
 
 // Define validateEnumCaseInsensitive at the top level
-function validateEnumCaseInsensitive(value: any, allowedValues: any[]): { isValid: boolean; message: string } {
-  if (typeof value !== "string") {
-    return { isValid: false, message: "Value must be a string for case-insensitive enum validation" }
+function validateEnumCaseInsensitive(value: any, allowedValues: any): { isValid: boolean; message: string } {
+  // Ensure allowedValues is an array
+  if (!Array.isArray(allowedValues)) {
+    console.error("validateEnumCaseInsensitive received non-array allowedValues:", allowedValues)
+    // Convert to array if possible, or use empty array
+    allowedValues = allowedValues ? [allowedValues] : []
   }
 
-  const lowerCaseValue = value.toLowerCase()
-  const isValid = allowedValues.map((v) => String(v).toLowerCase()).includes(lowerCaseValue)
+  // Add detailed logging
+  console.log("Case-insensitive enum validation:", {
+    value: value,
+    valueType: typeof value,
+    allowedValues: allowedValues,
+  })
+
+  // Handle non-string values by converting them to strings
+  const stringValue = String(value).trim()
+  const lowerCaseValue = stringValue.toLowerCase()
+
+  // Convert all allowed values to lowercase strings for comparison
+  const lowerCaseAllowedValues = allowedValues.map((v) => String(v).toLowerCase().trim())
+
+  const isValid = lowerCaseAllowedValues.includes(lowerCaseValue)
+
+  console.log("Case-insensitive enum validation details:", {
+    stringValue,
+    lowerCaseValue,
+    lowerCaseAllowedValues,
+    isValid,
+  })
 
   return {
     isValid,
-    message: isValid ? "" : `Value must be one of: ${allowedValues.join(", ")} (case-insensitive)`,
+    message: isValid ? "" : `Value "${value}" must be one of: ${allowedValues.join(", ")} (case-insensitive)`,
   }
 }
 
-// Define validateContains at the top level
+// Find the validateContains function and replace it with this improved version:
 function validateContains(
   value: any,
   searchString: any,
   matchType: any,
   caseSensitive: any,
 ): { isValid: boolean; message: string } {
-  if (typeof value !== "string" || typeof searchString !== "string") {
-    return { isValid: false, message: "Both value and search string must be strings" }
+  // Add detailed logging to diagnose the issue
+  console.log("Contains validation inputs:", {
+    value,
+    valueType: typeof value,
+    searchString,
+    searchStringType: typeof searchString,
+    matchType,
+    caseSensitive,
+  })
+
+  // Handle null/undefined value
+  if (value === null || value === undefined) {
+    console.log("Contains validation: value is null or undefined")
+    return { isValid: false, message: "Value cannot be null or undefined" }
   }
+
+  // Convert value to string if it's not already a string
+  const stringValue = typeof value === "string" ? value : String(value)
+
+  // Handle null/undefined searchString - consider it a pass if no search string is provided
+  if (searchString === null || searchString === undefined || searchString === "") {
+    console.log("Contains validation: searchString is null, undefined or empty - considering as valid")
+    return { isValid: true, message: "" }
+  }
+
+  // Convert searchString to string if it's not already a string
+  const stringSearchString = typeof searchString === "string" ? searchString : String(searchString)
+
+  console.log("Contains validation after conversion:", {
+    stringValue,
+    stringSearchString,
+    matchType,
+    caseSensitive,
+  })
 
   let isValid = false
   let message = ""
 
   if (caseSensitive === true) {
     if (matchType === "starts-with") {
-      isValid = value.startsWith(searchString)
+      isValid = stringValue.startsWith(stringSearchString)
     } else if (matchType === "ends-with") {
-      isValid = value.endsWith(searchString)
+      isValid = stringValue.endsWith(stringSearchString)
     } else {
-      isValid = value.includes(searchString)
+      isValid = stringValue.includes(stringSearchString)
     }
   } else {
-    const lowerCaseValue = value.toLowerCase()
-    const lowerCaseSearchString = searchString.toLowerCase()
+    const lowerCaseValue = stringValue.toLowerCase()
+    const lowerCaseSearchString = stringSearchString.toLowerCase()
 
     if (matchType === "starts-with") {
       isValid = lowerCaseValue.startsWith(lowerCaseSearchString)
@@ -140,7 +219,9 @@ function validateContains(
     }
   }
 
-  message = isValid ? "" : `Value must contain "${searchString}"`
+  console.log("Contains validation result:", { isValid })
+
+  message = isValid ? "" : `Value must contain "${stringSearchString}"`
 
   return {
     isValid,
@@ -382,7 +463,7 @@ function validateLessThan(value: any, compareValue: any): { isValid: boolean; me
   const numValue = typeof value === "string" ? Number(value) : value
   const numCompareValue = typeof compareValue === "string" ? Number(compareValue) : compareValue
 
-  // Check if both values are valid numbers after conversion
+  // Check if all values are valid numbers after conversion
   if (isNaN(numValue) || isNaN(numCompareValue)) {
     return {
       isValid: false,
@@ -2080,9 +2161,23 @@ function validateSingleColumnCondition(
     case "enum":
       // Check if case-insensitive flag is enabled
       if (condition.parameters.caseInsensitive === true) {
-        return validateEnumCaseInsensitive(value, condition.parameters.allowedValues)
+        // Ensure allowedValues exists and is an array
+        const allowedValues = Array.isArray(condition.parameters.allowedValues)
+          ? condition.parameters.allowedValues
+          : condition.parameters.allowedValues
+            ? [condition.parameters.allowedValues]
+            : []
+
+        return validateEnumCaseInsensitive(value, allowedValues)
       } else {
-        return validateEnum(value, condition.parameters.allowedValues)
+        // Ensure allowedValues exists and is an array
+        const allowedValues = Array.isArray(condition.parameters.allowedValues)
+          ? condition.parameters.allowedValues
+          : condition.parameters.allowedValues
+            ? [condition.parameters.allowedValues]
+            : []
+
+        return validateEnum(value, allowedValues)
       }
 
     // Also update the validateSingleColumnCondition function to handle both parameter names
@@ -2090,12 +2185,24 @@ function validateSingleColumnCondition(
     case "list":
       return validateList(value, condition.parameters.listId || condition.parameters.valueList, valueLists)
 
+    // Also update the validateSingleColumnCondition function's "contains" case
+    // Find this section in the validateSingleColumnCondition function:
     case "contains":
+      // Add debug logging
+      console.log("Contains condition parameters:", {
+        column: condition.column,
+        value,
+        searchString: condition.parameters.searchString || condition.parameters.containsValue || "",
+        matchType: condition.parameters.matchType || "contains",
+        caseSensitive: condition.parameters.caseSensitive || false,
+        allParameters: condition.parameters,
+      })
+
       return validateContains(
         value,
-        condition.parameters.searchString,
-        condition.parameters.matchType,
-        condition.parameters.caseSensitive,
+        condition.parameters.searchString || condition.parameters.containsValue || "",
+        condition.parameters.matchType || "contains",
+        condition.parameters.caseSensitive || false,
       )
 
     case "formula":
@@ -2217,10 +2324,38 @@ function validateRule(
       break
 
     case "enum":
+      // Add debug logging for enum rule
+      console.log("Processing enum rule:", {
+        ruleName: rule.name,
+        value,
+        allowedValues: rule.parameters.allowedValues,
+        caseInsensitive: rule.parameters.caseInsensitive,
+      })
+
       if (rule.parameters.caseInsensitive === true) {
-        ;({ isValid, message } = validateEnumCaseInsensitive(value, rule.parameters.allowedValues))
+        // Ensure allowedValues exists and is an array
+        const allowedValues = Array.isArray(rule.parameters.allowedValues)
+          ? rule.parameters.allowedValues
+          : typeof rule.parameters.allowedValues === "string"
+            ? rule.parameters.allowedValues.split(",").map((v) => v.trim())
+            : rule.parameters.allowedValues
+              ? [rule.parameters.allowedValues]
+              : []
+
+        console.log("Enum validation with values:", allowedValues)
+        ;({ isValid, message } = validateEnumCaseInsensitive(value, allowedValues))
       } else {
-        ;({ isValid, message } = validateEnum(value, rule.parameters.allowedValues))
+        // Ensure allowedValues exists and is an array
+        const allowedValues = Array.isArray(rule.parameters.allowedValues)
+          ? rule.parameters.allowedValues
+          : typeof rule.parameters.allowedValues === "string"
+            ? rule.parameters.allowedValues.split(",").map((v) => v.trim())
+            : rule.parameters.allowedValues
+              ? [rule.parameters.allowedValues]
+              : []
+
+        console.log("Enum validation with values:", allowedValues)
+        ;({ isValid, message } = validateEnum(value, allowedValues))
       }
       break
 
@@ -2239,11 +2374,24 @@ function validateRule(
       })
       break
 
+    // Also update the validateRule function's "contains" case to ensure parameters are correctly handled
+    // Find this section in the validateRule function:
     case "contains":
       // Handle both parameter names for backward compatibility
-      const searchString = rule.parameters.searchString || rule.parameters.containsValue
+      const searchString = rule.parameters.searchString || rule.parameters.containsValue || ""
       const matchType = rule.parameters.matchType || "contains"
       const caseSensitive = rule.parameters.caseSensitive || false
+
+      // Add debug logging
+      console.log("Contains rule parameters:", {
+        ruleName: rule.name,
+        column: rule.column,
+        value,
+        searchString,
+        matchType,
+        caseSensitive,
+        allParameters: rule.parameters,
+      })
       ;({ isValid, message } = validateContains(value, searchString, matchType, caseSensitive))
       break
 

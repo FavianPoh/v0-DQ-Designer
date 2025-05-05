@@ -37,16 +37,23 @@ const EnhancedRuleForm: React.FC<EnhancedRuleFormProps> = ({
   useEffect(() => {
     if (initialRule) {
       console.log("Loading initial rule in EnhancedRuleForm:", initialRule)
+      console.log("Initial rule column:", initialRule.column)
 
       // Create a deep copy to avoid reference issues
       const ruleCopy = JSON.parse(JSON.stringify(initialRule))
 
-      // Special handling for date rules
-      if (initialRule.ruleType?.startsWith("date-")) {
-        console.log("Date rule detected in EnhancedRuleForm, column =", initialRule.column)
-      }
+      // Ensure column is explicitly set and preserved
+      setRule({
+        ...ruleCopy,
+        column: ruleCopy.column || "",
+      })
 
-      setRule(ruleCopy)
+      // Log the rule state after setting it
+      console.log("Rule state after loading in EnhancedRuleForm:", {
+        ...ruleCopy,
+        column: ruleCopy.column || "",
+      })
+
       setSelectedColumns(initialRule.additionalColumns || [])
     }
   }, [initialRule])
