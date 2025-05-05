@@ -3141,7 +3141,8 @@ const validateCrossTableConditions = (row: DataRecord, crossTableConditions: any
   return { isValid: true, message: "" }
 }
 
-// Declare validateUnique function
+// Replace the `validateUnique` function with this improved version:
+
 function validateUnique(
   row: DataRecord,
   rowIndex: number,
@@ -3158,23 +3159,47 @@ function validateUnique(
   // Get the unique columns from the parameters
   const uniqueColumns = rule.parameters.uniqueColumns || [rule.column]
 
-  // Create a set to store unique values
-  const uniqueValues = new Set()
+  // Check if the current row has null values in any of the unique columns
+  // If so, skip validation (allow null values to be duplicated)
+  const hasNullValue = uniqueColumns.some((col) => row[col] === null || row[col] === undefined)
+  if (hasNullValue) {
+    console.log("Unique validation: Skipping row with null value in key columns", {
+      rowIndex,
+      uniqueColumns,
+      values: uniqueColumns.map((col) => row[col]),
+    })
+    return null // Skip validation for rows with null values
+  }
 
-  // Iterate through the dataset and check for duplicates
+  // For non-null values, check for duplicates
   const tableData = datasets[rule.table]
   if (tableData) {
-    for (const rowData of tableData) {
-      // Build a composite key from the specified columns
-      const compositeKey = uniqueColumns
-        .map((col) => {
-          const colValue = rowData[col]
-          return colValue === null || colValue === undefined ? "" : colValue // Treat nulls as empty strings
-        })
-        .join("||") // Use a separator that's unlikely to appear in the data
+    // Build the current row's composite key
+    const currentRowKey = uniqueColumns.map((col) => String(row[col])).join("||")
 
-      // If the value is already in the set, it's a duplicate
-      if (uniqueValues.has(compositeKey)) {
+    // Check against all other rows (excluding the current row)
+    for (let i = 0; i < tableData.length; i++) {
+      // Skip comparing the row with itself
+      if (i === rowIndex) continue
+
+      const otherRow = tableData[i]
+
+      // Skip rows that have null values in any of the unique columns
+      const otherRowHasNullValue = uniqueColumns.some((col) => otherRow[col] === null || otherRow[col] === undefined)
+
+      if (otherRowHasNullValue) continue
+
+      // Build composite key for the other row
+      const otherRowKey = uniqueColumns.map((col) => String(otherRow[col])).join("||")
+
+      // If the keys match, we found a duplicate
+      if (currentRowKey === otherRowKey) {
+        console.log("Unique validation: Found duplicate", {
+          rowIndex,
+          otherRowIndex: i,
+          key: currentRowKey,
+        })
+
         return {
           rowIndex,
           table: rule.table,
@@ -3184,11 +3209,10 @@ function validateUnique(
           severity: rule.severity,
           ruleId: rule.id,
         }
-      } else {
-        uniqueValues.add(compositeKey)
       }
     }
   }
 
+  // No duplicates found
   return null
 }

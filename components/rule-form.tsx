@@ -589,6 +589,17 @@ export function RuleForm(props: RuleFormProps) {
     }
   }, [rule.ruleType, rule.table, rule.column, tableColumns, props.onColumnChange])
 
+  // Add this useEffect to focus the first input when the form is rendered
+  useEffect(() => {
+    // Focus the first input field when the form is rendered
+    const firstInput = document.querySelector(".edit-rule-form input") as HTMLInputElement
+    if (firstInput) {
+      setTimeout(() => {
+        firstInput.focus()
+      }, 100)
+    }
+  }, [])
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
     setRule((prev) => ({ ...prev, [name]: value }))
@@ -2768,7 +2779,8 @@ export function RuleForm(props: RuleFormProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    // Add a class to the form for easier targeting
+    <form onSubmit={handleSubmit} className="space-y-4 edit-rule-form">
       <div>
         <Label htmlFor="name">Rule Name</Label>
         <Input type="text" id="name" name="name" value={rule.name} onChange={handleInputChange} required />

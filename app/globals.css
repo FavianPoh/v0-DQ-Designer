@@ -92,3 +92,14 @@ body {
     @apply bg-background text-foreground;
   }
 }
+
+/* Add these styles to enhance the visual feedback when editing a rule */
+.rule-card-editing {
+  border: 2px solid #3b82f6 !important; /* Blue border */
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.3) !important; /* Blue glow effect */
+  transition: all 0.3s ease-in-out;
+}
+
+.edit-rule-form {
+  scroll-margin-top: 20px; /* Ensures the form has some space at the top when scrolled to */
+}

@@ -107,23 +107,14 @@ export function RuleManager({
     }
   }
 
+  // Replace the handleEditClick function with this improved version that ensures a single click works properly
+  // This is the only change needed - replace the entire function
+
   const handleEditClick = (ruleId: string) => {
-    const rule = rules.find((r) => r.id === ruleId)
-    if (rule) {
-      console.log("Editing rule:", rule)
-    }
+    // Prevent any race conditions by using a direct approach
     console.log("Edit clicked for rule:", ruleId)
 
-    // Force scroll to top to ensure the edit form is visible
-    window.scrollTo(0, 0)
-
-    // Set both local and parent state
-    setLocalEditingRuleId(ruleId)
-    if (onEditingChange) {
-      onEditingChange(ruleId)
-    }
-
-    // Add a visual indicator that the rule is being edited
+    // First, highlight the rule card
     const ruleElement = document.getElementById(`rule-${ruleId}`)
     if (ruleElement) {
       ruleElement.classList.add("border-blue-500", "border-2", "bg-blue-50")
@@ -131,6 +122,28 @@ export function RuleManager({
         ruleElement.classList.remove("bg-blue-50")
       }, 1000)
     }
+
+    // Set the editing state
+    setLocalEditingRuleId(ruleId)
+
+    // Immediately notify parent component
+    if (onEditingChange) {
+      onEditingChange(ruleId)
+    }
+
+    // Force immediate scroll to top - don't use setTimeout here
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    })
+
+    // Focus the first input after a short delay to ensure the form is rendered
+    setTimeout(() => {
+      const editForm = document.querySelector(".tabs-container form input, .tabs-container form select")
+      if (editForm && editForm instanceof HTMLElement) {
+        editForm.focus()
+      }
+    }, 300)
   }
 
   const handleDeleteClick = (ruleId: string) => {
@@ -349,9 +362,14 @@ export function RuleManager({
                               size="sm"
                               className="h-7 w-7 p-0"
                               onClick={(e) => {
+                                // Ensure event propagation is completely stopped
                                 e.preventDefault()
                                 e.stopPropagation()
+                                e.nativeEvent.stopImmediatePropagation()
+                                // Call the edit handler directly
                                 handleEditClick(rule.id)
+                                // Return false to prevent any default behavior
+                                return false
                               }}
                               disabled={isSaving}
                             >

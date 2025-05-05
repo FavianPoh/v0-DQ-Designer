@@ -27,8 +27,11 @@ export function DataQualityDashboard() {
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
+  // Add a ref to the tabs container
   const tabsRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // Add a ref to track if we're currently editing a rule to prevent competing scroll behaviors
+  const isEditingRef = useRef<boolean>(false)
 
   const [rules, setRules] = useState<DataQualityRule[]>([])
   const [valueLists, setValueLists] = useState<ValueList[]>([])
@@ -218,19 +221,66 @@ export function DataQualityDashboard() {
     }
   }, [datasets, rules, valueLists, loading])
 
-  // Handle tab changes
+  // MODIFIED: Handle tab changes - only scroll to highlighted rule, not editing rule
   useEffect(() => {
-    if (activeTab === "rules" && (highlightedRuleId || editingRuleId)) {
-      // Scroll to the highlighted/edited rule
+    if (activeTab === "rules" && highlightedRuleId && !editingRuleId) {
+      // Only scroll to highlighted rule if we're not editing
       setTimeout(() => {
-        const ruleId = editingRuleId || highlightedRuleId
-        const ruleElement = document.getElementById(`rule-${ruleId}`)
+        const ruleElement = document.getElementById(`rule-${highlightedRuleId}`)
         if (ruleElement) {
           ruleElement.scrollIntoView({ behavior: "smooth", block: "center" })
         }
       }, 100)
     }
   }, [activeTab, highlightedRuleId, editingRuleId])
+
+  // MODIFIED: Handle editing rule changes - prioritize scrolling to top
+  useEffect(() => {
+    if (editingRuleId) {
+      // Set the editing flag to prevent competing scroll behaviors
+      isEditingRef.current = true
+
+      // Ensure we scroll to the top when a rule is being edited
+      window.scrollTo({
+        top: 0,
+        behavior: "smooth",
+      })
+
+      // Also highlight the rule being edited
+      const ruleElement = document.getElementById(`rule-${editingRuleId}`)
+      if (ruleElement) {
+        // Add a blue halo effect
+        ruleElement.classList.add("border-blue-500", "border-2")
+
+        // Keep the highlight for as long as the rule is being edited
+        return () => {
+          ruleElement.classList.remove("border-blue-500", "border-2")
+          // Reset the editing flag when done
+          isEditingRef.current = false
+        }
+      }
+    }
+  }, [editingRuleId])
+
+  // Add a handler for when editing changes
+  const handleEditingChange = (ruleId: string | null) => {
+    console.log("Editing rule changed to:", ruleId)
+    setEditingRuleId(ruleId)
+
+    // If we're starting to edit, set the editing flag
+    if (ruleId) {
+      isEditingRef.current = true
+
+      // Immediately scroll to top
+      window.scrollTo({
+        top: 0,
+        behavior: "smooth",
+      })
+    } else {
+      // Reset the editing flag when done
+      isEditingRef.current = false
+    }
+  }
 
   const handleAddRule = async (rule: DataQualityRule) => {
     try {
@@ -464,7 +514,9 @@ export function DataQualityDashboard() {
         return newRules
       })
 
+      // Reset the editing state
       setEditingRuleId(null)
+      isEditingRef.current = false
 
       if (response.ok) {
         toast({
@@ -723,6 +775,7 @@ export function DataQualityDashboard() {
     setValidationResults(results)
   }
 
+  // MODIFIED: Update handleRuleClick to use the isEditingRef
   const handleRuleClick = (ruleIdOrRule: string | DataQualityRule) => {
     let ruleId: string
 
@@ -744,12 +797,21 @@ export function DataQualityDashboard() {
 
       if (rule) {
         console.log("Found rule:", rule)
+
+        // Set the editing flag before changing the state
+        isEditingRef.current = true
         setEditingRuleId(rule.id)
 
         // Only switch to rules tab if we're not already there AND we're not coming from validation results tab
         if (activeTab !== "rules" && activeTab !== "validation") {
           setActiveTab("rules")
         }
+
+        // Ensure we scroll to the top when a rule is being edited
+        window.scrollTo({
+          top: 0,
+          behavior: "smooth",
+        })
       } else {
         console.error("Rule not found:", ruleId)
       }
@@ -1041,7 +1103,9 @@ export function DataQualityDashboard() {
         return newRules
       })
 
+      // Reset the editing state
       setEditingRuleId(null)
+      isEditingRef.current = false
 
       if (response.ok) {
         toast({
@@ -1097,11 +1161,11 @@ export function DataQualityDashboard() {
           <input type="file" ref={fileInputRef} onChange={handleImportData} accept=".json" className="hidden" />
         </div>
       </div>
-
       <Tabs
         value={activeTab}
         onValueChange={setActiveTab}
         ref={tabsRef}
+        className="tabs-container"
         key={`tabs-${activeTab}`} // Force re-render when tab changes
       >
         <TabsList className="grid w-full grid-cols-4">
@@ -1156,7 +1220,7 @@ export function DataQualityDashboard() {
             highlightedRuleId={highlightedRuleId}
             editingRuleId={editingRuleId}
             onRuleHighlighted={() => setHighlightedRuleId(null)}
-            onEditingChange={setEditingRuleId}
+            onEditingChange={handleEditingChange}
             isSaving={isSaving}
           />
         </TabsContent>
@@ -1192,7 +1256,10 @@ export function DataQualityDashboard() {
         datasets={datasets}
         valueLists={valueLists}
         onUpdateRule={handleDirectRuleUpdate}
-        onCancel={() => setEditingRuleId(null)}
+        onCancel={() => {
+          setEditingRuleId(null)
+          isEditingRef.current = false
+        }}
       />
     </div>
   )
