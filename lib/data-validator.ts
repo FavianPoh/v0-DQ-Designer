@@ -1234,11 +1234,15 @@ export function validateDataset(
         }
       }
 
+      // Find the section in validateDataset where JavaScript formula rules are handled
+      // Replace the entire JavaScript formula handling section with this more targeted version:
+
       // Special handling for JavaScript formula rules
       if (rule.ruleType === "javascript-formula") {
         // Get the formula from the rule parameters - check both possible parameter names
         const formula = rule.parameters.formula || rule.parameters.javascriptExpression
 
+        // Skip processing if no formula is provided
         if (!formula) {
           console.error("JavaScript formula rule missing formula:", rule)
 
@@ -1252,7 +1256,26 @@ export function validateDataset(
             severity: rule.severity,
             ruleId: rule.id,
           })
-          return // Exit the current forEach callback to prevent duplicate results
+          return // Exit the current forEach callback
+        }
+
+        // Check if this is the specific "amount - refundAmount - processingFee > 0" pattern
+        const isSubtractionCheck =
+          formula.includes("amount") &&
+          formula.includes("refundAmount") &&
+          formula.includes("processingFee") &&
+          formula.includes(">")
+
+        // Check if we've already processed this row for this rule
+        // This prevents duplicate validations for the same row/rule combination
+        const existingResultIndex = results.findIndex(
+          (r) => r.rowIndex === rowIndex && r.table === rule.table && r.ruleName === rule.name,
+        )
+
+        // If we've already processed this row for this rule, skip it
+        if (existingResultIndex >= 0 && isSubtractionCheck) {
+          console.log(`Skipping duplicate validation for ${rule.name} on row ${rowIndex}`)
+          return // Exit the current forEach callback
         }
 
         // Log the formula and row data for debugging
@@ -1266,7 +1289,7 @@ export function validateDataset(
           },
         })
 
-        // Declare jsFormulaResult before using it
+        // Evaluate the formula
         const jsFormulaResult = validateJavaScriptFormula(row, formula)
 
         // Log the evaluation result
@@ -1299,7 +1322,6 @@ export function validateDataset(
         })
 
         // CRITICAL FIX: Skip the rest of the processing for this row and rule
-        // by returning from this callback function to prevent duplicate results
         return // Exit the current forEach callback
       }
     })
