@@ -16,12 +16,53 @@ interface MultiColumnConditionEditorProps {
 }
 
 export function MultiColumnConditionEditor({ columns, conditions, onChange }: MultiColumnConditionEditorProps) {
-  const [newCondition, setNewCondition] = useState<Condition>({
-    column: "",
-    operator: "==",
-    value: "",
-    logicalOperator: "AND",
+  // Initialize newCondition with values from the first condition if available
+  const [newCondition, setNewCondition] = useState<Condition>(() => {
+    // If we have conditions, use the first one as a template
+    if (conditions && conditions.length > 0) {
+      console.log("Initializing newCondition from first condition:", conditions[0])
+      return {
+        column: conditions[0].column || "",
+        operator: conditions[0].operator || "==",
+        value: conditions[0].value === undefined ? "" : conditions[0].value,
+        logicalOperator: "AND",
+      }
+    }
+
+    // Default values if no conditions exist
+    return {
+      column: "",
+      operator: "==",
+      value: "",
+      logicalOperator: "AND",
+    }
   })
+  console.log("MultiColumnConditionEditor rendering with newCondition:", newCondition)
+  console.log("MultiColumnConditionEditor received conditions:", conditions)
+
+  // Add this useEffect at the beginning of the component to properly initialize conditions
+  useEffect(() => {
+    console.log("MultiColumnConditionEditor initializing with conditions:", conditions)
+
+    // If we have conditions, ensure they're properly formatted
+    if (conditions && conditions.length > 0) {
+      // Make a deep copy to avoid reference issues
+      const formattedConditions = JSON.parse(JSON.stringify(conditions))
+
+      // Ensure all conditions have the required properties
+      const updatedConditions = formattedConditions.map((condition, index) => {
+        return {
+          column: condition.column || "",
+          operator: condition.operator || "==",
+          value: condition.value === undefined ? "" : condition.value,
+          logicalOperator: index < formattedConditions.length - 1 ? condition.logicalOperator || "AND" : undefined,
+        }
+      })
+
+      console.log("Formatted conditions for display:", updatedConditions)
+      onChange(updatedConditions)
+    }
+  }, [])
 
   // Ensure all conditions have logical operators (except the last one)
   useEffect(() => {
@@ -41,6 +82,21 @@ export function MultiColumnConditionEditor({ columns, conditions, onChange }: Mu
       }
     }
   }, [conditions, onChange])
+
+  // Update newCondition when conditions change (e.g., when editing a rule)
+  useEffect(() => {
+    if (conditions && conditions.length > 0) {
+      console.log("Updating newCondition from conditions:", conditions)
+      // Use the last condition as a template for the next one to add
+      const lastCondition = conditions[conditions.length - 1]
+      setNewCondition({
+        column: lastCondition.column || "",
+        operator: lastCondition.operator || "==",
+        value: lastCondition.value === undefined ? "" : lastCondition.value,
+        logicalOperator: "AND",
+      })
+    }
+  }, [conditions])
 
   const handleAddCondition = () => {
     if (!newCondition.column) return
@@ -94,11 +150,13 @@ export function MultiColumnConditionEditor({ columns, conditions, onChange }: Mu
   }
 
   const handleUpdateCondition = (index: number, field: keyof Condition, value: any) => {
+    console.log(`Updating condition ${index}, field ${field} to value:`, value)
     const updatedConditions = [...conditions]
     updatedConditions[index] = {
       ...updatedConditions[index],
       [field]: value,
     }
+    console.log("Updated conditions:", updatedConditions)
     onChange(updatedConditions)
   }
 
@@ -179,7 +237,7 @@ export function MultiColumnConditionEditor({ columns, conditions, onChange }: Mu
                         Column
                       </Label>
                       <Select
-                        value={condition.column}
+                        value={condition.column || ""}
                         onValueChange={(value) => handleUpdateCondition(index, "column", value)}
                       >
                         <SelectTrigger id={`condition-${index}-column`}>
@@ -200,7 +258,7 @@ export function MultiColumnConditionEditor({ columns, conditions, onChange }: Mu
                         Operator
                       </Label>
                       <Select
-                        value={condition.operator}
+                        value={condition.operator || "=="}
                         onValueChange={(value) => handleUpdateCondition(index, "operator", value as any)}
                       >
                         <SelectTrigger id={`condition-${index}-operator`}>
@@ -363,7 +421,7 @@ export function MultiColumnConditionEditor({ columns, conditions, onChange }: Mu
           </div>
         )}
 
-        <Button onClick={handleAddCondition} disabled={!newCondition.column} className="w-full mt-3">
+        <Button type="button" onClick={handleAddCondition} disabled={!newCondition.column} className="w-full mt-3">
           <Plus className="h-4 w-4 mr-2" />
           Add Condition
         </Button>

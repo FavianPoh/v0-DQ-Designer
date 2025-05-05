@@ -421,8 +421,75 @@ function validateNotEquals(value: any, compareValue: any): { isValid: boolean; m
 }
 
 // Define validateEquals at the top level
+// Find the validateEquals function and update it to properly handle empty strings, null, and undefined values
+// Replace the current validateEquals function with this improved version:
+
 function validateEquals(value: any, compareValue: any): { isValid: boolean; message: string } {
+  // Add extremely detailed logging to diagnose the issue
+  console.log("=== EQUALS VALIDATION START ===")
+  console.log("Value:", value)
+  console.log("Value type:", typeof value)
+  console.log("Value is null:", value === null)
+  console.log("Value is undefined:", value === undefined)
+  console.log("Value is empty string:", value === "")
+  console.log("Compare value:", compareValue)
+  console.log("Compare value type:", typeof compareValue)
+  console.log("Compare value is null:", compareValue === null)
+  console.log("Compare value is undefined:", compareValue === undefined)
+  console.log("Compare value is empty string:", compareValue === "")
+
+  // Convert both values to strings for logging
+  const valueStr = value === null ? "null" : value === undefined ? "undefined" : String(value)
+  const compareValueStr =
+    compareValue === null ? "null" : compareValue === undefined ? "undefined" : String(compareValue)
+  console.log(`String representation - value: "${valueStr}", compareValue: "${compareValueStr}"`)
+
+  // SPECIAL CASE: Empty string, null, and undefined are considered equivalent
+  if (compareValue === "") {
+    // If we're checking for an empty string, then null and undefined should also pass
+    const isValid = value === "" || value === null || value === undefined
+    console.log(`Empty string comparison result: ${isValid}`)
+    console.log(`Reason: compareValue is empty string, value is ${valueStr}`)
+    console.log("=== EQUALS VALIDATION END ===")
+    return {
+      isValid,
+      message: isValid ? "" : `Value must equal ""`,
+    }
+  }
+
+  // SPECIAL CASE: Null comparison
+  if (compareValue === null) {
+    // Only null should match null
+    const isValid = value === null
+    console.log(`Null comparison result: ${isValid}`)
+    console.log(`Reason: compareValue is null, value is ${valueStr}`)
+    console.log("=== EQUALS VALIDATION END ===")
+    return {
+      isValid,
+      message: isValid ? "" : `Value must equal null`,
+    }
+  }
+
+  // SPECIAL CASE: Undefined comparison
+  if (compareValue === undefined) {
+    // Only undefined should match undefined
+    const isValid = value === undefined
+    console.log(`Undefined comparison result: ${isValid}`)
+    console.log(`Reason: compareValue is undefined, value is ${valueStr}`)
+    console.log("=== EQUALS VALIDATION END ===")
+    return {
+      isValid,
+      message: isValid ? "" : `Value must equal undefined`,
+    }
+  }
+
+  // For all other cases, use loose equality (==) to allow type coercion
+  // This handles cases like comparing "5" with 5
   const isValid = value == compareValue
+  console.log(`Standard comparison result: ${isValid}`)
+  console.log(`Reason: Using loose equality, ${valueStr} == ${compareValueStr} is ${isValid}`)
+  console.log("=== EQUALS VALIDATION END ===")
+
   return {
     isValid,
     message: isValid ? "" : `Value must equal ${compareValue}`,
@@ -513,8 +580,28 @@ function validateLessThanEquals(value: any, compareValue: any): { isValid: boole
   }
 }
 
-// Define validateRange at the top level
+// Find the validateRange function and update it to handle undefined min/max values better
+// Replace the existing validateRange function with this improved version:
+
 function validateRange(value: any, min: any, max: any): { isValid: boolean; message: string } {
+  // Add debug logging to help diagnose the issue
+  console.log("Range validation inputs:", {
+    value,
+    min,
+    max,
+    valueType: typeof value,
+    minType: typeof min,
+    maxType: typeof max,
+  })
+
+  // Handle undefined or empty string parameters
+  if (min === undefined || min === "" || max === undefined || max === "") {
+    return {
+      isValid: false,
+      message: `Invalid range parameters: min=${min}, max=${max}. Both min and max must be specified.`,
+    }
+  }
+
   // Convert string values to numbers if possible
   const numValue = typeof value === "string" ? Number(value) : value
   const numMin = typeof min === "string" ? Number(min) : min
@@ -529,6 +616,14 @@ function validateRange(value: any, min: any, max: any): { isValid: boolean; mess
   }
 
   const isValid = numValue >= numMin && numValue <= numMax
+
+  console.log("Range validation result:", {
+    numValue,
+    numMin,
+    numMax,
+    isValid,
+  })
+
   return {
     isValid,
     message: isValid ? "" : `Value must be between ${min} and ${max}`,
@@ -1053,7 +1148,7 @@ export function validateDataset(
     tableData.forEach((row, rowIndex) => {
       let validationResult: ValidationResult | null = null
 
-      // Special handling for date rules - REPLACE THIS SECTION
+      // Special handling for date rules
       if (rule.ruleType.startsWith("date-")) {
         validationResult = validateDateRuleWithSafeguards(row, rowIndex, rule)
         if (validationResult) {
@@ -1062,362 +1157,216 @@ export function validateDataset(
         return // Skip the rest of the processing for date rules
       }
 
-      // Special handling for column comparison rules
-      if (rule.ruleType === "column-comparison") {
-        validationResult = validateColumnComparison(row, rowIndex, rule)
-        if (validationResult) {
-          results.push(validationResult)
-        } else {
-          // Add a passing result if validation passed
-          results.push({
-            rowIndex,
-            table: rule.table,
-            column: rule.column,
-            ruleName: rule.name,
-            message: "Passed validation",
-            severity: "success",
-            ruleId: rule.id,
-          })
-        }
-      }
-      // Special handling for math operation rules
-      else if (rule.ruleType === "math-operation") {
-        validationResult = validateMathOperation(row, rowIndex, rule)
-        if (validationResult) {
-          results.push(validationResult)
-        } else {
-          // Add a passing result if validation passed
-          results.push({
-            rowIndex,
-            table: rule.table,
-            column: rule.column,
-            ruleName: rule.name,
-            message: "Passed validation",
-            severity: "success",
-            ruleId: rule.id,
-          })
-        }
-      }
-      // Special handling for composite reference rules
-      else if (rule.ruleType === "composite-reference") {
-        validationResult = validateCompositeReference(row, rowIndex, rule, datasets)
-        if (validationResult) {
-          results.push(validationResult)
-        } else {
-          // Add a passing result if validation passed
-          results.push({
-            rowIndex,
-            table: rule.table,
-            column: rule.column,
-            ruleName: rule.name,
-            message: "Passed validation",
-            severity: "success",
-            ruleId: rule.id,
-          })
-        }
-      }
-      // Special handling for reference integrity rules
-      else if (rule.ruleType === "reference-integrity") {
-        validationResult = validateReferenceIntegrity(row, rowIndex, rule, datasets)
-        if (validationResult) {
-          results.push(validationResult)
-        } else {
-          // Add a passing result if validation passed
-          results.push({
-            rowIndex,
-            table: rule.table,
-            column: rule.column,
-            ruleName: rule.name,
-            message: "Passed validation",
-            severity: "success",
-            ruleId: rule.id,
-          })
-        }
-      }
-      // Check if we have column conditions
-      else if (rule.columnConditions && rule.columnConditions.length > 0) {
-        validationResult = validateColumnConditions(row, rowIndex, rule, datasets, valueLists)
-        if (validationResult) {
-          results.push(validationResult)
-        } else {
-          // Add a passing result if validation passed
-          results.push({
-            rowIndex,
-            table: rule.table,
-            column: rule.column,
-            ruleName: rule.name,
-            message: "Passed validation",
-            severity: "success",
-            ruleId: rule.id,
-          })
-        }
-      }
-      // Special handling for rules with cross-table conditions
-      else if (rule.crossTableConditions && rule.crossTableConditions.length > 0) {
-        const crossTableResult = validateCrossTableConditions(row, rule.crossTableConditions, datasets)
-        if (!crossTableResult.isValid) {
-          results.push({
-            rowIndex,
-            table: rule.table,
-            column: rule.column,
-            ruleName: rule.name,
-            message: crossTableResult.message,
-            severity: rule.severity,
-            ruleId: rule.id,
-          })
-        } else {
-          // Add a passing result if validation passed
-          results.push({
-            rowIndex,
-            table: rule.table,
-            column: rule.column,
-            ruleName: rule.name,
-            message: "Passed cross-table validation",
-            severity: "success",
-            ruleId: rule.id,
-          })
-        }
-      } else {
-        // Use the traditional validation approach
-        validationResult = validateRule(row, rowIndex, rule, datasets, valueLists)
-        if (validationResult) {
-          results.push(validationResult)
-        } else {
-          // Add a passing result if validation passed
-          results.push({
-            rowIndex,
-            table: rule.table,
-            column: rule.column,
-            ruleName: rule.name,
-            message: "Passed validation",
-            severity: "success",
-            ruleId: rule.id,
-          })
-        }
-      }
-
-      // Special handling for list rules to ensure validation results are properly processed
-      if (rule.ruleType === "list") {
-        // Check if the rule has a listId parameter (check both possible parameter names)
-        const listId = rule.parameters.listId || rule.parameters.valueList
-
-        if (listId) {
-          const list = valueLists.find((l) => l.id === listId)
-
-          if (list) {
-            const value = row[rule.column]
-
-            // Skip validation for null/undefined/empty values unless required is true
-            if (value === null || value === undefined || value === "") {
-              if (rule.parameters.required === true) {
-                // Override any previous result for this rule with a failure
-                const existingResultIndex = results.findIndex(
-                  (r) =>
-                    r.rowIndex === rowIndex &&
-                    r.table === rule.table &&
-                    r.column === rule.column &&
-                    r.ruleName === rule.name,
-                )
-
-                const failureResult = {
-                  rowIndex,
-                  table: rule.table,
-                  column: rule.column,
-                  ruleName: rule.name,
-                  message: `Value is required and must be one of the values in the "${list.name}" list`,
-                  severity: rule.severity,
-                  ruleId: rule.id,
-                }
-
-                if (existingResultIndex >= 0) {
-                  results[existingResultIndex] = failureResult
-                } else {
-                  results.push(failureResult)
-                }
-              }
-              // If not required, we can skip further validation
-            } else {
-              // Only validate non-empty values
-              const stringValue = String(value)
-              const isInList = list.values.includes(stringValue)
-
-              // Debug the list validation
-              debugListValidation(value, listId, list, isInList)
-
-              // If the value is not in the list, make sure we have a failure result
-              if (!isInList) {
-                // Override any previous result for this rule
-                const existingResultIndex = results.findIndex(
-                  (r) =>
-                    r.rowIndex === rowIndex &&
-                    r.table === rule.table &&
-                    r.column === rule.column &&
-                    r.ruleName === rule.name,
-                )
-
-                const failureResult = {
-                  rowIndex,
-                  table: rule.table,
-                  column: rule.column,
-                  ruleName: rule.name,
-                  message: `Value "${stringValue}" must be one of the values in the "${list.name}" list`,
-                  severity: rule.severity,
-                  ruleId: rule.id,
-                }
-
-                if (existingResultIndex >= 0) {
-                  results[existingResultIndex] = failureResult
-                } else {
-                  results.push(failureResult)
-                }
-
-                console.log(`Added list validation failure for ${rule.name}:`, failureResult)
-              }
-            }
-          } else {
-            // List not found - report an error
-            const existingResultIndex = results.findIndex(
-              (r) =>
-                r.rowIndex === rowIndex &&
-                r.table === rule.table &&
-                r.column === rule.column &&
-                r.ruleName === rule.name,
-            )
-
-            const errorResult = {
+      // Process rule based on its type
+      switch (rule.ruleType) {
+        case "column-comparison":
+          validationResult = validateColumnComparison(row, rowIndex, rule)
+          break
+        case "math-operation":
+          validationResult = validateMathOperation(row, rowIndex, rule)
+          break
+        case "composite-reference":
+          validationResult = validateCompositeReference(row, rowIndex, rule, datasets)
+          break
+        case "reference-integrity":
+          validationResult = validateReferenceIntegrity(row, rowIndex, rule, datasets)
+          break
+        case "unique":
+          validationResult = validateUnique(row, rowIndex, rule, datasets)
+          break
+        case "javascript-formula":
+          // Handle JavaScript formula rule
+          const formula = rule.parameters.formula || rule.parameters.javascriptExpression
+          if (!formula) {
+            validationResult = {
               rowIndex,
               table: rule.table,
               column: rule.column,
               ruleName: rule.name,
-              message: `List with ID "${listId}" not found`,
-              severity: "failure",
+              message: "JavaScript formula rule is missing a formula expression",
+              severity: rule.severity,
               ruleId: rule.id,
             }
+          } else {
+            const jsFormulaResult = validateJavaScriptFormula(row, formula)
+            validationResult = {
+              rowIndex,
+              table: rule.table,
+              column: rule.column,
+              ruleName: rule.name,
+              message: jsFormulaResult.isValid
+                ? "Passed JavaScript formula validation"
+                : jsFormulaResult.message || `JavaScript formula evaluated to false: ${formula}`,
+              severity: jsFormulaResult.isValid ? "success" : rule.severity,
+              ruleId: rule.id,
+            }
+          }
+          break
+        default:
+          // Check for column conditions
+          if (rule.columnConditions && rule.columnConditions.length > 0) {
+            validationResult = validateColumnConditions(row, rowIndex, rule, datasets, valueLists)
+          }
+          // Check for cross-table conditions
+          else if (rule.crossTableConditions && rule.crossTableConditions.length > 0) {
+            const crossTableResult = validateCrossTableConditions(row, rule.crossTableConditions, datasets)
+            if (!crossTableResult.isValid) {
+              validationResult = {
+                rowIndex,
+                table: rule.table,
+                column: rule.column,
+                ruleName: rule.name,
+                message: crossTableResult.message,
+                severity: rule.severity,
+                ruleId: rule.id,
+              }
+            }
+          }
+          // Default case: use individual rule validation
+          else {
+            // Use standard rule validation for other rule types
+            const value = row[rule.column]
+            let isValid = true
+            let message = ""
 
-            if (existingResultIndex >= 0) {
-              results[existingResultIndex] = errorResult
-            } else {
-              results.push(errorResult)
+            // Validate based on rule type
+            switch (rule.ruleType) {
+              case "required":
+                ;({ isValid, message } = validateRequired(value))
+                break
+              case "equals":
+                ;({ isValid, message } = validateEquals(value, rule.parameters.value))
+                break
+              case "not-equals":
+                ;({ isValid, message } = validateNotEquals(value, rule.parameters.value))
+                break
+              case "greater-than":
+                ;({ isValid, message } = validateGreaterThan(value, rule.parameters.value))
+                break
+              case "greater-than-equals":
+                ;({ isValid, message } = validateGreaterThanEquals(value, rule.parameters.value))
+                break
+              case "less-than":
+                ;({ isValid, message } = validateLessThan(value, rule.parameters.value))
+                break
+              case "less-than-equals":
+                ;({ isValid, message } = validateLessThanEquals(value, rule.parameters.value))
+                break
+              case "range":
+                ;({ isValid, message } = validateRange(
+                  value,
+                  rule.parameters.min !== undefined ? rule.parameters.min : rule.parameters.minValue,
+                  rule.parameters.max !== undefined ? rule.parameters.max : rule.parameters.maxValue,
+                ))
+                break
+              case "regex":
+                ;({ isValid, message } = validateRegex(value, rule.parameters.pattern))
+                break
+              case "type":
+                ;({ isValid, message } = validateType(value, rule.parameters.dataType))
+                break
+              case "enum":
+                if (rule.parameters.caseInsensitive === true) {
+                  const allowedValues = Array.isArray(rule.parameters.allowedValues)
+                    ? rule.parameters.allowedValues
+                    : typeof rule.parameters.allowedValues === "string"
+                      ? rule.parameters.allowedValues.split(",").map((v) => v.trim())
+                      : rule.parameters.allowedValues
+                        ? [rule.parameters.allowedValues]
+                        : []
+                  ;({ isValid, message } = validateEnumCaseInsensitive(value, allowedValues))
+                } else {
+                  const allowedValues = Array.isArray(rule.parameters.allowedValues)
+                    ? rule.parameters.allowedValues
+                    : typeof rule.parameters.allowedValues === "string"
+                      ? rule.parameters.allowedValues.split(",").map((v) => v.trim())
+                      : rule.parameters.allowedValues
+                        ? [rule.parameters.allowedValues]
+                        : []
+                  ;({ isValid, message } = validateEnum(value, allowedValues))
+                }
+                break
+              case "list":
+                const listResult = validateList(value, rule.parameters.listId || rule.parameters.valueList, valueLists)
+                isValid = listResult.isValid
+                message = listResult.message
+                break
+              case "contains":
+                const searchString = rule.parameters.searchString || rule.parameters.containsValue || ""
+                const matchType = rule.parameters.matchType || "contains"
+                const caseSensitive = rule.parameters.caseSensitive || false
+                ;({ isValid, message } = validateContains(value, searchString, matchType, caseSensitive))
+                break
+              case "dependency":
+                ;({ isValid, message } = validateDependency(
+                  value,
+                  row[rule.parameters.dependsOn],
+                  rule.parameters.condition,
+                ))
+                break
+              case "multi-column":
+                ;({ isValid, message } = validateMultiColumn(row, rule.conditions || [], datasets, valueLists))
+                break
+              case "lookup":
+                ;({ isValid, message } = validateLookup(
+                  row,
+                  rule.column,
+                  rule.parameters.lookupTable,
+                  rule.parameters.lookupColumn,
+                  rule.parameters.validation,
+                  datasets,
+                ))
+                break
+              case "custom":
+                ;({ isValid, message } = validateCustom(value, row, rule.parameters.functionBody, datasets))
+                break
+              case "formula":
+                if (rule.parameters.operator && rule.parameters.value !== undefined) {
+                  ;({ isValid, message } = validateFormula(
+                    row,
+                    rule.parameters.formula,
+                    rule.parameters.operator,
+                    rule.parameters.value,
+                  ))
+                } else {
+                  ;({ isValid, message } = validateFormula(row, rule.parameters.formula))
+                }
+                break
             }
 
-            console.log(`List not found error for ${rule.name}:`, errorResult)
+            if (!isValid) {
+              validationResult = {
+                rowIndex,
+                table: rule.table,
+                column: rule.column,
+                ruleName: rule.name,
+                message,
+                severity: rule.severity,
+                ruleId: rule.id,
+              }
+            }
           }
-        } else {
-          // Missing listId parameter - report an error
-          const existingResultIndex = results.findIndex(
-            (r) =>
-              r.rowIndex === rowIndex && r.table === rule.table && r.column === rule.column && r.ruleName === rule.name,
-          )
-
-          const errorResult = {
-            rowIndex,
-            table: rule.table,
-            column: rule.column,
-            ruleName: rule.name,
-            message: `List validation rule is missing a listId parameter`,
-            severity: "failure",
-            ruleId: rule.id,
-          }
-
-          if (existingResultIndex >= 0) {
-            results[existingResultIndex] = errorResult
-          } else {
-            results.push(errorResult)
-          }
-
-          console.log(`Missing listId parameter error for ${rule.name}:`, errorResult)
-        }
       }
 
-      // Find the section in validateDataset where JavaScript formula rules are handled
-      // Replace the entire JavaScript formula handling section with this more targeted version:
-
-      // Special handling for JavaScript formula rules
-      if (rule.ruleType === "javascript-formula") {
-        // Get the formula from the rule parameters - check both possible parameter names
-        const formula = rule.parameters.formula || rule.parameters.javascriptExpression
-
-        // Skip processing if no formula is provided
-        if (!formula) {
-          console.error("JavaScript formula rule missing formula:", rule)
-
-          // Push a validation error for missing formula
-          results.push({
-            rowIndex,
-            table: rule.table,
-            column: rule.column,
-            ruleName: rule.name,
-            message: "JavaScript formula rule is missing a formula expression",
-            severity: rule.severity,
-            ruleId: rule.id,
-          })
-          return // Exit the current forEach callback
-        }
-
-        // Check if this is the specific "amount - refundAmount - processingFee > 0" pattern
-        const isSubtractionCheck =
-          formula.includes("amount") &&
-          formula.includes("refundAmount") &&
-          formula.includes("processingFee") &&
-          formula.includes(">")
-
-        // Check if we've already processed this row for this rule
-        // This prevents duplicate validations for the same row/rule combination
-        const existingResultIndex = results.findIndex(
-          (r) => r.rowIndex === rowIndex && r.table === rule.table && r.ruleName === rule.name,
-        )
-
-        // If we've already processed this row for this rule, skip it
-        if (existingResultIndex >= 0 && isSubtractionCheck) {
-          console.log(`Skipping duplicate validation for ${rule.name} on row ${rowIndex}`)
-          return // Exit the current forEach callback
-        }
-
-        // Log the formula and row data for debugging
-        console.log("Evaluating JavaScript formula:", {
-          formula,
-          rule: rule.name,
-          rowData: {
-            amount: row.amount,
-            refundAmount: row.refundAmount,
-            processingFee: row.processingFee,
-          },
-        })
-
-        // Evaluate the formula
-        const jsFormulaResult = validateJavaScriptFormula(row, formula)
-
-        // Log the evaluation result
-        console.log("JavaScript formula result:", {
-          formula,
-          isValid: jsFormulaResult.isValid,
-          message: jsFormulaResult.message,
-          rowData: {
-            amount: row.amount,
-            refundAmount: row.refundAmount,
-            processingFee: row.processingFee,
-            calculation:
-              row.amount !== undefined && row.refundAmount !== undefined && row.processingFee !== undefined
-                ? `${row.amount} - ${row.refundAmount} - ${row.processingFee} = ${row.amount - row.refundAmount - row.processingFee}`
-                : "N/A",
-          },
-        })
-
-        // Always push a result with the appropriate severity based on the validation result
+      // Add result to results array
+      if (validationResult) {
+        results.push(validationResult)
+      } else {
+        // Add a passing result if validation passed
         results.push({
           rowIndex,
           table: rule.table,
           column: rule.column,
           ruleName: rule.name,
-          message: jsFormulaResult.isValid
-            ? "Passed JavaScript formula validation"
-            : jsFormulaResult.message || `JavaScript formula evaluated to false: ${formula}`,
-          severity: jsFormulaResult.isValid ? "success" : rule.severity,
+          message: "Passed validation",
+          severity: "success",
           ruleId: rule.id,
         })
+      }
 
-        // CRITICAL FIX: Skip the rest of the processing for this row and rule
-        return // Exit the current forEach callback
+      // Special handling for list rules
+      if (rule.ruleType === "list") {
+        // This is already handled in the switch statement above
       }
     })
   })
@@ -1425,7 +1374,7 @@ export function validateDataset(
   return results
 }
 
-// Enhanced function to validate column comparison rules
+// Enhanced function to validate column comparison rules\
 function validateColumnComparison(row: DataRecord, rowIndex: number, rule: DataQualityRule): ValidationResult | null {
   const { parameters, table, column } = rule
   const { leftColumn, rightColumn, comparisonOperator, allowNull } = parameters
@@ -1732,6 +1681,7 @@ function validateDateRule(row: DataRecord, rowIndex: number, rule: DataQualityRu
     column: rule.column,
     ruleType: rule.ruleType,
     parameters: rule.parameters,
+    severity: rule.severity,
   })
 
   // Check if column exists in the row
@@ -2332,8 +2282,25 @@ function validateRule(
       ;({ isValid, message } = validateLessThanEquals(value, rule.parameters.value))
       break
 
+    // Find the validateRule function and update it to handle undefined min/max values better
+    // Also update the validateRule function's "range" case to ensure parameters are correctly passed
+    // Find this section in the validateRule function:
+
     case "range":
-      ;({ isValid, message } = validateRange(value, rule.parameters.min, rule.parameters.max))
+      // Add debug logging for range rule
+      console.log("Processing range rule:", {
+        ruleName: rule.name,
+        value,
+        min: rule.parameters.min,
+        max: rule.parameters.max,
+        allParameters: rule.parameters,
+      })
+      // Make sure we're passing the correct parameters
+      ;({ isValid, message } = validateRange(
+        value,
+        rule.parameters.min !== undefined ? rule.parameters.min : rule.parameters.minValue,
+        rule.parameters.max !== undefined ? rule.parameters.max : rule.parameters.maxValue,
+      ))
       break
 
     case "regex":
@@ -2341,8 +2308,41 @@ function validateRule(
       break
 
     case "unique":
-      // Note: This would need the full dataset to validate uniqueness
-      isValid = true
+      // Add debug logging for unique rule
+      console.log("Processing unique rule:", {
+        ruleName: rule.name,
+        column: rule.column,
+        allParameters: rule.parameters,
+      })
+
+      // Get the unique columns from the parameters
+      const uniqueColumns = rule.parameters.uniqueColumns || [rule.column]
+
+      // Create a set to store unique values
+      const uniqueValues = new Set()
+
+      // Iterate through the dataset and check for duplicates
+      const tableData = datasets[rule.table]
+      if (tableData) {
+        for (const rowData of tableData) {
+          // Build a composite key from the specified columns
+          const compositeKey = uniqueColumns
+            .map((col) => {
+              const colValue = rowData[col]
+              return colValue === null || colValue === undefined ? "" : colValue // Treat nulls as empty strings
+            })
+            .join("||") // Use a separator that's unlikely to appear in the data
+
+          // If the value is already in the set, it's a duplicate
+          if (uniqueValues.has(compositeKey)) {
+            isValid = false
+            message = `Duplicate value(s) found in column(s): ${uniqueColumns.join(", ")}`
+            break // Exit the loop as soon as a duplicate is found
+          } else {
+            uniqueValues.add(compositeKey)
+          }
+        }
+      }
       break
 
     case "type":
@@ -2834,6 +2834,7 @@ function validateFormula(
     const paramValues = paramNames.map((key) => row[key])
 
     // Check if the formula already contains a comparison operator
+
     const hasComparisonOperator = /[<>]=?|[!=]=/.test(formula)
 
     // SPECIAL CASE: Handle "score / age" formula specifically
@@ -3076,7 +3077,8 @@ function validateFormula(
     console.error("Math Formula validation error:", error)
     return {
       isValid: false,
-      message: `Error in math formula: ${error.message}\nFormula: ${formula}`,
+      message: `Error in math formula: ${error.message}
+Formula: ${formula}`,
     }
   }
 }
@@ -3129,4 +3131,77 @@ const validateCrossTableConditions = (
   }
 
   return { isValid, message }
+}
+
+// New function to validate unique rules
+function validateUnique(
+  row: DataRecord,
+  rowIndex: number,
+  rule: DataQualityRule,
+  datasets: DataTables,
+): ValidationResult | null {
+  // Add debug logging for unique rule
+  console.log("Processing unique rule:", {
+    ruleName: rule.name,
+    column: rule.column,
+    allParameters: rule.parameters,
+  })
+
+  // Get the unique columns from the parameters
+  const uniqueColumns = rule.parameters.uniqueColumns || [rule.column]
+
+  // First, get the value(s) for the current row
+  const currentRowValues = uniqueColumns.map((col) => row[col])
+  const currentCompositeKey = currentRowValues
+    .map((val) => (val === null || val === undefined ? null : String(val)))
+    .join("||")
+
+  console.log(`Checking uniqueness for row ${rowIndex}, values: ${currentCompositeKey}`)
+
+  // Skip validation if all values are null/undefined and we want to ignore nulls
+  if (rule.parameters.ignoreNulls === true && currentRowValues.every((val) => val === null || val === undefined)) {
+    console.log(`Skipping null values in row ${rowIndex} because ignoreNulls is true`)
+    return null
+  }
+
+  // Check if this value exists in any other row
+  const tableData = datasets[rule.table]
+  if (tableData) {
+    for (let i = 0; i < tableData.length; i++) {
+      // Skip the current row
+      if (i === rowIndex) continue
+
+      const otherRow = tableData[i]
+      const otherRowValues = uniqueColumns.map((col) => otherRow[col])
+      const otherCompositeKey = otherRowValues
+        .map((val) => (val === null || val === undefined ? null : String(val)))
+        .join("||")
+
+      // If both are null composites and we're ignoring nulls, skip
+      if (
+        rule.parameters.ignoreNulls === true &&
+        currentRowValues.every((val) => val === null || val === undefined) &&
+        otherRowValues.every((val) => val === null || val === undefined)
+      ) {
+        continue
+      }
+
+      // Check if the values match
+      if (currentCompositeKey === otherCompositeKey) {
+        console.log(`Found duplicate in row ${i}: ${otherCompositeKey}`)
+        return {
+          rowIndex,
+          table: rule.table,
+          column: rule.column,
+          ruleName: rule.name,
+          message: `Duplicate value(s) found in column(s): ${uniqueColumns.join(", ")}`,
+          severity: rule.severity,
+          ruleId: rule.id,
+        }
+      }
+    }
+  }
+
+  // No duplicates found
+  return null
 }

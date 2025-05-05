@@ -108,6 +108,10 @@ export function RuleManager({
   }
 
   const handleEditClick = (ruleId: string) => {
+    const rule = rules.find((r) => r.id === ruleId)
+    if (rule) {
+      console.log("Editing rule:", rule)
+    }
     console.log("Edit clicked for rule:", ruleId)
 
     // Force scroll to top to ensure the edit form is visible

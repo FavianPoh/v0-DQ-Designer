@@ -340,6 +340,7 @@ export function CrossTableConditionEditor({ datasets, conditions, onChange }: Cr
         )}
 
         <Button
+          type="button"
           onClick={handleAddCondition}
           disabled={!newCondition.table || !newCondition.column}
           size="sm"

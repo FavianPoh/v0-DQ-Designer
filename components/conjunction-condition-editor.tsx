@@ -153,9 +153,8 @@ export function ConjunctionConditionEditor({ columns, conditions, onChange }: Co
           </div>
         </div>
 
-        <Button onClick={handleAddCondition} disabled={!newCondition.column} size="sm" className="w-full mt-2">
-          <Plus className="h-4 w-4 mr-2" />
-          Add Condition
+        <Button variant="outline" size="sm" onClick={handleAddCondition} type="button" className="mt-2">
+          <Plus className="h-4 w-4 mr-2" />+ Add Condition
         </Button>
       </div>
 

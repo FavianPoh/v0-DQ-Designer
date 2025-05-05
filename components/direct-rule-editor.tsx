@@ -27,10 +27,17 @@ export function DirectRuleEditor({
 
   // Update the rule when the ruleId changes
   useEffect(() => {
-    if (ruleId) {
+    if (ruleId && rules) {
       const foundRule = rules.find((r) => r.id === ruleId)
       if (foundRule) {
-        console.log("DirectRuleEditor: Found rule to edit:", foundRule)
+        console.log("Loading rule in DirectRuleEditor:", foundRule)
+
+        // Add specific logging for type validation rules
+        if (foundRule.ruleType === "type") {
+          console.log("Type Validation rule parameters:", foundRule.parameters)
+          console.log("dataType value:", foundRule.parameters.dataType)
+        }
+
         // Create a deep copy to avoid reference issues
         setRule(JSON.parse(JSON.stringify(foundRule)))
       } else {

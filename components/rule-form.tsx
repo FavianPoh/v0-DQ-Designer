@@ -422,6 +422,7 @@ export function RuleForm(props: RuleFormProps) {
     })
   }, [rule.name, sourceColumns, referenceColumns, rule.parameters.referenceTable])
 
+  // Update the useEffect that handles initialRule to properly initialize uniqueColumns
   useEffect(() => {
     if (initialRule) {
       console.log("Loading initial rule in RuleForm:", initialRule)
@@ -436,11 +437,40 @@ export function RuleForm(props: RuleFormProps) {
         column: ruleCopy.column || "",
       })
 
+      // Add debug logging for Type Validation rule
+      if (initialRule.ruleType === "type") {
+        console.log("Loading Type Validation rule with parameters:", initialRule.parameters)
+        console.log("dataType value:", initialRule.parameters.dataType)
+      }
+
       if (initialRule.secondaryColumns) {
         setSelectedSecondaryColumns(initialRule.secondaryColumns)
       }
       if (initialRule.conditions) {
+        console.log("Loading conditions from initialRule:", initialRule.conditions)
         setConditions(initialRule.conditions)
+
+        // If this is a multi-column rule, ensure conditions are properly loaded
+        if (initialRule.ruleType === "multi-column") {
+          console.log("Loading multi-column conditions from initialRule:", initialRule.conditions)
+
+          // Ensure conditions are properly initialized
+          if (initialRule.conditions && initialRule.conditions.length > 0) {
+            // Make a deep copy to avoid reference issues
+            const formattedConditions = JSON.parse(JSON.stringify(initialRule.conditions))
+
+            // Ensure each condition has the required properties
+            const updatedConditions = formattedConditions.map((condition, index) => ({
+              column: condition.column || "",
+              operator: condition.operator || "==",
+              value: condition.value === undefined ? "" : condition.value,
+              logicalOperator: index < formattedConditions.length - 1 ? condition.logicalOperator || "AND" : undefined,
+            }))
+
+            setConditions(updatedConditions)
+            console.log("Set multi-column conditions:", updatedConditions)
+          }
+        }
       }
       if (initialRule.additionalConditions && initialRule.additionalConditions.length > 0) {
         setAdditionalConditions(initialRule.additionalConditions)
@@ -491,11 +521,58 @@ export function RuleForm(props: RuleFormProps) {
         }
       }
 
+      // Properly initialize uniqueColumns for unique rules
+      if (initialRule.ruleType === "unique") {
+        if (initialRule.parameters.uniqueColumns && initialRule.parameters.uniqueColumns.length > 0) {
+          console.log("Setting unique columns from rule:", initialRule.parameters.uniqueColumns)
+          setUniqueColumns(initialRule.parameters.uniqueColumns)
+        } else {
+          // Default to the primary column if no unique columns are specified
+          setUniqueColumns([initialRule.column || ""])
+        }
+      }
+
       // Log the rule state after setting it
       console.log("Rule state after loading initial rule:", {
         ...ruleCopy,
         column: ruleCopy.column || "",
       })
+    }
+
+    // Inside the useEffect that handles initialRule
+    if (initialRule && initialRule.ruleType === "multi-column") {
+      console.log("Loading multi-column conditions from initialRule:", initialRule.conditions)
+
+      // Ensure conditions are properly initialized
+      if (initialRule.conditions && initialRule.conditions.length > 0) {
+        // Make a deep copy to avoid reference issues
+        const formattedConditions = JSON.parse(JSON.stringify(initialRule.conditions))
+
+        // Set the conditions state
+        setConditions(formattedConditions)
+        console.log("Set multi-column conditions:", formattedConditions)
+      }
+    }
+
+    // Inside the useEffect that handles initialRule
+    // Ensure columnConditions are properly loaded for multi-column rules
+    if (initialRule && initialRule.ruleType === "multi-column" && initialRule.columnConditions) {
+      console.log("Loading column conditions for multi-column rule:", initialRule.columnConditions)
+
+      // Make a deep copy to avoid reference issues
+      const formattedColumnConditions = JSON.parse(JSON.stringify(initialRule.columnConditions))
+
+      // Ensure each condition has the required properties
+      const updatedColumnConditions = formattedColumnConditions.map((condition) => ({
+        column: condition.column || "",
+        ruleType: condition.ruleType || "required",
+        parameters: condition.parameters || {},
+        logicalOperator: condition.logicalOperator || "AND",
+        table: condition.table || initialRule.table || tables[0] || "",
+      }))
+
+      setColumnConditions(updatedColumnConditions)
+      console.log("Set column conditions:", updatedColumnConditions)
     }
   }, [initialRule, datasets, tables])
 
@@ -803,6 +880,9 @@ export function RuleForm(props: RuleFormProps) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
 
+    console.log("Form submitted, rule type:", rule.ruleType)
+    console.log("Current conditions:", conditions)
+
     // Special handling for date rules
     if (rule.ruleType?.startsWith("date-")) {
       console.log("Date rule submission:", {
@@ -934,18 +1014,39 @@ export function RuleForm(props: RuleFormProps) {
       return
     }
 
+    // Add this helper function to ensure logical operators are set
+    function ensureLogicalOperators(conditions: Condition[]): Condition[] {
+      if (!conditions || conditions.length === 0) return []
+
+      return conditions.map((condition, index) => {
+        // Make sure every condition except the last one has a logical operator
+        if (index < conditions.length - 1) {
+          return {
+            ...condition,
+            logicalOperator: condition.logicalOperator || "AND", // Default to AND if not set
+          }
+        }
+        // The last condition shouldn't have a logical operator
+        return {
+          ...condition,
+          logicalOperator: undefined,
+        }
+      })
+    }
+
     const finalRule = {
       ...rule,
       table: primaryTable,
       column: primaryColumn || rule.column, // Ensure we use the rule.column if primaryColumn is empty
       parameters: finalParameters,
       secondaryColumns: selectedSecondaryColumns.length > 0 ? selectedSecondaryColumns : undefined,
-      conditions: rule.ruleType === "multi-column" ? conditions : undefined,
+      conditions: rule.ruleType === "multi-column" ? ensureLogicalOperators(conditions) : undefined,
       additionalConditions: additionalConditions.length > 0 ? additionalConditions : undefined,
       crossTableConditions: finalCrossTableConditions.length > 0 ? finalCrossTableConditions : undefined,
       columnConditions: columnConditions.length > 1 ? columnConditions : undefined,
     }
 
+    console.log("Final rule being submitted:", finalRule)
     console.log("Submitting rule with column:", finalRule.column)
     onSubmit(finalRule)
   }
@@ -992,7 +1093,12 @@ export function RuleForm(props: RuleFormProps) {
                 type="number"
                 id="minValue"
                 value={rule.parameters.minValue || ""}
-                onChange={(e) => handleParameterChange("minValue", e.target.value)}
+                onChange={(e) => {
+                  // Ensure we're saving a number, not a string
+                  const value = e.target.value !== "" ? Number(e.target.value) : ""
+                  handleParameterChange("minValue", value)
+                  console.log("Setting minValue:", value, typeof value)
+                }}
               />
             </div>
             <div>
@@ -1001,9 +1107,21 @@ export function RuleForm(props: RuleFormProps) {
                 type="number"
                 id="maxValue"
                 value={rule.parameters.maxValue || ""}
-                onChange={(e) => handleParameterChange("maxValue", e.target.value)}
+                onChange={(e) => {
+                  // Ensure we're saving a number, not a string
+                  const value = e.target.value !== "" ? Number(e.target.value) : ""
+                  handleParameterChange("maxValue", value)
+                  console.log("Setting maxValue:", value, typeof value)
+                }}
               />
             </div>
+            {rule.parameters.minValue !== undefined && rule.parameters.maxValue !== undefined && (
+              <div className="mt-2 p-3 bg-gray-50 rounded-md">
+                <p className="text-sm text-gray-700">
+                  Value must be between {rule.parameters.minValue} and {rule.parameters.maxValue}
+                </p>
+              </div>
+            )}
           </>
         )
       case "regex":
@@ -1022,7 +1140,10 @@ export function RuleForm(props: RuleFormProps) {
         return (
           <div>
             <Label htmlFor="dataType">Data Type</Label>
-            <Select onValueChange={(value) => handleParameterChange("dataType", value)}>
+            <Select
+              value={rule.parameters.dataType || ""}
+              onValueChange={(value) => handleParameterChange("dataType", value)}
+            >
               <SelectTrigger>
                 <SelectValue placeholder="Select a data type" />
               </SelectTrigger>
@@ -1033,6 +1154,9 @@ export function RuleForm(props: RuleFormProps) {
                 <SelectItem value="date">Date</SelectItem>
               </SelectContent>
             </Select>
+            {rule.parameters.dataType && (
+              <p className="mt-2 text-sm text-muted-foreground">Selected type: {rule.parameters.dataType}</p>
+            )}
           </div>
         )
       case "enum":
@@ -1364,8 +1488,9 @@ export function RuleForm(props: RuleFormProps) {
             <div>
               <Label>Unique Columns</Label>
               {uniqueColumns.map((column, index) => (
-                <div key={index} className="flex items-center space-x-2">
+                <div key={index} className="flex items-center space-x-2 mb-2">
                   <Select
+                    value={column}
                     onValueChange={(value) => {
                       handleUniqueColumnChange(index, value)
                     }}
@@ -1388,7 +1513,7 @@ export function RuleForm(props: RuleFormProps) {
                   )}
                 </div>
               ))}
-              <Button variant="ghost" size="sm" onClick={handleAddUniqueColumn}>
+              <Button variant="ghost" size="sm" onClick={handleAddUniqueColumn} type="button">
                 <Plus className="h-4 w-4 mr-2" />
                 Add Column
               </Button>
@@ -1452,7 +1577,10 @@ export function RuleForm(props: RuleFormProps) {
                 <div className="grid grid-cols-3 gap-4">
                   <div>
                     <Label htmlFor={`column-${index}`}>Column</Label>
-                    <Select onValueChange={(value) => handleColumnConditionChange(index, "column", value)}>
+                    <Select
+                      value={condition.column || ""}
+                      onValueChange={(value) => handleColumnConditionChange(index, "column", value)}
+                    >
                       <SelectTrigger>
                         <SelectValue placeholder="Select a column" />
                       </SelectTrigger>
@@ -1467,7 +1595,10 @@ export function RuleForm(props: RuleFormProps) {
                   </div>
                   <div>
                     <Label htmlFor={`ruleType-${index}`}>Rule Type</Label>
-                    <Select onValueChange={(value) => handleColumnConditionChange(index, "ruleType", value)}>
+                    <Select
+                      value={condition.ruleType || ""}
+                      onValueChange={(value) => handleColumnConditionChange(index, "ruleType", value)}
+                    >
                       <SelectTrigger>
                         <SelectValue placeholder="Select a rule type" />
                       </SelectTrigger>
@@ -1482,7 +1613,10 @@ export function RuleForm(props: RuleFormProps) {
                   </div>
                   <div>
                     <Label htmlFor={`logicalOperator-${index}`}>Logical Operator</Label>
-                    <Select onValueChange={(value) => handleColumnConditionChange(index, "logicalOperator", value)}>
+                    <Select
+                      value={condition.logicalOperator || "AND"}
+                      onValueChange={(value) => handleColumnConditionChange(index, "logicalOperator", value)}
+                    >
                       <SelectTrigger>
                         <SelectValue placeholder="Select an operator" />
                       </SelectTrigger>
@@ -1501,7 +1635,7 @@ export function RuleForm(props: RuleFormProps) {
                 )}
               </div>
             ))}
-            <Button variant="ghost" size="sm" onClick={handleAddColumnCondition}>
+            <Button variant="ghost" size="sm" onClick={handleAddColumnCondition} type="button">
               <Plus className="h-4 w-4 mr-2" />
               Add Condition
             </Button>
@@ -1563,54 +1697,56 @@ export function RuleForm(props: RuleFormProps) {
         )
       case "date-format":
         return (
-          <div>
-            <Label htmlFor="format">Format</Label>
-            <Select
-              value={rule.parameters.format || "iso"}
-              onValueChange={(value) => handleParameterChange("format", value)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select a date format" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="any">Any Valid Date</SelectItem>
-                <SelectItem value="iso">ISO (YYYY-MM-DD)</SelectItem>
-                <SelectItem value="us">US (MM/DD/YYYY)</SelectItem>
-                <SelectItem value="eu">EU (DD/MM/YYYY)</SelectItem>
-                <SelectItem value="custom">Custom Format</SelectItem>
-              </SelectContent>
-            </Select>
-            {rule.parameters.format === "custom" && (
-              <div className="mt-2">
-                <Label htmlFor="customFormat">Custom Format Pattern</Label>
-                <Input
-                  type="text"
-                  id="customFormat"
-                  value={rule.parameters.customFormat || ""}
-                  onChange={(e) => handleParameterChange("customFormat", e.target.value)}
-                  placeholder="e.g., YYYY/MM/DD"
+          <>
+            <div>
+              <Label htmlFor="format">Format</Label>
+              <Select
+                value={rule.parameters.format || "iso"}
+                onValueChange={(value) => handleParameterChange("format", value)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a date format" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="any">Any Valid Date</SelectItem>
+                  <SelectItem value="iso">ISO (YYYY-MM-DD)</SelectItem>
+                  <SelectItem value="us">US (MM/DD/YYYY)</SelectItem>
+                  <SelectItem value="eu">EU (DD/MM/YYYY)</SelectItem>
+                  <SelectItem value="custom">Custom Format</SelectItem>
+                </SelectContent>
+              </Select>
+              {rule.parameters.format === "custom" && (
+                <div className="mt-2">
+                  <Label htmlFor="customFormat">Custom Format Pattern</Label>
+                  <Input
+                    type="text"
+                    id="customFormat"
+                    value={rule.parameters.customFormat || ""}
+                    onChange={(e) => handleParameterChange("customFormat", e.target.value)}
+                    placeholder="e.g., YYYY/MM/DD"
+                  />
+                </div>
+              )}
+              <p className="text-sm text-muted-foreground mt-1">
+                {rule.parameters.format === "any" &&
+                  "Checks if the value can be parsed as a valid date without enforcing a specific format."}
+                {rule.parameters.format === "iso" && "Enforces ISO date format (YYYY-MM-DD)."}
+                {rule.parameters.format === "us" && "Enforces US date format (MM/DD/YYYY)."}
+                {rule.parameters.format === "eu" && "Enforces European date format (DD/MM/YYYY)."}
+                {rule.parameters.format === "custom" && "Enforces a custom date format pattern."}
+              </p>
+              <div className="flex items-center space-x-2 mt-3">
+                <Checkbox
+                  id="required"
+                  checked={rule.parameters.required === true}
+                  onCheckedChange={(checked) => handleParameterChange("required", checked === true)}
                 />
+                <Label htmlFor="required" className="text-sm font-normal">
+                  Field is required (must be a valid date)
+                </Label>
               </div>
-            )}
-            <p className="text-sm text-muted-foreground mt-1">
-              {rule.parameters.format === "any" &&
-                "Checks if the value can be parsed as a valid date without enforcing a specific format."}
-              {rule.parameters.format === "iso" && "Enforces ISO date format (YYYY-MM-DD)."}
-              {rule.parameters.format === "us" && "Enforces US date format (MM/DD/YYYY)."}
-              {rule.parameters.format === "eu" && "Enforces European date format (DD/MM/YYYY)."}
-              {rule.parameters.format === "custom" && "Enforces a custom date format pattern."}
-            </p>
-            <div className="flex items-center space-x-2 mt-3">
-              <Checkbox
-                id="required"
-                checked={rule.parameters.required === true}
-                onCheckedChange={(checked) => handleParameterChange("required", checked === true)}
-              />
-              <Label htmlFor="required" className="text-sm font-normal">
-                Field is required (must be a valid date)
-              </Label>
             </div>
-          </div>
+          </>
         )
       case "math-operation":
         return (
@@ -1751,12 +1887,14 @@ export function RuleForm(props: RuleFormProps) {
                 type="number"
                 id={`minValue-${index}`}
                 value={columnConditions[index]?.parameters?.minValue || ""}
-                onChange={(e) =>
+                onChange={(e) => {
+                  // Ensure we're saving a number, not a string
+                  const value = e.target.value !== "" ? Number(e.target.value) : ""
                   handleColumnConditionChange(index, "parameters", {
                     ...columnConditions[index].parameters,
-                    minValue: e.target.value,
+                    minValue: value,
                   })
-                }
+                }}
               />
             </div>
             <div>
@@ -1765,12 +1903,14 @@ export function RuleForm(props: RuleFormProps) {
                 type="number"
                 id={`maxValue-${index}`}
                 value={columnConditions[index]?.parameters?.maxValue || ""}
-                onChange={(e) =>
+                onChange={(e) => {
+                  // Ensure we're saving a number, not a string
+                  const value = e.target.value !== "" ? Number(e.target.value) : ""
                   handleColumnConditionChange(index, "parameters", {
                     ...columnConditions[index].parameters,
-                    maxValue: e.target.value,
+                    maxValue: value,
                   })
-                }
+                }}
               />
             </div>
           </>
@@ -2267,64 +2407,12 @@ export function RuleForm(props: RuleFormProps) {
       case "multi-column":
         return (
           <div>
-            {columnConditions.map((condition, index) => (
-              <div key={index} className="mb-4 border p-4 rounded">
-                <div className="grid grid-cols-3 gap-4">
-                  <div>
-                    <Label htmlFor={`column-${index}`}>Column</Label>
-                    <Select onValueChange={(value) => handleColumnConditionChange(index, "column", value)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a column" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {tableColumns[condition.table]?.map((col) => (
-                          <SelectItem key={col} value={col}>
-                            {col}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label htmlFor={`ruleType-${index}`}>Rule Type</Label>
-                    <Select onValueChange={(value) => handleColumnConditionChange(index, "ruleType", value)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a rule type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {RULE_TYPES.map((type) => (
-                          <SelectItem key={type.value} value={type.value}>
-                            {type.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label htmlFor={`logicalOperator-${index}`}>Logical Operator</Label>
-                    <Select onValueChange={(value) => handleColumnConditionChange(index, "logicalOperator", value)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select an operator" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="AND">AND</SelectItem>
-                        <SelectItem value="OR">OR</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                {condition.ruleType && <div className="mt-4">{renderParameterFields(condition.ruleType, index)}</div>}
-                {columnConditions.length > 1 && (
-                  <Button variant="ghost" size="sm" onClick={() => handleRemoveColumnCondition(index)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                )}
-              </div>
-            ))}
-            <Button variant="ghost" size="sm" onClick={handleAddColumnCondition}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Condition
-            </Button>
+            <p className="text-sm text-muted-foreground mb-2">
+              Multi-column conditions are configured in the main rule editor.
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Please use the main interface to add or modify multi-column conditions.
+            </p>
           </div>
         )
       case "date-before":
