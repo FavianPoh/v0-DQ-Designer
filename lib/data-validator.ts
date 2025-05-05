@@ -397,6 +397,29 @@ function validateRequired(value: any): { isValid: boolean; message: string } {
   }
 }
 
+// Find the validateNotEquals function and update it to properly handle the validation logic
+// The current implementation is returning isValid=true when the values are equal, which is incorrect for a "not equals" check
+
+// Replace the validateNotEquals function with this corrected version:
+function validateNotEquals(value: any, compareValue: any): { isValid: boolean; message: string } {
+  // Add debug logging to help diagnose the issue
+  console.log("Not Equals validation:", {
+    value,
+    compareValue,
+    areEqual: value == compareValue,
+    valueType: typeof value,
+    compareValueType: typeof compareValue,
+  })
+
+  // For not-equals, isValid should be true when the values are NOT equal
+  const isValid = value != compareValue
+
+  return {
+    isValid,
+    message: isValid ? "" : `Value must not equal ${compareValue}`,
+  }
+}
+
 // Define validateEquals at the top level
 function validateEquals(value: any, compareValue: any): { isValid: boolean; message: string } {
   const isValid = value == compareValue
@@ -424,15 +447,6 @@ function validateGreaterThan(value: any, compareValue: any): { isValid: boolean;
   return {
     isValid,
     message: isValid ? "" : `Value must be greater than ${compareValue}`,
-  }
-}
-
-// Define validateNotEquals at the top level
-function validateNotEquals(value: any, compareValue: any): { isValid: boolean; message: string } {
-  const isValid = value != compareValue
-  return {
-    isValid,
-    message: isValid ? "" : `Value must not equal ${compareValue}`,
   }
 }
 
@@ -2118,7 +2132,7 @@ function validateColumnConditions(
   return null // Passed validation
 }
 
-// Also update the validateSingleColumnCondition function to use the correct parameter name
+// Update the validateSingleColumnCondition function to use the correct parameter name
 function validateSingleColumnCondition(
   value: any,
   row: DataRecord,
@@ -2285,8 +2299,20 @@ function validateRule(
       ;({ isValid, message } = validateEquals(value, rule.parameters.value))
       break
 
+    // In the validateRule function, find the "not-equals" case and update it to use the correct parameter name:
+    // Replace:
+    // case "not-equals":
+    //   ;({ isValid, message } = validateNotEquals(value, rule.parameters.compareValue))
+    //   break
+
+    // With:
     case "not-equals":
-      ;({ isValid, message } = validateNotEquals(value, rule.parameters.compareValue))
+      ;({ isValid, message } = validateNotEquals(value, rule.parameters.value))
+      console.log(`Not equals validation result for ${rule.name}:`, {
+        value,
+        compareValue: rule.parameters.value,
+        isValid,
+      })
       break
 
     // In the validateRule function, find the "greater-than" case and update it to use "value" instead of "compareValue"
