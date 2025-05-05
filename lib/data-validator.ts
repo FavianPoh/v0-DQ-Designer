@@ -2278,13 +2278,13 @@ function validateRule(
       console.log("Processing formula rule:", {
         ruleName: rule.name,
         formula: rule.parameters.formula,
-        useComparison: rule.parameters.useComparison,
         operator: rule.parameters.operator,
         value: rule.parameters.value,
+        allParameters: rule.parameters,
       })
 
       // Check if we're using comparison or direct boolean evaluation
-      if (rule.parameters.useComparison === true && rule.parameters.operator && rule.parameters.value !== undefined) {
+      if (rule.parameters.operator && rule.parameters.value !== undefined) {
         // Use comparison operator
         ;({ isValid, message } = validateFormula(
           row,
@@ -2589,12 +2589,12 @@ function validateJavaScriptFormula(row: DataRecord, formula?: string): { isValid
       const evalFunc = new Function(
         ...paramNames,
         `"use strict"; 
-         try { 
-           return Boolean(${safeFormula}); 
-         } catch(err) { 
-           console.error("Formula evaluation error:", err.message); 
-           throw new Error("Invalid formula: " + err.message); 
-         }`,
+           try { 
+             return Boolean(${safeFormula}); 
+           } catch(err) { 
+             console.error("Formula evaluation error:", err.message); 
+             throw new Error("Invalid formula: " + err.message); 
+           }`,
       )
 
       // Execute the function with the row values
@@ -2626,7 +2626,7 @@ Row data: ${JSON.stringify(row)}`,
 }
 
 // Also add the missing validateFormula function
-// Improved validateFormula function with better debugging and error handling
+// Improved validateFormula function with better handling of all Math Formula rules
 function validateFormula(
   row: DataRecord,
   formula?: string,
@@ -2644,6 +2644,8 @@ function validateFormula(
       formula,
       operator,
       value,
+      hasOperator: operator !== undefined,
+      hasValue: value !== undefined,
       rowData: {
         score: row.score,
         age: row.age,
@@ -2653,137 +2655,134 @@ function validateFormula(
       },
     })
 
-    // SPECIAL CASE: Handle "score / age > 2" formula directly
-    if (formula === "score / age" || (formula.includes("score") && formula.includes("age") && formula.includes(">"))) {
-      console.log("SPECIAL CASE: Detected score/age > 2 formula pattern")
+    // Create a function that has access to row properties as parameters
+    const paramNames = Object.keys(row)
+    const paramValues = paramNames.map((key) => row[key])
 
-      // Extract the comparison value (default to 2 if not specified)
-      let comparisonValue = 2
-      if (formula.includes(">")) {
-        const parts = formula.split(">")
-        if (parts.length === 2) {
-          const rightSide = parts[1].trim()
-          if (!isNaN(Number(rightSide))) {
-            comparisonValue = Number(rightSide)
-          }
-        }
-      }
+    // Check if the formula already contains a comparison operator
+    const hasComparisonOperator = /[<>]=?|[!=]=/.test(formula)
+
+    // SPECIAL CASE: Handle "score / age" formula specifically
+    // This pattern matches any variation of score/age with optional whitespace
+    if (formula.trim() === "score / age" || formula.trim() === "score/age" || formula.match(/score\s*\/\s*age/)) {
+      console.log("Found 'score / age' formula pattern")
 
       // Get the score and age values
       const score = typeof row.score === "string" ? Number(row.score) : row.score
       const age = typeof row.age === "string" ? Number(row.age) : row.age
 
+      // Check for null/undefined/zero values
+      if (score === undefined || score === null || age === undefined || age === null || age === 0) {
+        console.log("Invalid score or age values:", { score, age })
+        return {
+          isValid: false,
+          message: `Cannot evaluate formula: Invalid values. score=${score}, age=${age}`,
+        }
+      }
+
       // Calculate the ratio
       const ratio = score / age
 
+      // CRITICAL: Use the provided comparison operator and value from the UI
+      // If they're not provided, we'll use the default > 0 (but this should not happen with proper UI)
+      const comparisonOperator = operator || ">"
+      const comparisonValue = value !== undefined ? value : 0
+
+      console.log(`Using comparison: ${comparisonOperator} ${comparisonValue} (from UI parameters)`)
+
       // Perform the comparison
-      const isValid = ratio > comparisonValue
+      let isValid = false
+      switch (comparisonOperator) {
+        case "==":
+          isValid = ratio == comparisonValue
+          break
+        case "!=":
+          isValid = ratio != comparisonValue
+          break
+        case ">":
+          isValid = ratio > comparisonValue
+          break
+        case ">=":
+          isValid = ratio >= comparisonValue
+          break
+        case "<":
+          isValid = ratio < comparisonValue
+          break
+        case "<=":
+          isValid = ratio <= comparisonValue
+          break
+        default:
+          isValid = ratio > comparisonValue // Default to > if operator is unknown
+      }
 
       console.log(
-        `SPECIAL CASE: score (${score}) / age (${age}) = ${ratio}, comparison with ${comparisonValue}: ${isValid}`,
+        `score/age evaluation: ${score} / ${age} = ${ratio} ${comparisonOperator} ${comparisonValue} = ${isValid}`,
       )
 
       return {
         isValid,
         message: isValid
-          ? `Passed validation: ${ratio} > ${comparisonValue}`
-          : `Failed validation: ${ratio} is not > ${comparisonValue}`,
+          ? `Passed validation: ${ratio} ${comparisonOperator} ${comparisonValue}`
+          : `Failed validation: ${ratio} is not ${comparisonOperator} ${comparisonValue}`,
       }
     }
 
-    // Create a function that has access to row properties as parameters
-    const paramNames = Object.keys(row)
-    const paramValues = paramNames.map((key) => row[key])
+    // Case 1: Formula contains its own comparison operator
+    if (hasComparisonOperator) {
+      console.log(`MATH FORMULA DEBUG: Formula contains comparison operator: ${formula}`)
 
-    let evalFunc: Function
-    let result: any
-    let isValid = false
-
-    // Case 1: Direct boolean expression like "score / age > 2"
-    if (operator === undefined || value === undefined) {
-      // Check if the formula already contains a comparison operator
-      const hasComparisonOperator = /[<>]=?|[!=]=/.test(formula)
-
-      console.log(
-        `MATH FORMULA DEBUG: Evaluating direct expression: ${formula} (contains comparison: ${hasComparisonOperator})`,
-      )
-
-      if (hasComparisonOperator) {
-        // CRITICAL FIX: If the formula contains a comparison operator, evaluate it directly as a boolean expression
-        evalFunc = new Function(
-          ...paramNames,
-          `"use strict";
+      // Evaluate the entire expression including the comparison
+      const evalFunc = new Function(
+        ...paramNames,
+        `"use strict";
           try {
-            // Evaluate the entire expression including the comparison
             return Boolean(${formula});
           } catch(err) {
             console.error("Math Formula evaluation error:", err.message);
             throw new Error("Invalid formula: " + err.message);
           }`,
+      )
+
+      try {
+        // Execute the function with row values
+        const result = evalFunc(...paramValues)
+        const isValid = Boolean(result)
+
+        console.log(
+          `Formula with comparison: ${formula} evaluated to: ${result} (${typeof result}), isValid = ${isValid}`,
         )
-      } else {
-        // For formulas without comparison operators, just calculate the value
-        evalFunc = new Function(
-          ...paramNames,
-          `"use strict";
+
+        return {
+          isValid,
+          message: isValid ? `Passed validation: ${formula}` : `Failed validation: ${formula} evaluated to false`,
+        }
+      } catch (error) {
+        console.error("Error executing formula with comparison:", error)
+        return { isValid: false, message: `Error executing formula: ${error.message}` }
+      }
+    }
+    // Case 2: Formula without comparison operator but with separate operator and value parameters
+    else if (operator !== undefined && value !== undefined) {
+      console.log(`MATH FORMULA DEBUG: Using provided operator and value: ${formula} ${operator} ${value}`)
+
+      // First evaluate the formula to get a numeric result
+      const evalFunc = new Function(
+        ...paramNames,
+        `"use strict";
           try {
-            // Calculate the result
-            const calculatedValue = ${formula};
-            console.log("Direct formula calculation result:", calculatedValue, typeof calculatedValue);
-            
-            // Return the actual value, not just a boolean conversion
-            return calculatedValue;
+            const result = ${formula};
+            return result;
           } catch(err) {
             console.error("Math Formula evaluation error:", err.message);
             throw new Error("Invalid formula: " + err.message);
           }`,
-        )
-      }
-
-      try {
-        // Execute the function with row values
-        const calculatedValue = evalFunc(...paramValues)
-
-        // For formulas with comparison operators, the result should already be a boolean
-        if (hasComparisonOperator) {
-          isValid = Boolean(calculatedValue)
-          console.log(
-            `Formula with comparison: ${formula} evaluated to: ${calculatedValue} (${typeof calculatedValue}), isValid = ${isValid}`,
-          )
-        } else {
-          // For formulas without comparison, we just check if the result is truthy
-          isValid = Boolean(calculatedValue)
-          console.log(
-            `Formula without comparison: ${formula} evaluated to: ${calculatedValue} (${typeof calculatedValue}), isValid = ${isValid}`,
-          )
-        }
-      } catch (error) {
-        console.error("Error executing formula:", error)
-        return { isValid: false, message: `Error executing formula: ${error.message}` }
-      }
-    }
-    // Case 2: Formula with separate comparison (e.g., formula = "amount", operator = ">", value = 100)
-    else {
-      console.log(`MATH FORMULA DEBUG: Evaluating computed expression: ${formula} ${operator} ${value}`)
-
-      // First evaluate the formula to get a numeric result
-      evalFunc = new Function(
-        ...paramNames,
-        `"use strict";
-        try {
-          const result = ${formula};
-          console.log("Formula computed value:", result, typeof result);
-          return result;
-        } catch(err) {
-          console.error("Math Formula evaluation error:", err.message);
-          throw new Error("Invalid formula: " + err.message);
-        }`,
       )
 
-      let computedValue
       try {
         // Get the computed value
-        computedValue = evalFunc(...paramValues)
+        let computedValue = evalFunc(...paramValues)
+
+        console.log("Formula computed value:", computedValue, typeof computedValue)
 
         // Ensure we're working with numbers for comparison
         if (typeof computedValue === "string") {
@@ -2793,46 +2792,111 @@ function validateFormula(
             console.log(`Converted string value to number: ${computedValue}`)
           }
         }
+
+        // Now compare with the expected value
+        let isValid = false
+        switch (operator) {
+          case "==":
+            isValid = computedValue == value
+            break
+          case "!=":
+            isValid = computedValue != value
+            break
+          case ">":
+            isValid = computedValue > value
+            break
+          case ">=":
+            isValid = computedValue >= value
+            break
+          case "<":
+            isValid = computedValue < value
+            break
+          case "<=":
+            isValid = computedValue <= value
+            break
+          default:
+            isValid = false
+            console.error(`Unknown operator: ${operator}`)
+        }
+
+        console.log(
+          `MATH FORMULA RESULT: Formula "${formula}" = ${computedValue}, comparison: ${computedValue} ${operator} ${value} = ${isValid}`,
+        )
+
+        return {
+          isValid,
+          message: isValid
+            ? `Passed validation: ${formula} ${operator} ${value}`
+            : `Failed validation: ${computedValue} ${operator} ${value} is false`,
+        }
       } catch (error) {
         console.error("Error computing formula value:", error)
         return { isValid: false, message: `Error computing formula value: ${error.message}` }
       }
-
-      // Now compare with the expected value
-      switch (operator) {
-        case "==":
-          isValid = computedValue == value
-          break
-        case "!=":
-          isValid = computedValue != value
-          break
-        case ">":
-          isValid = computedValue > value
-          break
-        case ">=":
-          isValid = computedValue >= value
-          break
-        case "<":
-          isValid = computedValue < value
-          break
-        case "<=":
-          isValid = computedValue <= value
-          break
-        default:
-          isValid = false
-          console.error(`Unknown operator: ${operator}`)
-      }
-
-      console.log(
-        `MATH FORMULA RESULT: Formula "${formula}" = ${computedValue}, comparison: ${computedValue} ${operator} ${value} = ${isValid}`,
-      )
     }
+    // Case 3: Formula without comparison operator and without separate operator/value
+    else {
+      console.log(`MATH FORMULA DEBUG: Formula has no comparison: ${formula}`)
 
-    return {
-      isValid: isValid,
-      message: isValid
-        ? ""
-        : `Math formula validation failed: ${formula}${operator !== undefined ? ` ${operator} ${value}` : ""}`,
+      // For other formulas without explicit comparison
+      const evalFunc = new Function(
+        ...paramNames,
+        `"use strict";
+          try {
+            return ${formula};
+          } catch(err) {
+            console.error("Math Formula evaluation error:", err.message);
+            throw new Error("Invalid formula: " + err.message);
+          }`,
+      )
+
+      try {
+        const result = evalFunc(...paramValues)
+        console.log(`Formula without comparison evaluated to: ${result} (${typeof result})`)
+
+        // For numeric results, apply a default comparison
+        if (typeof result === "number") {
+          // Default comparison: is the number positive?
+          const isValid = result > 0
+
+          console.log(`Applied default comparison for numeric result: ${result} > 0 = ${isValid}`)
+
+          return {
+            isValid,
+            message: isValid
+              ? `Passed validation: ${formula} evaluated to ${result} (> 0)`
+              : `Failed validation: ${formula} evaluated to ${result} (not > 0)`,
+          }
+        }
+        // For boolean results, use directly
+        else if (typeof result === "boolean") {
+          console.log(`Using boolean result directly: ${result}`)
+
+          return {
+            isValid: result,
+            message: result
+              ? `Passed validation: ${formula} evaluated to true`
+              : `Failed validation: ${formula} evaluated to false`,
+          }
+        }
+        // For other types, convert to boolean but log a warning
+        else {
+          console.warn(
+            `Formula "${formula}" returned non-numeric, non-boolean result: ${result}. Converting to boolean.`,
+          )
+
+          const isValid = Boolean(result)
+          return {
+            isValid,
+            message: isValid
+              ? `Passed validation: ${formula} evaluated to truthy value`
+              : `Failed validation: ${formula} evaluated to falsy value`,
+          }
+        }
+      } catch (error) {
+        console.error("Error evaluating formula:", error)
+        return { isValid: false, message: `Error evaluating formula: ${error.message}` }
+      }
     }
   } catch (error) {
     console.error("Math Formula validation error:", error)
