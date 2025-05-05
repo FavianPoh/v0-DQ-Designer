@@ -444,10 +444,25 @@ function validateEquals(value: any, compareValue: any): { isValid: boolean; mess
     compareValue === null ? "null" : compareValue === undefined ? "undefined" : String(compareValue)
   console.log(`String representation - value: "${valueStr}", compareValue: "${compareValueStr}"`)
 
-  // SPECIAL CASE: Empty string, null, and undefined are considered equivalent
-  if (compareValue === "") {
+  // CRITICAL FIX: Normalize empty strings for comparison
+  // This ensures that any string representation of an empty string is treated as an empty string
+  const normalizedValue = value === "" ? "" : value
+  const normalizedCompareValue = compareValue === "" ? "" : compareValue
+
+  // Check if both are empty strings after normalization
+  if (normalizedValue === "" && normalizedCompareValue === "") {
+    console.log("Both values are empty strings after normalization - they are equal")
+    console.log("=== EQUALS VALIDATION END ===")
+    return {
+      isValid: true,
+      message: "",
+    }
+  }
+
+  // SPECIAL CASE: Empty string comparison
+  if (normalizedCompareValue === "") {
     // If we're checking for an empty string, then null and undefined should also pass
-    const isValid = value === "" || value === null || value === undefined
+    const isValid = normalizedValue === "" || normalizedValue === null || normalizedValue === undefined
     console.log(`Empty string comparison result: ${isValid}`)
     console.log(`Reason: compareValue is empty string, value is ${valueStr}`)
     console.log("=== EQUALS VALIDATION END ===")
@@ -458,9 +473,9 @@ function validateEquals(value: any, compareValue: any): { isValid: boolean; mess
   }
 
   // SPECIAL CASE: Null comparison
-  if (compareValue === null) {
+  if (normalizedCompareValue === null) {
     // Only null should match null
-    const isValid = value === null
+    const isValid = normalizedValue === null
     console.log(`Null comparison result: ${isValid}`)
     console.log(`Reason: compareValue is null, value is ${valueStr}`)
     console.log("=== EQUALS VALIDATION END ===")
@@ -471,9 +486,9 @@ function validateEquals(value: any, compareValue: any): { isValid: boolean; mess
   }
 
   // SPECIAL CASE: Undefined comparison
-  if (compareValue === undefined) {
+  if (normalizedCompareValue === undefined) {
     // Only undefined should match undefined
-    const isValid = value === undefined
+    const isValid = normalizedValue === undefined
     console.log(`Undefined comparison result: ${isValid}`)
     console.log(`Reason: compareValue is undefined, value is ${valueStr}`)
     console.log("=== EQUALS VALIDATION END ===")
@@ -484,10 +499,9 @@ function validateEquals(value: any, compareValue: any): { isValid: boolean; mess
   }
 
   // For all other cases, use loose equality (==) to allow type coercion
-  // This handles cases like comparing "5" with 5
-  const isValid = value == compareValue
+  const isValid = normalizedValue == normalizedCompareValue
   console.log(`Standard comparison result: ${isValid}`)
-  console.log(`Reason: Using loose equality, ${valueStr} == ${compareValueStr} is ${isValid}`)
+  console.log(`Reason: Using loose equality, ${valueStr} == "${compareValueStr}" is ${isValid}`)
   console.log("=== EQUALS VALIDATION END ===")
 
   return {
@@ -2485,10 +2499,8 @@ function validateRule(
         },
       })
 
-      // CRITICAL: Do NOT return immediately - just set the validation result
-      // This makes formula rules consistent with other rule types
-      break
-
+    // CRITICAL: Do NOT return immediately - just set the validation result
+    // This makes formula rules consistent with other rule types
     // Also update the validateRule function to check both formula and javascriptExpression:
 
     // Find this case in the switch statement in validateRule:
@@ -3084,56 +3096,52 @@ Formula: ${formula}`,
 }
 
 // Remove the evaluateSimpleFormula function as we're now using a more direct approach
-const validateCrossTableConditions = (
-  row: DataRecord,
-  crossTableConditions: any[],
-  datasets: DataTables,
-): { isValid: boolean; message: string } => {
-  let isValid = true
-  let message = ""
+const validateCrossTableConditions = (row: DataRecord, crossTableConditions: any[], datasets: DataTables) => {
+  if (!crossTableConditions || crossTableConditions.length === 0) {
+    return { isValid: true, message: "" }
+  }
 
   for (const condition of crossTableConditions) {
-    const { table, column, operator, value } = condition
+    const { table, column, conditionTable, conditionColumn, operator } = condition
 
-    // Check if the table exists
-    if (!datasets[table]) {
-      return { isValid: false, message: `Table "${table}" not found` }
+    // Get the value from the current row
+    const value = row[column]
+
+    // Check if the condition table exists
+    if (!datasets[conditionTable]) {
+      return { isValid: false, message: `Condition table ${conditionTable} not found` }
     }
 
-    // Find the first row in the table that matches the condition
-    const matchingRow = datasets[table].find((tableRow) => {
-      const tableValue = tableRow[column]
+    // Check if the condition column exists in the condition table
+    const conditionData = datasets[conditionTable]
+    if (!conditionData || conditionData.length === 0 || !conditionData[0][conditionColumn]) {
+      return { isValid: false, message: `Condition column ${conditionColumn} not found in table ${conditionTable}` }
+    }
 
-      switch (operator) {
-        case "==":
-          return tableValue == value
-        case "!=":
-          return tableValue != value
-        case ">":
-          return tableValue > value
-        case ">=":
-          return tableValue >= value
-        case "<":
-          return tableValue < value
-        case "<=":
-          return tableValue <= value
-        default:
-          return false
+    let isValid = false
+    switch (operator) {
+      case "exists":
+        isValid = conditionData.some((item) => item[conditionColumn] == value)
+        break
+      case "not-exists":
+        isValid = !conditionData.some((item) => item[conditionColumn] == value)
+        break
+      default:
+        return { isValid: false, message: `Unknown operator: ${operator}` }
+    }
+
+    if (!isValid) {
+      return {
+        isValid: false,
+        message: `Cross-table condition failed: value ${value} in ${column} ${operator} in ${conditionTable}.${conditionColumn}`,
       }
-    })
-
-    // If no matching row is found, the condition is not valid
-    if (!matchingRow) {
-      isValid = false
-      message = `No matching row found in table "${table}" for condition: ${column} ${operator} ${value}`
-      break
     }
   }
 
-  return { isValid, message }
+  return { isValid: true, message: "" }
 }
 
-// New function to validate unique rules
+// Declare validateUnique function
 function validateUnique(
   row: DataRecord,
   rowIndex: number,
@@ -3150,45 +3158,23 @@ function validateUnique(
   // Get the unique columns from the parameters
   const uniqueColumns = rule.parameters.uniqueColumns || [rule.column]
 
-  // First, get the value(s) for the current row
-  const currentRowValues = uniqueColumns.map((col) => row[col])
-  const currentCompositeKey = currentRowValues
-    .map((val) => (val === null || val === undefined ? null : String(val)))
-    .join("||")
+  // Create a set to store unique values
+  const uniqueValues = new Set()
 
-  console.log(`Checking uniqueness for row ${rowIndex}, values: ${currentCompositeKey}`)
-
-  // Skip validation if all values are null/undefined and we want to ignore nulls
-  if (rule.parameters.ignoreNulls === true && currentRowValues.every((val) => val === null || val === undefined)) {
-    console.log(`Skipping null values in row ${rowIndex} because ignoreNulls is true`)
-    return null
-  }
-
-  // Check if this value exists in any other row
+  // Iterate through the dataset and check for duplicates
   const tableData = datasets[rule.table]
   if (tableData) {
-    for (let i = 0; i < tableData.length; i++) {
-      // Skip the current row
-      if (i === rowIndex) continue
+    for (const rowData of tableData) {
+      // Build a composite key from the specified columns
+      const compositeKey = uniqueColumns
+        .map((col) => {
+          const colValue = rowData[col]
+          return colValue === null || colValue === undefined ? "" : colValue // Treat nulls as empty strings
+        })
+        .join("||") // Use a separator that's unlikely to appear in the data
 
-      const otherRow = tableData[i]
-      const otherRowValues = uniqueColumns.map((col) => otherRow[col])
-      const otherCompositeKey = otherRowValues
-        .map((val) => (val === null || val === undefined ? null : String(val)))
-        .join("||")
-
-      // If both are null composites and we're ignoring nulls, skip
-      if (
-        rule.parameters.ignoreNulls === true &&
-        currentRowValues.every((val) => val === null || val === undefined) &&
-        otherRowValues.every((val) => val === null || val === undefined)
-      ) {
-        continue
-      }
-
-      // Check if the values match
-      if (currentCompositeKey === otherCompositeKey) {
-        console.log(`Found duplicate in row ${i}: ${otherCompositeKey}`)
+      // If the value is already in the set, it's a duplicate
+      if (uniqueValues.has(compositeKey)) {
         return {
           rowIndex,
           table: rule.table,
@@ -3198,10 +3184,11 @@ function validateUnique(
           severity: rule.severity,
           ruleId: rule.id,
         }
+      } else {
+        uniqueValues.add(compositeKey)
       }
     }
   }
 
-  // No duplicates found
   return null
 }
