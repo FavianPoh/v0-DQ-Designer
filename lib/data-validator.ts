@@ -229,16 +229,69 @@ function validateContains(
   }
 }
 
-// Define validateDependency at the top level
-function validateDependency(value: any, dependsOnValue: any, condition: any): { isValid: boolean; message: string } {
+// Find the validateDependency function and replace it with this enhanced version:
+function validateDependency(
+  value: any,
+  dependsOnValue: any,
+  condition: any,
+  operator = "==",
+): { isValid: boolean; message: string } {
+  console.log("Dependency validation:", {
+    value,
+    dependsOnValue,
+    condition,
+    operator,
+  })
+
+  let conditionMet = false
+
+  // Evaluate if the condition is met based on the operator
+  switch (operator) {
+    case "==":
+      conditionMet = dependsOnValue == condition
+      break
+    case "!=":
+      conditionMet = dependsOnValue != condition
+      break
+    case ">":
+      conditionMet = dependsOnValue > condition
+      break
+    case ">=":
+      conditionMet = dependsOnValue >= condition
+      break
+    case "<":
+      conditionMet = dependsOnValue < condition
+      break
+    case "<=":
+      conditionMet = dependsOnValue <= condition
+      break
+    case "contains":
+      conditionMet = String(dependsOnValue).includes(String(condition))
+      break
+    case "starts-with":
+      conditionMet = String(dependsOnValue).startsWith(String(condition))
+      break
+    case "ends-with":
+      conditionMet = String(dependsOnValue).endsWith(String(condition))
+      break
+    case "is-empty":
+      conditionMet = dependsOnValue === "" || dependsOnValue === null || dependsOnValue === undefined
+      break
+    case "is-not-empty":
+      conditionMet = dependsOnValue !== "" && dependsOnValue !== null && dependsOnValue !== undefined
+      break
+    default:
+      conditionMet = dependsOnValue == condition
+  }
+
   let isValid = true
   let message = ""
 
-  if (condition === "required") {
-    isValid = dependsOnValue !== null && dependsOnValue !== undefined && dependsOnValue !== ""
-    message = isValid ? "" : "This field is required because another field has a value"
-  } else {
-    isValid = true
+  if (conditionMet) {
+    // If the condition is met, check if the dependent value meets its requirements
+    // For now, we're just checking if it's required (not null/empty)
+    isValid = value !== null && value !== undefined && value !== ""
+    message = isValid ? "" : "This field is required when the condition is met"
   }
 
   return {
@@ -1152,6 +1205,9 @@ export function validateDataset(
       )
     }
 
+    // CRITICAL FIX: Log the rule table to help with debugging
+    console.log(`Processing rule: ${rule.name}, Table: ${rule.table}, Type: ${rule.ruleType}`)
+
     const tableData = datasets[rule.table]
     if (!tableData) {
       console.log(`Table ${rule.table} not found for rule ${rule.name}`)
@@ -1160,11 +1216,15 @@ export function validateDataset(
 
     // Process each row in the table
     tableData.forEach((row, rowIndex) => {
+      // CRITICAL FIX: Add table name to row for validation functions to check
+      // This ensures each row knows which table it belongs to
+      const rowWithTable = { ...row, _table: rule.table }
+
       let validationResult: ValidationResult | null = null
 
       // Special handling for date rules
       if (rule.ruleType.startsWith("date-")) {
-        validationResult = validateDateRuleWithSafeguards(row, rowIndex, rule)
+        validationResult = validateDateRuleWithSafeguards(rowWithTable, rowIndex, rule)
         if (validationResult) {
           results.push(validationResult)
         }
@@ -1174,19 +1234,19 @@ export function validateDataset(
       // Process rule based on its type
       switch (rule.ruleType) {
         case "column-comparison":
-          validationResult = validateColumnComparison(row, rowIndex, rule)
+          validationResult = validateColumnComparison(rowWithTable, rowIndex, rule)
           break
         case "math-operation":
-          validationResult = validateMathOperation(row, rowIndex, rule)
+          validationResult = validateMathOperation(rowWithTable, rowIndex, rule)
           break
         case "composite-reference":
-          validationResult = validateCompositeReference(row, rowIndex, rule, datasets)
+          validationResult = validateCompositeReference(rowWithTable, rowIndex, rule, datasets)
           break
         case "reference-integrity":
-          validationResult = validateReferenceIntegrity(row, rowIndex, rule, datasets)
+          validationResult = validateReferenceIntegrity(rowWithTable, rowIndex, rule, datasets)
           break
         case "unique":
-          validationResult = validateUnique(row, rowIndex, rule, datasets)
+          validationResult = validateUnique(rowWithTable, rowIndex, rule, datasets)
           break
         case "javascript-formula":
           // Handle JavaScript formula rule
@@ -1202,7 +1262,7 @@ export function validateDataset(
               ruleId: rule.id,
             }
           } else {
-            const jsFormulaResult = validateJavaScriptFormula(row, formula)
+            const jsFormulaResult = validateJavaScriptFormula(rowWithTable, formula)
             validationResult = {
               rowIndex,
               table: rule.table,
@@ -1219,11 +1279,11 @@ export function validateDataset(
         default:
           // Check for column conditions
           if (rule.columnConditions && rule.columnConditions.length > 0) {
-            validationResult = validateColumnConditions(row, rowIndex, rule, datasets, valueLists)
+            validationResult = validateColumnConditions(rowWithTable, rowIndex, rule, datasets, valueLists)
           }
           // Check for cross-table conditions
           else if (rule.crossTableConditions && rule.crossTableConditions.length > 0) {
-            const crossTableResult = validateCrossTableConditions(row, rule.crossTableConditions, datasets)
+            const crossTableResult = validateCrossTableConditions(rowWithTable, rule.crossTableConditions, datasets)
             if (!crossTableResult.isValid) {
               validationResult = {
                 rowIndex,
@@ -1239,7 +1299,7 @@ export function validateDataset(
           // Default case: use individual rule validation
           else {
             // Use standard rule validation for other rule types
-            const value = row[rule.column]
+            const value = rowWithTable[rule.column]
             let isValid = true
             let message = ""
 
@@ -1312,18 +1372,20 @@ export function validateDataset(
                 ;({ isValid, message } = validateContains(value, searchString, matchType, caseSensitive))
                 break
               case "dependency":
+                // Pass the operator parameter (defaulting to "==" for backward compatibility)
                 ;({ isValid, message } = validateDependency(
                   value,
-                  row[rule.parameters.dependsOn],
+                  rowWithTable[rule.parameters.dependsOn],
                   rule.parameters.condition,
+                  rule.parameters.operator || "==",
                 ))
                 break
               case "multi-column":
-                ;({ isValid, message } = validateMultiColumn(row, rule.conditions || [], datasets, valueLists))
+                ;({ isValid, message } = validateMultiColumn(rowWithTable, rule.conditions || [], datasets, valueLists))
                 break
               case "lookup":
                 ;({ isValid, message } = validateLookup(
-                  row,
+                  rowWithTable,
                   rule.column,
                   rule.parameters.lookupTable,
                   rule.parameters.lookupColumn,
@@ -1332,18 +1394,18 @@ export function validateDataset(
                 ))
                 break
               case "custom":
-                ;({ isValid, message } = validateCustom(value, row, rule.parameters.functionBody, datasets))
+                ;({ isValid, message } = validateCustom(value, rowWithTable, rule.parameters.functionBody, datasets))
                 break
               case "formula":
                 if (rule.parameters.operator && rule.parameters.value !== undefined) {
                   ;({ isValid, message } = validateFormula(
-                    row,
+                    rowWithTable,
                     rule.parameters.formula,
                     rule.parameters.operator,
                     rule.parameters.value,
                   ))
                 } else {
-                  ;({ isValid, message } = validateFormula(row, rule.parameters.formula))
+                  ;({ isValid, message } = validateFormula(rowWithTable, rule.parameters.formula))
                 }
                 break
             }
@@ -1388,158 +1450,110 @@ export function validateDataset(
   return results
 }
 
-// Enhanced function to validate column comparison rules\
+// Find the validateColumnComparison function and replace it with this updated version
+// that ensures the rule is only applied to the correct table
+
 function validateColumnComparison(row: DataRecord, rowIndex: number, rule: DataQualityRule): ValidationResult | null {
   const { parameters, table, column } = rule
 
-  // Debug log to inspect parameters
-  console.log("Column Comparison Parameters:", {
+  // Enhanced debug log to inspect parameters and raw rule
+  console.log("Column Comparison Validation:", {
+    ruleId: rule.id,
     ruleName: rule.name,
-    parameters,
+    ruleType: rule.ruleType,
     column: rule.column,
+    table: rule.table,
+    rowTable: row._table,
+    rowIndex,
+    rawParameters: parameters,
   })
 
-  // FIXED: Check for both parameter naming conventions
-  // Extract parameters using both possible naming conventions
-  const leftColumn = parameters.leftColumn || column // Default to primary column if leftColumn is missing
+  // CRITICAL FIX: Skip validation if the row's table doesn't match the rule's table
+  // This is the most important check to ensure we're only validating against the correct table
+  if (row._table && row._table !== table) {
+    console.log(`Skipping column comparison validation - row table (${row._table}) doesn't match rule table (${table})`)
+    return {
+      rowIndex,
+      table: row._table || "",
+      column: "",
+      ruleName: rule.name,
+      message: `Skipped validation: Rule applies to table '${table}' but row is from table '${row._table}'`,
+      severity: "success",
+      ruleId: rule.id,
+    }
+  }
+
+  // Extract parameters with uniform naming to prevent inconsistencies
+  const leftColumn = parameters.leftColumn || column || parameters.column // Default to primary column if leftColumn is missing
   const rightColumn = parameters.rightColumn || parameters.secondaryColumn
   const comparisonOperator = parameters.comparisonOperator || parameters.operator
   const allowNull = parameters.allowNull
 
-  // More detailed logging
-  console.log("Column Comparison Extracted Parameters:", {
+  // Explicit check that we have both columns from the correct table
+  if (!row.hasOwnProperty(leftColumn) || !row.hasOwnProperty(rightColumn)) {
+    console.log(`Missing columns for comparison: ${leftColumn} or ${rightColumn} not found in row`, {
+      availableColumns: Object.keys(row),
+    })
+    return null // Skip validation if columns don't exist in this row
+  }
+
+  // Log values from the row for debugging
+  const leftValue = row[leftColumn]
+  const rightValue = row[rightColumn]
+
+  console.log("Column Comparison Parameters:", {
     leftColumn,
     rightColumn,
     comparisonOperator,
     allowNull,
-  })
-
-  // Ensure we have all required parameters
-  if (!leftColumn || !rightColumn || !comparisonOperator) {
-    return {
-      rowIndex,
-      table,
-      column,
-      ruleName: rule.name,
-      message: "Missing required parameters for column comparison",
-      severity: rule.severity,
-      ruleId: rule.id,
-    }
-  }
-
-  // Get the values from the row
-  const leftValue = row[leftColumn]
-  const rightValue = row[rightColumn]
-
-  // Handle null values if allowNull is true
-  if (
-    allowNull === true &&
-    (leftValue === null || leftValue === undefined || rightValue === null || rightValue === undefined)
-  ) {
-    // Skip validation if either value is null and allowNull is true
-    return null
-  }
-
-  // Check for null values if allowNull is false
-  if (leftValue === null || leftValue === undefined || rightValue === null || rightValue === undefined) {
-    return {
-      rowIndex,
-      table,
-      column,
-      ruleName: rule.name,
-      message: `Cannot compare null values: ${leftColumn}=${leftValue} ${comparisonOperator} ${rightColumn}=${rightValue}`,
-      severity: rule.severity,
-      ruleId: rule.id,
-    }
-  }
-
-  // Try to convert string values to numbers if both can be converted
-  const canConvertLeft = typeof leftValue === "string" && !isNaN(Number(leftValue))
-  const canConvertRight = typeof rightValue === "string" && !isNaN(Number(rightValue))
-
-  // Values to use for comparison
-  let leftCompare = leftValue
-  let rightCompare = rightValue
-
-  // If both values can be converted to numbers, convert them
-  if (canConvertLeft && canConvertRight) {
-    leftCompare = Number(leftValue)
-    rightCompare = Number(rightValue)
-  }
-  // If we're comparing dates, convert to Date objects
-  else if (
-    (leftValue instanceof Date || (typeof leftValue === "string" && !isNaN(Date.parse(leftValue)))) &&
-    (rightValue instanceof Date || (typeof rightValue === "string" && !isNaN(Date.parse(rightValue))))
-  ) {
-    leftCompare = leftValue instanceof Date ? leftValue : new Date(leftValue)
-    rightCompare = rightValue instanceof Date ? rightValue : new Date(rightValue)
-
-    // Convert to timestamps for comparison
-    leftCompare = leftCompare.getTime()
-    rightCompare = rightCompare.getTime()
-  }
-
-  // For string comparisons, ensure both values are strings
-  else if (typeof leftValue === "string" || typeof rightValue === "string") {
-    leftCompare = String(leftValue)
-    rightCompare = String(rightValue)
-  }
-
-  // Log comparison details for debugging
-  console.log("Performing comparison:", {
     leftValue,
     rightValue,
-    leftCompare,
-    rightCompare,
-    comparisonOperator,
+    rowData: row,
   })
 
   // Perform the comparison
   let isValid = false
   switch (comparisonOperator) {
     case "==":
-      isValid = leftCompare === rightCompare
+      isValid = leftValue == rightValue // Use loose equality for cross-type comparisons
       break
     case "!=":
-      isValid = leftCompare !== rightCompare
+      isValid = leftValue != rightValue
       break
     case ">":
-      isValid = leftCompare > rightCompare
+      isValid = leftValue > rightValue
       break
     case ">=":
-      isValid = leftCompare >= rightCompare
+      isValid = leftValue >= rightValue
       break
     case "<":
-      isValid = leftCompare < rightCompare
+      isValid = leftValue < rightValue
       break
     case "<=":
-      isValid = leftCompare <= rightCompare
+      isValid = leftValue <= rightValue
       break
     default:
       isValid = false
+      console.error("Unknown comparison operator:", comparisonOperator)
   }
 
-  // Log validation result
   console.log("Column comparison result:", {
     isValid,
     comparisonString: `${leftColumn}(${leftValue}) ${comparisonOperator} ${rightColumn}(${rightValue})`,
   })
 
-  // If the validation fails, return a result
-  if (!isValid) {
-    return {
-      rowIndex,
-      table,
-      column,
-      ruleName: rule.name,
-      message: `Column comparison failed: ${leftColumn} (${leftValue}) ${comparisonOperator} ${rightColumn} (${rightValue})`,
-      severity: rule.severity,
-      ruleId: rule.id,
-    }
+  // Return a validation result object for both passing and failing cases
+  return {
+    rowIndex,
+    table,
+    column,
+    ruleName: rule.name,
+    message: isValid
+      ? `Passed validation: ${leftColumn} (${leftValue}) ${comparisonOperator} ${rightColumn} (${rightValue})`
+      : `Column comparison failed: ${leftColumn} (${leftValue}) ${comparisonOperator} ${rightColumn} (${rightValue})`,
+    severity: isValid ? "success" : rule.severity,
+    ruleId: rule.id,
   }
-
-  // Validation passed
-  return null
 }
 
 // Function to validate math operation rules
@@ -2242,6 +2256,15 @@ function validateSingleColumnCondition(
     case "date-format":
       return validateDateFormat(value, condition.parameters.format, condition.parameters.customFormat)
 
+    // And update validateSingleColumnCondition for the dependency case:
+    case "dependency":
+      return validateDependency(
+        value,
+        row[condition.parameters.dependsOn],
+        condition.parameters.condition,
+        condition.parameters.operator || "==",
+      )
+
     default:
       return { isValid: true, message: "" }
   }
@@ -2472,7 +2495,13 @@ function validateRule(
       break
 
     case "dependency":
-      ;({ isValid, message } = validateDependency(value, row[rule.parameters.dependsOn], rule.parameters.condition))
+      // Pass the operator parameter (defaulting to "==" for backward compatibility)
+      ;({ isValid, message } = validateDependency(
+        value,
+        row[rule.parameters.dependsOn],
+        rule.parameters.condition,
+        rule.parameters.operator || "==",
+      ))
       break
 
     case "multi-column":

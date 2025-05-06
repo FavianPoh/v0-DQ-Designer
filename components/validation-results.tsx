@@ -125,6 +125,26 @@ export function ValidationResults({
 
   // Add this near the beginning of the component, after the state declarations
   useEffect(() => {
+    // Log cross-column validation results
+    const crossColumnResults = initialResults.filter(
+      (result) =>
+        result.ruleName.toLowerCase().includes("comparison") ||
+        rules.some(
+          (r) => r.id === result.ruleId && (r.ruleType === "cross-column" || r.ruleType === "column-comparison"),
+        ),
+    )
+
+    if (crossColumnResults.length > 0) {
+      console.log("Cross-Column validation results:", {
+        total: crossColumnResults.length,
+        success: crossColumnResults.filter((r) => r.severity === "success").length,
+        failures: crossColumnResults.filter((r) => r.severity !== "success").length,
+        results: crossColumnResults,
+      })
+    }
+  }, [initialResults, rules])
+
+  useEffect(() => {
     console.log("ValidationResults - Current validation results:", initialResults)
 
     // Log enum-related validation results

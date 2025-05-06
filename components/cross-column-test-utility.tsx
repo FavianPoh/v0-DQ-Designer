@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -11,16 +11,38 @@ import { AlertCircle, CheckCircle2 } from "lucide-react"
 
 interface CrossColumnTestProps {
   onClose: () => void
+  table?: string
+  column?: string
+  secondaryColumn?: string
+  operator?: string
+  datasets?: any
 }
 
-export function CrossColumnTestUtility({ onClose }: CrossColumnTestProps) {
+export function CrossColumnTestUtility({
+  onClose,
+  table,
+  column,
+  secondaryColumn,
+  operator: initialOperator,
+  datasets,
+}: CrossColumnTestProps) {
   const [leftValue, setLeftValue] = useState<string>("")
   const [rightValue, setRightValue] = useState<string>("")
   const [leftType, setLeftType] = useState<string>("string")
   const [rightType, setRightType] = useState<string>("string")
-  const [operator, setOperator] = useState<string>("==")
+  const [operator, setOperator] = useState<string>(initialOperator || "==")
   const [result, setResult] = useState<{ valid: boolean; message: string } | null>(null)
   const [allowNull, setAllowNull] = useState(false)
+
+  // Debug logging to verify props are passed correctly
+  useEffect(() => {
+    console.log("CrossColumnTestUtility initialized with:", {
+      table,
+      column,
+      secondaryColumn,
+      operator: initialOperator,
+    })
+  }, [table, column, secondaryColumn, initialOperator])
 
   const runTest = () => {
     // Convert values based on selected types

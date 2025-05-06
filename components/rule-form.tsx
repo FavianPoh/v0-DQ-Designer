@@ -33,6 +33,36 @@ interface RuleFormProps {
   onColumnChange?: (column: string) => void // Add this line
 }
 
+// Add this helper function at the top of the component (after the imports, outside any other functions):
+function getOperatorDisplay(operator: string): string {
+  switch (operator) {
+    case "==":
+      return "equals"
+    case "!=":
+      return "does not equal"
+    case ">":
+      return "is greater than"
+    case ">=":
+      return "is greater than or equal to"
+    case "<":
+      return "is less than"
+    case "<=":
+      return "is less than or equal to"
+    case "contains":
+      return "contains"
+    case "starts-with":
+      return "starts with"
+    case "ends-with":
+      return "ends with"
+    case "is-empty":
+      return "is empty"
+    case "is-not-empty":
+      return "is not empty"
+    default:
+      return "equals"
+  }
+}
+
 // Update the RULE_TYPES array to be sorted alphabetically by label
 const RULE_TYPES: { value: RuleType; label: string }[] = [
   { value: "column-comparison", label: "Column Comparison" },
@@ -130,8 +160,9 @@ const RULE_TYPE_EXAMPLES: Record<RuleType, { example: string; explanation: strin
       "Evaluates a JavaScript expression with direct access to the row object. Must return true for valid rows, false for invalid rows.",
   },
   dependency: {
-    example: "If status === 'completed', completedDate must be provided",
-    explanation: "Validates that when a condition is met, another field must have a specific value.",
+    example: "If status !== 'completed', completedDate must be provided",
+    explanation:
+      "Validates that when a condition using a specified operator is met, the target field must have a value.",
   },
   lookup: {
     example: "departmentId exists in departments.id",
@@ -574,6 +605,36 @@ export function RuleForm(props: RuleFormProps) {
       setColumnConditions(updatedColumnConditions)
       console.log("Set column conditions:", updatedColumnConditions)
     }
+
+    // Inside the useEffect that handles initialRule
+    if ((initialRule && initialRule.ruleType === "cross-column") || initialRule?.ruleType === "column-comparison") {
+      console.log("Loading cross-column/column-comparison rule with parameters:", initialRule.parameters)
+
+      // Support both naming conventions
+      const leftColumn = initialRule.column || initialRule.parameters.leftColumn || ""
+      const rightColumn = initialRule.parameters.secondaryColumn || initialRule.parameters.rightColumn || ""
+      const operator = initialRule.parameters.operator || initialRule.parameters.comparisonOperator || "=="
+      const allowNull = initialRule.parameters.allowNull || false
+
+      console.log("Cross-column extracted values:", { leftColumn, rightColumn, operator, allowNull })
+
+      // Ensure the table and column are set correctly
+      setRule((prev) => ({
+        ...prev,
+        table: initialRule.table || tables[0] || "",
+        column: leftColumn,
+        parameters: {
+          ...initialRule.parameters,
+          // Save under both naming conventions for backward compatibility
+          leftColumn: leftColumn,
+          rightColumn: rightColumn,
+          secondaryColumn: rightColumn,
+          operator: operator,
+          comparisonOperator: operator,
+          allowNull: allowNull,
+        },
+      }))
+    }
   }, [initialRule, datasets, tables])
 
   // Ensure date rules always have a column selected
@@ -892,7 +953,51 @@ export function RuleForm(props: RuleFormProps) {
     e.preventDefault()
 
     console.log("Form submitted, rule type:", rule.ruleType)
-    console.log("Current conditions:", conditions)
+    console.log("Form submitted with table:", rule.table)
+    console.log("Form submitted with column:", rule.column)
+
+    // Special handling for column-comparison rules
+    if (rule.ruleType === "column-comparison") {
+      console.log("Submitting column-comparison rule with:")
+      console.log("- Table:", rule.table)
+      console.log("- Left Column:", rule.column)
+      console.log("- Right Column:", rule.parameters.rightColumn || rule.parameters.secondaryColumn)
+      console.log("- Operator:", rule.parameters.operator || rule.parameters.comparisonOperator)
+
+      // Make sure the table and columns are explicitly set
+      if (!rule.table || !rule.column) {
+        toast({
+          title: "Error",
+          description: "Please select both a table and a primary column for the comparison",
+          variant: "destructive",
+        })
+        return // Prevent submission
+      }
+
+      // Make sure secondaryColumn is set
+      if (!rule.parameters.secondaryColumn && !rule.parameters.rightColumn) {
+        toast({
+          title: "Error",
+          description: "Please select a secondary column for the comparison",
+          variant: "destructive",
+        })
+        return // Prevent submission
+      }
+
+      // Ensure we're setting the parameters correctly to avoid mismatches
+      const finalParams = {
+        ...rule.parameters,
+        // Store both parameter names for backward compatibility
+        leftColumn: rule.column,
+        rightColumn: rule.parameters.secondaryColumn || rule.parameters.rightColumn,
+        secondaryColumn: rule.parameters.secondaryColumn || rule.parameters.rightColumn,
+        operator: rule.parameters.operator || rule.parameters.comparisonOperator,
+        comparisonOperator: rule.parameters.operator || rule.parameters.comparisonOperator,
+      }
+
+      // Update rule.parameters with the standardized parameters
+      rule.parameters = finalParams
+    }
 
     // Special handling for date rules
     if (rule.ruleType?.startsWith("date-")) {
@@ -1263,40 +1368,75 @@ export function RuleForm(props: RuleFormProps) {
         return (
           <>
             <div>
-              <Label htmlFor="conditionField">Condition Field</Label>
-              <Input
-                type="text"
-                id="conditionField"
-                value={rule.parameters.conditionField || ""}
-                onChange={(e) => handleParameterChange("conditionField", e.target.value)}
-              />
+              <Label htmlFor="dependsOn">Condition Field</Label>
+              <Select
+                value={rule.parameters.dependsOn || ""}
+                onValueChange={(value) => handleParameterChange("dependsOn", value)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a field" />
+                </SelectTrigger>
+                <SelectContent>
+                  {tableColumns[rule.table]?.map((column) => (
+                    <SelectItem key={column} value={column}>
+                      {column}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div>
-              <Label htmlFor="conditionValue">Condition Value</Label>
-              <Input
-                type="text"
-                id="conditionValue"
-                value={rule.parameters.conditionValue || ""}
-                onChange={(e) => handleParameterChange("conditionValue", e.target.value)}
-              />
+              <Label htmlFor="operator">Condition Operator</Label>
+              <Select
+                value={rule.parameters.operator || "=="}
+                onValueChange={(value) => handleParameterChange("operator", value)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select an operator" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="==">Equals</SelectItem>
+                  <SelectItem value="!=">Not Equals</SelectItem>
+                  <SelectItem value=">">Greater Than</SelectItem>
+                  <SelectItem value=">=">Greater Than or Equal</SelectItem>
+                  <SelectItem value="<">Less Than</SelectItem>
+                  <SelectItem value="<=">Less Than or Equal</SelectItem>
+                  <SelectItem value="contains">Contains</SelectItem>
+                  <SelectItem value="starts-with">Starts With</SelectItem>
+                  <SelectItem value="ends-with">Ends With</SelectItem>
+                  <SelectItem value="is-empty">Is Empty</SelectItem>
+                  <SelectItem value="is-not-empty">Is Not Empty</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <div>
-              <Label htmlFor="dependentField">Dependent Field</Label>
-              <Input
-                type="text"
-                id="dependentField"
-                value={rule.parameters.dependentField || ""}
-                onChange={(e) => handleParameterChange("dependentField", e.target.value)}
-              />
+            {rule.parameters.operator !== "is-empty" && rule.parameters.operator !== "is-not-empty" && (
+              <div>
+                <Label htmlFor="condition">Condition Value</Label>
+                <Input
+                  type="text"
+                  id="condition"
+                  value={rule.parameters.condition || ""}
+                  onChange={(e) => handleParameterChange("condition", e.target.value)}
+                />
+              </div>
+            )}
+            <div className="mt-4 p-3 bg-gray-50 rounded-md">
+              <p className="text-sm font-medium text-gray-700">Rule Preview:</p>
+              <p className="text-sm text-gray-700">
+                If <span className="font-medium">{rule.parameters.dependsOn || "[field]"}</span>{" "}
+                {getOperatorDisplay(rule.parameters.operator || "==")}{" "}
+                {rule.parameters.operator !== "is-empty" && rule.parameters.operator !== "is-not-empty" ? (
+                  <span className="font-medium">"{rule.parameters.condition || "[value]"}"</span>
+                ) : (
+                  ""
+                )}
+                , then <span className="font-medium">{rule.column || "[this field]"}</span> must not be empty
+              </p>
             </div>
-            <div>
-              <Label htmlFor="dependentValue">Dependent Value</Label>
-              <Input
-                type="text"
-                id="dependentValue"
-                value={rule.parameters.dependentValue || ""}
-                onChange={(e) => handleParameterChange("dependentValue", e.target.value)}
-              />
+            <div className="mt-2">
+              <p className="text-sm text-muted-foreground">
+                <strong>Example:</strong> If status != "completed", then notes field must not be empty
+              </p>
             </div>
           </>
         )
@@ -1536,7 +1676,10 @@ export function RuleForm(props: RuleFormProps) {
           <>
             <div>
               <Label htmlFor="secondaryColumn">Secondary Column</Label>
-              <Select onValueChange={(value) => handleParameterChange("secondaryColumn", value)}>
+              <Select
+                value={rule.parameters.secondaryColumn || ""}
+                onValueChange={(value) => handleParameterChange("secondaryColumn", value)}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select a secondary column" />
                 </SelectTrigger>
@@ -1551,7 +1694,10 @@ export function RuleForm(props: RuleFormProps) {
             </div>
             <div>
               <Label htmlFor="operator">Operator</Label>
-              <Select onValueChange={(value) => handleParameterChange("operator", value)}>
+              <Select
+                value={rule.parameters.operator || "=="}
+                onValueChange={(value) => handleParameterChange("operator", value)}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select an operator" />
                 </SelectTrigger>
@@ -1819,6 +1965,7 @@ export function RuleForm(props: RuleFormProps) {
               <Select
                 value={rule.column || ""}
                 onValueChange={(value) => {
+                  console.log("Setting primary column to:", value)
                   handleSelectChange("column", value)
                   if (props.onColumnChange) {
                     props.onColumnChange(value)
@@ -1844,6 +1991,7 @@ export function RuleForm(props: RuleFormProps) {
                 value={rule.parameters.secondaryColumn || rule.parameters.rightColumn || ""}
                 onValueChange={(value) => {
                   // Store as both parameter names for backward compatibility
+                  console.log("Setting secondary column to:", value)
                   handleParameterChange("secondaryColumn", value)
                   handleParameterChange("rightColumn", value)
                 }}
@@ -1867,6 +2015,7 @@ export function RuleForm(props: RuleFormProps) {
                 value={rule.parameters.operator || rule.parameters.comparisonOperator || ""}
                 onValueChange={(value) => {
                   // Store as both parameter names for backward compatibility
+                  console.log("Setting comparison operator to:", value)
                   handleParameterChange("operator", value)
                   handleParameterChange("comparisonOperator", value)
                 }}
@@ -1897,6 +2046,7 @@ export function RuleForm(props: RuleFormProps) {
             <div className="mt-4 p-3 bg-gray-50 rounded-md">
               <p className="text-sm text-gray-700 font-medium">Rule Preview:</p>
               <p className="text-sm text-gray-700">
+                Table: <span className="font-medium">{rule.table || "[table]"}</span>,{" "}
                 {rule.column || "[primary column]"}{" "}
                 {rule.parameters.operator || rule.parameters.comparisonOperator || "[operator]"}{" "}
                 {rule.parameters.secondaryColumn || rule.parameters.rightColumn || "[secondary column]"}
@@ -2148,61 +2298,74 @@ export function RuleForm(props: RuleFormProps) {
         return (
           <>
             <div>
-              <Label htmlFor={`conditionField-${index}`}>Condition Field</Label>
-              <Input
-                type="text"
-                id={`conditionField-${index}`}
-                value={columnConditions[index]?.parameters?.conditionField || ""}
-                onChange={(e) =>
+              <Label htmlFor={`dependsOn-${index}`}>Condition Field</Label>
+              <Select
+                value={columnConditions[index]?.parameters?.dependsOn || ""}
+                onChange={(value) =>
                   handleColumnConditionChange(index, "parameters", {
                     ...columnConditions[index].parameters,
-                    conditionField: e.target.value,
+                    dependsOn: value,
                   })
                 }
-              />
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a field" />
+                </SelectTrigger>
+                <SelectContent>
+                  {tableColumns[columnConditions[index].table]?.map((column) => (
+                    <SelectItem key={column} value={column}>
+                      {column}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div>
-              <Label htmlFor={`conditionValue-${index}`}>Condition Value</Label>
-              <Input
-                type="text"
-                id={`conditionValue-${index}`}
-                value={columnConditions[index]?.parameters?.conditionValue || ""}
-                onChange={(e) =>
+              <Label htmlFor={`operator-${index}`}>Condition Operator</Label>
+              <Select
+                value={columnConditions[index]?.parameters?.operator || "=="}
+                onChange={(value) =>
                   handleColumnConditionChange(index, "parameters", {
                     ...columnConditions[index].parameters,
-                    conditionValue: e.target.value,
+                    operator: value,
                   })
                 }
-              />
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select an operator" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="==">Equals</SelectItem>
+                  <SelectItem value="!=">Not Equals</SelectItem>
+                  <SelectItem value=">">Greater Than</SelectItem>
+                  <SelectItem value=">=">Greater Than or Equal</SelectItem>
+                  <SelectItem value="<">Less Than</SelectItem>
+                  <SelectItem value="<=">Less Than or Equal</SelectItem>
+                  <SelectItem value="contains">Contains</SelectItem>
+                  <SelectItem value="starts-with">Starts With</SelectItem>
+                  <SelectItem value="ends-with">Ends With</SelectItem>
+                  <SelectItem value="is-empty">Is Empty</SelectItem>
+                  <SelectItem value="is-not-empty">Is Not Empty</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <div>
-              <Label htmlFor={`dependentField-${index}`}>Dependent Field</Label>
-              <Input
-                type="text"
-                id={`dependentField-${index}`}
-                value={columnConditions[index]?.parameters?.dependentField || ""}
-                onChange={(e) =>
-                  handleColumnConditionChange(index, "parameters", {
-                    ...columnConditions[index].parameters,
-                    dependentField: e.target.value,
-                  })
-                }
-              />
-            </div>
-            <div>
-              <Label htmlFor={`dependentValue-${index}`}>Dependent Value</Label>
-              <Input
-                type="text"
-                id={`dependentValue-${index}`}
-                value={columnConditions[index]?.parameters?.dependentValue || ""}
-                onChange={(e) =>
-                  handleColumnConditionChange(index, "parameters", {
-                    ...columnConditions[index].parameters,
-                    dependentValue: e.target.value,
-                  })
-                }
-              />
-            </div>
+            {columnConditions[index]?.parameters?.operator !== "is-empty" &&
+              columnConditions[index]?.parameters?.operator !== "is-not-empty" && (
+                <div>
+                  <Label htmlFor={`condition-${index}`}>Condition Value</Label>
+                  <Input
+                    type="text"
+                    id={`condition-${index}`}
+                    value={columnConditions[index]?.parameters?.condition || ""}
+                    onChange={(e) =>
+                      handleColumnConditionChange(index, "parameters", {
+                        ...columnConditions[index].parameters,
+                        condition: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+              )}
           </>
         )
       case "lookup":

@@ -18,6 +18,8 @@ import { Loader2, Save, Download, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
 // Import the DirectRuleEditor component
 import { DirectRuleEditor } from "@/components/direct-rule-editor"
+// Import the PRDDownloadButton component
+import { PRDDownloadButton } from "@/components/prd-download-button"
 
 export function DataQualityDashboard() {
   const [datasets, setDatasets] = useState<DataTables>(() => generateSyntheticData(100))
@@ -487,6 +489,39 @@ export function DataQualityDashboard() {
               ruleCopy.parameters.endDate = endDateObj.toISOString().split("T")[0]
             }
           }
+        }
+      }
+
+      // Special handling for column-comparison rules
+      if (ruleCopy.ruleType === "column-comparison") {
+        console.log("Updating column-comparison rule:", ruleCopy)
+        console.log("- Table:", ruleCopy.table)
+        console.log("- Left Column:", ruleCopy.column)
+        console.log("- Right Column:", ruleCopy.parameters.rightColumn || ruleCopy.parameters.secondaryColumn)
+        console.log("- Operator:", ruleCopy.parameters.operator || ruleCopy.parameters.comparisonOperator)
+
+        // Ensure parameters are consistently named to prevent mismatches
+        ruleCopy.parameters = {
+          ...ruleCopy.parameters,
+          leftColumn: ruleCopy.column,
+          rightColumn: ruleCopy.parameters.secondaryColumn || ruleCopy.parameters.rightColumn,
+          secondaryColumn: ruleCopy.parameters.secondaryColumn || ruleCopy.parameters.rightColumn,
+          operator: ruleCopy.parameters.operator || ruleCopy.parameters.comparisonOperator,
+          comparisonOperator: ruleCopy.parameters.operator || ruleCopy.parameters.comparisonOperator,
+        }
+
+        // Verify table and columns
+        if (
+          !ruleCopy.table ||
+          !ruleCopy.column ||
+          (!ruleCopy.parameters.secondaryColumn && !ruleCopy.parameters.rightColumn)
+        ) {
+          console.error("Missing required fields for column-comparison rule:", ruleCopy)
+          toast({
+            title: "Warning",
+            description: "Column comparison rule is missing required fields. Please check table and columns.",
+            variant: "warning",
+          })
         }
       }
 
@@ -1146,6 +1181,8 @@ export function DataQualityDashboard() {
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold">Data Quality Framework</h1>
         <div className="flex gap-2">
+          {/* Add the PRD Download Button here */}
+          <PRDDownloadButton />
           <Button variant="outline" size="sm" onClick={handleBackupData} disabled={isSaving} className="gap-2">
             {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             Backup Data
