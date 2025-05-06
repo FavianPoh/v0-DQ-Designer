@@ -1815,8 +1815,39 @@ export function RuleForm(props: RuleFormProps) {
         return (
           <>
             <div>
+              <Label htmlFor="leftColumn">Primary Column</Label>
+              <Select
+                value={rule.column || ""}
+                onValueChange={(value) => {
+                  handleSelectChange("column", value)
+                  if (props.onColumnChange) {
+                    props.onColumnChange(value)
+                  }
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a primary column" />
+                </SelectTrigger>
+                <SelectContent>
+                  {tableColumns[rule.table]?.map((column) => (
+                    <SelectItem key={column} value={column}>
+                      {column}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">Primary column (left side of comparison)</p>
+            </div>
+            <div>
               <Label htmlFor="secondaryColumn">Secondary Column</Label>
-              <Select onValueChange={(value) => handleParameterChange("secondaryColumn", value)}>
+              <Select
+                value={rule.parameters.secondaryColumn || rule.parameters.rightColumn || ""}
+                onValueChange={(value) => {
+                  // Store as both parameter names for backward compatibility
+                  handleParameterChange("secondaryColumn", value)
+                  handleParameterChange("rightColumn", value)
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select a secondary column" />
                 </SelectTrigger>
@@ -1828,10 +1859,18 @@ export function RuleForm(props: RuleFormProps) {
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground mt-1">Secondary column (right side of comparison)</p>
             </div>
             <div>
-              <Label htmlFor="operator">Operator</Label>
-              <Select onValueChange={(value) => handleParameterChange("operator", value)}>
+              <Label htmlFor="operator">Comparison Operator</Label>
+              <Select
+                value={rule.parameters.operator || rule.parameters.comparisonOperator || ""}
+                onValueChange={(value) => {
+                  // Store as both parameter names for backward compatibility
+                  handleParameterChange("operator", value)
+                  handleParameterChange("comparisonOperator", value)
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select an operator" />
                 </SelectTrigger>
@@ -1844,6 +1883,27 @@ export function RuleForm(props: RuleFormProps) {
                   <SelectItem value="!=">Not Equals</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div className="flex items-center space-x-2 mt-2">
+              <Checkbox
+                id="allowNull"
+                checked={rule.parameters.allowNull === true}
+                onCheckedChange={(checked) => handleParameterChange("allowNull", checked === true)}
+              />
+              <Label htmlFor="allowNull" className="text-sm font-normal">
+                Skip validation if either value is null
+              </Label>
+            </div>
+            <div className="mt-4 p-3 bg-gray-50 rounded-md">
+              <p className="text-sm text-gray-700 font-medium">Rule Preview:</p>
+              <p className="text-sm text-gray-700">
+                {rule.column || "[primary column]"}{" "}
+                {rule.parameters.operator || rule.parameters.comparisonOperator || "[operator]"}{" "}
+                {rule.parameters.secondaryColumn || rule.parameters.rightColumn || "[secondary column]"}
+              </p>
+              {rule.parameters.allowNull && (
+                <p className="text-xs text-gray-500 mt-1">(Validation will be skipped if either value is null)</p>
+              )}
             </div>
           </>
         )

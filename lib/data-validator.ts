@@ -1391,7 +1391,28 @@ export function validateDataset(
 // Enhanced function to validate column comparison rules\
 function validateColumnComparison(row: DataRecord, rowIndex: number, rule: DataQualityRule): ValidationResult | null {
   const { parameters, table, column } = rule
-  const { leftColumn, rightColumn, comparisonOperator, allowNull } = parameters
+
+  // Debug log to inspect parameters
+  console.log("Column Comparison Parameters:", {
+    ruleName: rule.name,
+    parameters,
+    column: rule.column,
+  })
+
+  // FIXED: Check for both parameter naming conventions
+  // Extract parameters using both possible naming conventions
+  const leftColumn = parameters.leftColumn || column // Default to primary column if leftColumn is missing
+  const rightColumn = parameters.rightColumn || parameters.secondaryColumn
+  const comparisonOperator = parameters.comparisonOperator || parameters.operator
+  const allowNull = parameters.allowNull
+
+  // More detailed logging
+  console.log("Column Comparison Extracted Parameters:", {
+    leftColumn,
+    rightColumn,
+    comparisonOperator,
+    allowNull,
+  })
 
   // Ensure we have all required parameters
   if (!leftColumn || !rightColumn || !comparisonOperator) {
@@ -1464,6 +1485,15 @@ function validateColumnComparison(row: DataRecord, rowIndex: number, rule: DataQ
     rightCompare = String(rightValue)
   }
 
+  // Log comparison details for debugging
+  console.log("Performing comparison:", {
+    leftValue,
+    rightValue,
+    leftCompare,
+    rightCompare,
+    comparisonOperator,
+  })
+
   // Perform the comparison
   let isValid = false
   switch (comparisonOperator) {
@@ -1488,6 +1518,12 @@ function validateColumnComparison(row: DataRecord, rowIndex: number, rule: DataQ
     default:
       isValid = false
   }
+
+  // Log validation result
+  console.log("Column comparison result:", {
+    isValid,
+    comparisonString: `${leftColumn}(${leftValue}) ${comparisonOperator} ${rightColumn}(${rightValue})`,
+  })
 
   // If the validation fails, return a result
   if (!isValid) {
