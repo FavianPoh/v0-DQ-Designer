@@ -1288,9 +1288,9 @@ export function validateDataset(
         // that forces failures to be properly detected and reported
 
         case "column-comparison":
-        case "cross-column": // Add this line to handle both rule types
+        case "cross-column": // Handle both rule types
           validationResult = validateColumnComparison(rowWithTable, rowIndex, rule)
-          // CRITICAL: Always add the result to the results array
+          // Add the result to the results array and set a flag to prevent duplicate results
           results.push(validationResult)
           console.log("ADDED COLUMN COMPARISON RESULT:", {
             ruleName: rule.name,
@@ -1298,7 +1298,8 @@ export function validateDataset(
             message: validationResult.message,
             severity: validationResult.severity,
           })
-          break
+          // Skip the default success result that gets added after the switch statement
+          return // Use return to exit the forEach callback instead of continue
         case "math-operation":
           validationResult = validateMathOperation(rowWithTable, rowIndex, rule)
           break
@@ -1487,7 +1488,7 @@ export function validateDataset(
           }
       }
 
-      // Add result to results array
+      // Add result to results array if we haven't already added one via continue
       if (validationResult) {
         results.push(validationResult)
       } else {
