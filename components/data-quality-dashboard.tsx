@@ -391,6 +391,55 @@ export function DataQualityDashboard() {
     }
   }
 
+  // Add a debug function to help diagnose issues with cross-column rules
+  // Add this function near the beginning of the component
+  function debugCrossColumnRules() {
+    try {
+      const rules = JSON.parse(localStorage.getItem("dataQualityRules") || "[]")
+      const crossColumnRules = rules.filter((r) => r.ruleType === "cross-column" || r.ruleType === "column-comparison")
+
+      console.log("CROSS-COLUMN RULES:", crossColumnRules)
+
+      // Check for missing operators
+      const rulesWithMissingOperators = crossColumnRules.filter(
+        (r) => !r.parameters.operator && !r.parameters.comparisonOperator,
+      )
+
+      if (rulesWithMissingOperators.length > 0) {
+        console.error("RULES WITH MISSING OPERATORS:", rulesWithMissingOperators)
+
+        // Fix the rules
+        const fixedRules = rules.map((rule) => {
+          if (
+            (rule.ruleType === "cross-column" || rule.ruleType === "column-comparison") &&
+            !rule.parameters.operator &&
+            !rule.parameters.comparisonOperator
+          ) {
+            return {
+              ...rule,
+              parameters: {
+                ...rule.parameters,
+                operator: "==", // Default to equals
+                comparisonOperator: "==", // Default to equals
+              },
+            }
+          }
+          return rule
+        })
+
+        // Save the fixed rules
+        localStorage.setItem("dataQualityRules", JSON.stringify(fixedRules))
+        console.log("FIXED RULES SAVED TO LOCAL STORAGE")
+
+        // Update the rules state
+        setRules(fixedRules)
+      }
+    } catch (error) {
+      console.error("Error in debugCrossColumnRules:", error)
+    }
+  }
+
+  // In the handleUpdateRule function, modify the column-comparison check to include cross-column
   const handleUpdateRule = async (updatedRule: DataQualityRule) => {
     try {
       setIsSaving(true)
@@ -493,7 +542,7 @@ export function DataQualityDashboard() {
       }
 
       // Special handling for column-comparison rules
-      if (ruleCopy.ruleType === "column-comparison") {
+      if (ruleCopy.ruleType === "column-comparison" || ruleCopy.ruleType === "cross-column") {
         console.log("Updating column-comparison rule:", ruleCopy)
         console.log("- Table:", ruleCopy.table)
         console.log("- Left Column:", ruleCopy.column)
@@ -506,8 +555,8 @@ export function DataQualityDashboard() {
           leftColumn: ruleCopy.column,
           rightColumn: ruleCopy.parameters.secondaryColumn || ruleCopy.parameters.rightColumn,
           secondaryColumn: ruleCopy.parameters.secondaryColumn || ruleCopy.parameters.rightColumn,
-          operator: ruleCopy.parameters.operator || ruleCopy.parameters.comparisonOperator,
-          comparisonOperator: ruleCopy.parameters.operator || ruleCopy.parameters.comparisonOperator,
+          operator: ruleCopy.parameters.operator || ruleCopy.parameters.comparisonOperator || "==", // Default to equals
+          comparisonOperator: ruleCopy.parameters.operator || ruleCopy.parameters.comparisonOperator || "==", // Default to equals
         }
 
         // Verify table and columns
@@ -576,6 +625,105 @@ export function DataQualityDashboard() {
       setIsSaving(false)
     }
   }
+
+  // Also add this to the handleDirectRuleUpdate function to ensure cross-column rules are properly handled
+  const handleDirectRuleUpdate = async (updatedRule: DataQualityRule) => {
+    try {
+      setIsSaving(true)
+
+      // Create a deep copy to avoid reference issues
+      const ruleCopy = JSON.parse(JSON.stringify(updatedRule))
+
+      console.log("Received rule for update:", ruleCopy)
+
+      // Preserve the ID in the rule name if it exists
+      let updatedName = ruleCopy.name
+      if (!updatedName.includes(`[ID: ${ruleCopy.id}]`)) {
+        updatedName = `${ruleCopy.name} [ID: ${ruleCopy.id}]`
+      }
+
+      // Special handling for cross-column rules
+      if (ruleCopy.ruleType === "column-comparison" || ruleCopy.ruleType === "cross-column") {
+        console.log("Updating cross-column rule:", ruleCopy)
+        console.log("- Table:", ruleCopy.table)
+        console.log("- Left Column:", ruleCopy.column)
+        console.log("- Right Column:", ruleCopy.parameters.rightColumn || ruleCopy.parameters.secondaryColumn)
+        console.log("- Operator:", ruleCopy.parameters.operator || ruleCopy.parameters.comparisonOperator)
+
+        // Ensure parameters are consistently named to prevent mismatches
+        ruleCopy.parameters = {
+          ...ruleCopy.parameters,
+          leftColumn: ruleCopy.column,
+          rightColumn: ruleCopy.parameters.secondaryColumn || ruleCopy.parameters.rightColumn,
+          secondaryColumn: ruleCopy.parameters.secondaryColumn || ruleCopy.parameters.rightColumn,
+          operator: ruleCopy.parameters.operator || ruleCopy.parameters.comparisonOperator || "==", // Default to equals
+          comparisonOperator: ruleCopy.parameters.operator || ruleCopy.parameters.comparisonOperator || "==", // Default to equals
+        }
+      }
+
+      const finalRule = {
+        ...ruleCopy,
+        name: updatedName,
+      }
+
+      console.log("Final rule for update:", finalRule)
+
+      // Update on server
+      const response = await fetch("/api/rules", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(finalRule),
+      })
+
+      // Update local state regardless of server response
+      setRules((prev) => {
+        const newRules = prev.map((rule) => {
+          if (rule.id === finalRule.id) {
+            return finalRule
+          }
+          return rule
+        })
+        // Also update localStorage
+        localStorage.setItem("dataQualityRules", JSON.stringify(newRules))
+        return newRules
+      })
+
+      // Reset the editing state
+      setEditingRuleId(null)
+      isEditingRef.current = false
+
+      if (response.ok) {
+        toast({
+          title: "Success",
+          description: "Rule updated successfully",
+        })
+      } else {
+        toast({
+          title: "Warning",
+          description: "Rule updated in browser storage only",
+          variant: "default",
+        })
+      }
+    } catch (error) {
+      console.error("Error updating rule:", error)
+      toast({
+        title: "Warning",
+        description: "Rule updated in browser storage only",
+        variant: "default",
+      })
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  // Call this function when the dashboard loads
+  useEffect(() => {
+    if (!loading) {
+      debugCrossColumnRules()
+    }
+  }, [loading])
 
   const handleAddList = async (list: ValueList) => {
     try {
@@ -1003,167 +1151,6 @@ export function DataQualityDashboard() {
         <span className="ml-2 text-lg">Loading data quality framework...</span>
       </div>
     )
-  }
-
-  const handleDirectRuleUpdate = async (updatedRule: DataQualityRule) => {
-    try {
-      setIsSaving(true)
-
-      // Create a deep copy to avoid reference issues
-      const ruleCopy = JSON.parse(JSON.stringify(updatedRule))
-
-      console.log("Received rule for update:", ruleCopy)
-
-      // Preserve the ID in the rule name if it exists
-      let updatedName = ruleCopy.name
-      if (!updatedName.includes(`[ID: ${ruleCopy.id}]`)) {
-        updatedName = `${ruleCopy.name} [ID: ${ruleCopy.id}]`
-      }
-
-      // Special handling for date rules
-      if (ruleCopy.ruleType?.startsWith("date-")) {
-        console.log("Updating date rule:", ruleCopy)
-        console.log("Column value:", ruleCopy.column)
-        console.log("Parameters:", ruleCopy.parameters)
-
-        // Ensure column is not empty
-        if (!ruleCopy.column) {
-          console.error("Missing column for date rule in dashboard update")
-
-          // Try to find a suitable column from the dataset
-          if (ruleCopy.table && datasets[ruleCopy.table]?.length > 0) {
-            const availableColumns = Object.keys(datasets[ruleCopy.table][0])
-
-            // Look for date-like columns
-            const dateColumns = availableColumns.filter(
-              (col) =>
-                col.toLowerCase().includes("date") ||
-                col.toLowerCase().includes("time") ||
-                col.toLowerCase().includes("day"),
-            )
-
-            if (dateColumns.length > 0) {
-              // Use the first date-like column
-              ruleCopy.column = dateColumns[0]
-              console.log(`Auto-selected column for date rule: ${ruleCopy.column}`)
-
-              toast({
-                title: "Column Auto-Selected",
-                description: `Column "${ruleCopy.column}" was automatically selected for this date rule.`,
-                variant: "warning",
-              })
-            } else if (availableColumns.length > 0) {
-              // If no date-like columns, use the first available column
-              ruleCopy.column = availableColumns[0]
-              console.log(`Auto-selected column for date rule: ${ruleCopy.column}`)
-
-              toast({
-                title: "Column Auto-Selected",
-                description: `Column "${ruleCopy.column}" was automatically selected for this date rule.`,
-                variant: "warning",
-              })
-            } else {
-              toast({
-                title: "Error",
-                description: "Column must be specified for date rules and no columns are available",
-                variant: "destructive",
-              })
-              setIsSaving(false)
-              return
-            }
-          } else {
-            toast({
-              title: "Error",
-              description: "Column must be specified for date rules and no table data is available",
-              variant: "destructive",
-            })
-            setIsSaving(false)
-            return
-          }
-        }
-
-        // Ensure date parameters are properly formatted
-        if (ruleCopy.ruleType === "date-before" || ruleCopy.ruleType === "date-after") {
-          if (ruleCopy.parameters.compareDate) {
-            // Ensure compareDate is in YYYY-MM-DD format
-            const dateObj = new Date(ruleCopy.parameters.compareDate)
-            if (!isNaN(dateObj.getTime())) {
-              ruleCopy.parameters.compareDate = dateObj.toISOString().split("T")[0]
-            }
-          }
-        } else if (ruleCopy.ruleType === "date-between") {
-          if (ruleCopy.parameters.startDate) {
-            // Ensure startDate is in YYYY-MM-DD format
-            const startDateObj = new Date(ruleCopy.parameters.startDate)
-            if (!isNaN(startDateObj.getTime())) {
-              ruleCopy.parameters.startDate = startDateObj.toISOString().split("T")[0]
-            }
-          }
-          if (ruleCopy.parameters.endDate) {
-            // Ensure endDate is in YYYY-MM-DD format
-            const endDateObj = new Date(ruleCopy.parameters.endDate)
-            if (!isNaN(endDateObj.getTime())) {
-              ruleCopy.parameters.endDate = endDateObj.toISOString().split("T")[0]
-            }
-          }
-        }
-      }
-
-      const finalRule = {
-        ...ruleCopy,
-        name: updatedName,
-      }
-
-      console.log("Final rule for update:", finalRule)
-
-      // Update on server
-      const response = await fetch("/api/rules", {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(finalRule),
-      })
-
-      // Update local state regardless of server response
-      setRules((prev) => {
-        const newRules = prev.map((rule) => {
-          if (rule.id === finalRule.id) {
-            return finalRule
-          }
-          return rule
-        })
-        // Also update localStorage
-        localStorage.setItem("dataQualityRules", JSON.stringify(newRules))
-        return newRules
-      })
-
-      // Reset the editing state
-      setEditingRuleId(null)
-      isEditingRef.current = false
-
-      if (response.ok) {
-        toast({
-          title: "Success",
-          description: "Rule updated successfully",
-        })
-      } else {
-        toast({
-          title: "Warning",
-          description: "Rule updated in browser storage only",
-          variant: "default",
-        })
-      }
-    } catch (error) {
-      console.error("Error updating rule:", error)
-      toast({
-        title: "Warning",
-        description: "Rule updated in browser storage only",
-        variant: "default",
-      })
-    } finally {
-      setIsSaving(false)
-    }
   }
 
   const handleViewRowData = (row: any) => {

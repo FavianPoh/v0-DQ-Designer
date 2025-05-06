@@ -291,6 +291,45 @@ export function ValidationResults({
     rules,
   ])
 
+  // Add this right after the filteredResults useMemo:
+
+  // Add special debug logging for cross-column validation results
+  useEffect(() => {
+    // Log all cross-column validation results
+    const crossColumnResults = initialResults.filter((result) => {
+      // Find the rule definition
+      const rule = rules.find(
+        (r) => r.id === result.ruleId || r.name === result.ruleName || result.ruleName.includes(`[ID: ${r.id}]`),
+      )
+
+      return rule && rule.ruleType === "column-comparison"
+    })
+
+    if (crossColumnResults.length > 0) {
+      console.log("CROSS-COLUMN VALIDATION RESULTS:", {
+        total: crossColumnResults.length,
+        passing: crossColumnResults.filter((r) => r.severity === "success").length,
+        failing: crossColumnResults.filter((r) => r.severity !== "success").length,
+        results: crossColumnResults,
+      })
+
+      // Log the filtered results to see if any cross-column validations are being filtered out
+      const filteredCrossColumn = filteredResults.filter((result) => {
+        const rule = rules.find(
+          (r) => r.id === result.ruleId || r.name === result.ruleName || result.ruleName.includes(`[ID: ${r.id}]`),
+        )
+
+        return rule && rule.ruleType === "column-comparison"
+      })
+
+      console.log("FILTERED CROSS-COLUMN RESULTS:", {
+        total: filteredCrossColumn.length,
+        passing: filteredCrossColumn.filter((r) => r.severity === "success").length,
+        failing: filteredCrossColumn.filter((r) => r.severity !== "success").length,
+      })
+    }
+  }, [initialResults, filteredResults, rules])
+
   // Compute derived data using useMemo to avoid recalculations on every render
   /*
   const {

@@ -1200,7 +1200,7 @@ export function validateDataset(
       return
     }
     // Inside the rules.forEach loop, right after checking if the rule is enabled:
-    if (rule.ruleType === "column-comparison") {
+    if (rule.ruleType === "column-comparison" || rule.ruleType === "cross-column") {
       console.log("!!!!! PROCESSING COLUMN COMPARISON RULE !!!!!")
       console.log({
         id: rule.id,
@@ -1225,7 +1225,7 @@ export function validateDataset(
     }
 
     // Add enhanced logging for column-comparison rules
-    if (rule.ruleType === "column-comparison") {
+    if (rule.ruleType === "column-comparison" || rule.ruleType === "cross-column") {
       console.log("PROCESSING COLUMN COMPARISON RULE:", {
         ruleId: rule.id,
         ruleName: rule.name,
@@ -1284,18 +1284,20 @@ export function validateDataset(
 
       // Process rule based on its type
       switch (rule.ruleType) {
+        // Find the validateColumnComparison function and completely replace it with this new implementation
+        // that forces failures to be properly detected and reported
+
         case "column-comparison":
+        case "cross-column": // Add this line to handle both rule types
           validationResult = validateColumnComparison(rowWithTable, rowIndex, rule)
-          // CRITICAL: Make sure we're adding the result to the results array
-          if (validationResult) {
-            results.push(validationResult)
-            // Log that we've added a column comparison result
-            console.log("Added column comparison result:", {
-              ruleName: rule.name,
-              isValid: validationResult.severity === "success",
-              message: validationResult.message,
-            })
-          }
+          // CRITICAL: Always add the result to the results array
+          results.push(validationResult)
+          console.log("ADDED COLUMN COMPARISON RESULT:", {
+            ruleName: rule.name,
+            isValid: validationResult.severity === "success",
+            message: validationResult.message,
+            severity: validationResult.severity,
+          })
           break
         case "math-operation":
           validationResult = validateMathOperation(rowWithTable, rowIndex, rule)
@@ -1514,40 +1516,26 @@ export function validateDataset(
 // Find the validateColumnComparison function and replace it with this updated version
 // that ensures the rule is only applied to the correct table
 
-function validateColumnComparison(row: DataRecord, rowIndex: number, rule: DataQualityRule): ValidationResult | null {
-  try {
-    // Log that this function is being called
-    console.log("validateColumnComparison called for rule:", {
-      ruleId: rule.id,
-      ruleName: rule.name,
-      table: rule.table,
-      rowTable: row._table,
-    })
+function validateColumnComparison(row: DataRecord, rowIndex: number, rule: DataQualityRule): ValidationResult {
+  // Add extensive logging to track execution
+  console.log("CROSS-COLUMN VALIDATION STARTED:", {
+    ruleId: rule.id,
+    ruleName: rule.name,
+    ruleType: rule.ruleType,
+    table: rule.table,
+    rowIndex: rowIndex,
+  })
 
+  try {
     const { parameters, table, column } = rule
 
-    // Defensive check for parameters
-    if (!parameters) {
-      console.error("Missing parameters in rule", rule)
-      return {
-        rowIndex,
-        table: table || "",
-        column: column || "",
-        ruleName: rule.name,
-        message: "Rule configuration error: Missing parameters",
-        severity: rule.severity || "error",
-        ruleId: rule.id,
-      }
-    }
-
     // Extract parameters with uniform naming to prevent inconsistencies
-    const leftColumn = parameters.leftColumn || column || parameters.column // Default to primary column if leftColumn is missing
+    const leftColumn = parameters.leftColumn || column || parameters.column
     const rightColumn = parameters.rightColumn || parameters.secondaryColumn
-    const comparisonOperator = parameters.comparisonOperator || parameters.operator || "==" // Default to equality
+    const comparisonOperator = parameters.comparisonOperator || parameters.operator || "=="
     const allowNull = parameters.allowNull
 
-    // Log the extracted parameters
-    console.log("Column comparison parameters:", {
+    console.log("CROSS-COLUMN PARAMETERS:", {
       leftColumn,
       rightColumn,
       comparisonOperator,
@@ -1556,18 +1544,19 @@ function validateColumnComparison(row: DataRecord, rowIndex: number, rule: DataQ
 
     // Defensive check for required parameters
     if (!leftColumn || !rightColumn) {
-      console.error("Missing column names in rule", {
+      console.error("CROSS-COLUMN ERROR: Missing column names", {
         leftColumn,
         rightColumn,
         parameters,
       })
+
       return {
         rowIndex,
         table: table || "",
         column: column || "",
         ruleName: rule.name,
         message: "Rule configuration error: Missing column names",
-        severity: rule.severity || "error",
+        severity: rule.severity || "failure",
         ruleId: rule.id,
       }
     }
@@ -1576,17 +1565,18 @@ function validateColumnComparison(row: DataRecord, rowIndex: number, rule: DataQ
     const leftValue = row.hasOwnProperty(leftColumn) ? row[leftColumn] : undefined
     const rightValue = row.hasOwnProperty(rightColumn) ? row[rightColumn] : undefined
 
-    // Log the values being compared
-    console.log("Column values:", {
+    console.log("CROSS-COLUMN VALUES:", {
       leftColumn,
       leftValue,
+      leftValueType: typeof leftValue,
       rightColumn,
       rightValue,
+      rightValueType: typeof rightValue,
     })
 
     // Check if either column is missing from the row
     if (!row.hasOwnProperty(leftColumn) || !row.hasOwnProperty(rightColumn)) {
-      console.error(`Missing columns - ${leftColumn} or ${rightColumn} not found in row`, {
+      console.error("CROSS-COLUMN ERROR: Missing columns", {
         availableColumns: Object.keys(row),
       })
 
@@ -1596,7 +1586,7 @@ function validateColumnComparison(row: DataRecord, rowIndex: number, rule: DataQ
         column: leftColumn,
         ruleName: rule.name,
         message: `Column comparison failed: One or both columns (${leftColumn}, ${rightColumn}) not found in data`,
-        severity: rule.severity || "error",
+        severity: rule.severity || "failure",
         ruleId: rule.id,
       }
     }
@@ -1606,11 +1596,7 @@ function validateColumnComparison(row: DataRecord, rowIndex: number, rule: DataQ
       allowNull &&
       (leftValue === null || leftValue === undefined || rightValue === null || rightValue === undefined)
     ) {
-      console.log("Skipping comparison - Null values and allowNull=true", {
-        leftValue,
-        rightValue,
-        allowNull,
-      })
+      console.log("CROSS-COLUMN: Skipping null values with allowNull=true")
 
       return {
         rowIndex,
@@ -1623,56 +1609,80 @@ function validateColumnComparison(row: DataRecord, rowIndex: number, rule: DataQ
       }
     }
 
-    // Perform the comparison with error handling
-    let isValid = false
-    try {
-      switch (comparisonOperator) {
-        case "==":
-          isValid = leftValue == rightValue // Use loose equality for cross-type comparisons
-          break
-        case "!=":
-          isValid = leftValue != rightValue
-          break
-        case ">":
-          isValid = leftValue > rightValue
-          break
-        case ">=":
-          isValid = leftValue >= rightValue
-          break
-        case "<":
-          isValid = leftValue < rightValue
-          break
-        case "<=":
-          isValid = leftValue <= rightValue
-          break
-        default:
-          console.error("Unknown comparison operator:", comparisonOperator)
-          isValid = false
-      }
-    } catch (error) {
-      console.error("Error during comparison:", error)
+    // If either value is null/undefined and allowNull is false, the validation should fail
+    if (
+      !allowNull &&
+      (leftValue === null || leftValue === undefined || rightValue === null || rightValue === undefined)
+    ) {
+      console.log("CROSS-COLUMN FAILURE: Null values with allowNull=false")
+
       return {
         rowIndex,
         table: table || "",
         column: leftColumn,
         ruleName: rule.name,
-        message: `Error during comparison: ${error.message || "Unknown error"}`,
-        severity: rule.severity || "error",
+        message: `Column comparison failed: One or both values are null/undefined (${leftColumn}=${leftValue}, ${rightColumn}=${rightValue})`,
+        severity: rule.severity || "failure",
         ruleId: rule.id,
       }
     }
 
-    // Log the comparison result
-    console.log("Comparison result:", {
-      leftValue,
-      rightValue,
-      operator: comparisonOperator,
-      comparisonString: `${leftColumn}(${leftValue}) ${comparisonOperator} ${rightColumn}(${rightValue})`,
-      isValid,
+    // Convert values for comparison if needed
+    let compareLeftValue = leftValue
+    let compareRightValue = rightValue
+
+    // For numeric comparisons, always convert to numbers
+    if (
+      (typeof leftValue === "number" || !isNaN(Number(leftValue))) &&
+      (typeof rightValue === "number" || !isNaN(Number(rightValue))) &&
+      (comparisonOperator === ">" ||
+        comparisonOperator === ">=" ||
+        comparisonOperator === "<" ||
+        comparisonOperator === "<=" ||
+        comparisonOperator === "==" ||
+        comparisonOperator === "!=")
+    ) {
+      compareLeftValue = Number(leftValue)
+      compareRightValue = Number(rightValue)
+      console.log("CROSS-COLUMN: Converting to numbers for comparison", {
+        original: { leftValue, rightValue },
+        converted: { compareLeftValue, compareRightValue },
+      })
+    }
+
+    // Perform the comparison
+    let isValid = false
+    switch (comparisonOperator) {
+      case "==":
+        isValid = compareLeftValue == compareRightValue
+        break
+      case "!=":
+        isValid = compareLeftValue != compareRightValue
+        break
+      case ">":
+        isValid = compareLeftValue > compareRightValue
+        break
+      case ">=":
+        isValid = compareLeftValue >= compareRightValue
+        break
+      case "<":
+        isValid = compareLeftValue < compareRightValue
+        break
+      case "<=":
+        isValid = compareLeftValue <= compareRightValue
+        break
+      default:
+        console.error("CROSS-COLUMN ERROR: Unknown operator", comparisonOperator)
+        isValid = false
+    }
+
+    console.log("CROSS-COLUMN COMPARISON RESULT:", {
+      comparison: `${leftColumn}(${leftValue}) ${comparisonOperator} ${rightColumn}(${rightValue})`,
+      isValid: isValid,
     })
 
-    // CRITICAL: Always return a validation result, whether it passed or failed
-    return {
+    // Create the validation result
+    const result = {
       rowIndex,
       table: table || "",
       column: leftColumn,
@@ -1680,19 +1690,21 @@ function validateColumnComparison(row: DataRecord, rowIndex: number, rule: DataQ
       message: isValid
         ? `Passed validation: ${leftColumn} (${leftValue}) ${comparisonOperator} ${rightColumn} (${rightValue})`
         : `Column comparison failed: ${leftColumn} (${leftValue}) ${comparisonOperator} ${rightColumn} (${rightValue})`,
-      severity: isValid ? "success" : rule.severity || "error",
+      severity: isValid ? "success" : rule.severity || "failure",
       ruleId: rule.id,
     }
+
+    console.log("CROSS-COLUMN RETURNING:", result)
+    return result
   } catch (error) {
-    // Global error handler to prevent the function from crashing
-    console.error("Unexpected error in validateColumnComparison:", error)
+    console.error("CROSS-COLUMN UNEXPECTED ERROR:", error)
     return {
       rowIndex,
       table: rule.table || "",
       column: rule.column || "",
       ruleName: rule.name || "Unknown rule",
       message: `Unexpected error during validation: ${error.message || "Unknown error"}`,
-      severity: rule.severity || "error",
+      severity: rule.severity || "failure",
       ruleId: rule.id || "unknown",
     }
   }
@@ -2533,32 +2545,64 @@ function validateRule(
       // Get the unique columns from the parameters
       const uniqueColumns = rule.parameters.uniqueColumns || [rule.column]
 
-      // Create a set to store unique values
-      const uniqueValues = new Set()
+      // Check if the current row has null values in any of the unique columns
+      // If so, skip validation (allow null values to be duplicated)
+      const hasNullValue = uniqueColumns.some((col) => row[col] === null || row[col] === undefined)
+      if (hasNullValue) {
+        console.log("Unique validation: Skipping row with null value in key columns", {
+          rowIndex,
+          uniqueColumns,
+          values: uniqueColumns.map((col) => row[col]),
+        })
+        return null // Skip validation for rows with null values
+      }
 
-      // Iterate through the dataset and check for duplicates
+      // For non-null values, check for duplicates
       const tableData = datasets[rule.table]
       if (tableData) {
-        for (const rowData of tableData) {
-          // Build a composite key from the specified columns
-          const compositeKey = uniqueColumns
-            .map((col) => {
-              const colValue = rowData[col]
-              return colValue === null || colValue === undefined ? "" : colValue // Treat nulls as empty strings
-            })
-            .join("||") // Use a separator that's unlikely to appear in the data
+        // Build the current row's composite key
+        const currentRowKey = uniqueColumns.map((col) => String(row[col])).join("||")
 
-          // If the value is already in the set, it's a duplicate
-          if (uniqueValues.has(compositeKey)) {
-            isValid = false
-            message = `Duplicate value(s) found in column(s): ${uniqueColumns.join(", ")}`
-            break // Exit the loop as soon as a duplicate is found
-          } else {
-            uniqueValues.add(compositeKey)
+        // Check against all other rows (excluding the current row)
+        for (let i = 0; i < tableData.length; i++) {
+          // Skip comparing the row with itself
+          if (i === rowIndex) continue
+
+          const otherRow = tableData[i]
+
+          // Skip rows that have null values in any of the unique columns
+          const otherRowHasNullValue = uniqueColumns.some(
+            (col) => otherRow[col] === null || otherRow[col] === undefined,
+          )
+
+          if (otherRowHasNullValue) continue
+
+          // Build composite key for the other row
+          const otherRowKey = uniqueColumns.map((col) => String(otherRow[col])).join("||")
+
+          // If the keys match, we found a duplicate
+          if (currentRowKey === otherRowKey) {
+            console.log("Unique validation: Found duplicate", {
+              rowIndex,
+              otherRowIndex: i,
+              key: currentRowKey,
+            })
+
+            return {
+              rowIndex,
+              table: rule.table,
+              column: rule.column,
+              ruleName: rule.name,
+              message: `Duplicate value(s) found in column(s): ${uniqueColumns.join(", ")}`,
+              severity: rule.severity,
+              ruleId: rule.id,
+            }
           }
         }
       }
-      break
+
+      // No duplicates found
+      return null
 
     case "type":
       ;({ isValid, message } = validateType(value, rule.parameters.dataType))
@@ -2699,10 +2743,9 @@ function validateRule(
         rowData: {
           score: row.score,
           age: row.age,
-          calculation:
-            row.score !== undefined && row.age !== undefined
-              ? `${row.score} / ${row.age} = ${row.score / row.age}`
-              : "N/A",
+          scoreType: typeof row.score,
+          ageType: typeof row.age,
+          calculatedValue: row.score !== undefined && row.age !== undefined ? row.score / row.age : "N/A",
         },
       })
 
