@@ -94,6 +94,7 @@ export function ValidationResults({
     { key: "ruleName", label: "Rule" },
     { key: "rowIndex", label: "Row" },
     { key: "column", label: "Column" },
+    { key: "value", label: "Value" },
     { key: "message", label: "Message" },
     { key: "severity", label: "Severity" },
   ]
@@ -1235,6 +1236,7 @@ export function ValidationResults({
                     <TableCell>{result.ruleName.replace(/ \[ID: [a-zA-Z0-9-]+\]$/, "")}</TableCell>
                     <TableCell>{result.rowIndex}</TableCell>
                     <TableCell>{result.column}</TableCell>
+                    <TableCell>{formatCellValue(result, initialDatasets)}</TableCell>
                     <TableCell>{result.message}</TableCell>
                     <TableCell>
                       {result.severity === "success" ? (
@@ -1554,4 +1556,34 @@ function findRelatedRowMatch(mainRow: DataRecord | null, relatedRow: DataRecord)
   }
 
   return false
+}
+
+// Helper function to get and format the actual value being validated
+function formatCellValue(result: ValidationResult, datasets: DataTables): string {
+  try {
+    // Get the data from the dataset
+    const row = datasets[result.table]?.[result.rowIndex]
+    if (!row) return "N/A"
+
+    const value = row[result.column]
+
+    // Format the value based on its type
+    if (value === null || value === undefined) {
+      return "null"
+    } else if (typeof value === "object" && value instanceof Date) {
+      return value.toISOString()
+    } else if (typeof value === "object") {
+      return JSON.stringify(value)
+    } else if (typeof value === "boolean") {
+      return value ? "true" : "false"
+    } else if (typeof value === "string") {
+      // Truncate long strings
+      return value.length > 50 ? `${value.substring(0, 47)}...` : value
+    } else {
+      return String(value)
+    }
+  } catch (error) {
+    console.error("Error formatting cell value:", error)
+    return "Error"
+  }
 }
