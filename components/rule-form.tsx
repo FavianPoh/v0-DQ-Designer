@@ -952,6 +952,19 @@ export function RuleForm(props: RuleFormProps) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
 
+    // Add this code at the beginning of the handleSubmit function in the rule-form.tsx file
+    // This will help us see what parameters are being saved for the cross-column rule
+
+    // Find the handleSubmit function and add this code at the beginning
+    if (rule.ruleType === "column-comparison") {
+      console.error("CRITICAL: SAVING COLUMN COMPARISON RULE", {
+        rule,
+        leftColumn: rule.column,
+        rightColumn: rule.parameters.secondaryColumn || rule.parameters.rightColumn,
+        operator: rule.parameters.operator || rule.parameters.comparisonOperator,
+      })
+    }
+
     console.log("Form submitted, rule type:", rule.ruleType)
     console.log("Form submitted with table:", rule.table)
     console.log("Form submitted with column:", rule.column)

@@ -1166,6 +1166,19 @@ export function validateDataset(
   rules: DataQualityRule[],
   valueLists: ValueList[] = [],
 ): ValidationResult[] {
+  // Add this code at the beginning of the validateDataset function, right after the function signature:
+  console.log("==========================================")
+  console.log(
+    "VALIDATION STARTED WITH RULES:",
+    rules.map((r) => ({
+      id: r.id,
+      name: r.name,
+      type: r.ruleType,
+      table: r.table,
+      enabled: r.enabled,
+    })),
+  )
+  console.log("==========================================")
   const results: ValidationResult[] = []
 
   // Check if we have rules to process
@@ -1185,6 +1198,44 @@ export function validateDataset(
     // Skip disabled rules
     if (rule.enabled === false) {
       return
+    }
+    // Inside the rules.forEach loop, right after checking if the rule is enabled:
+    if (rule.ruleType === "column-comparison") {
+      console.log("!!!!! PROCESSING COLUMN COMPARISON RULE !!!!!")
+      console.log({
+        id: rule.id,
+        name: rule.name,
+        table: rule.table,
+        column: rule.column,
+        parameters: rule.parameters,
+        enabled: rule.enabled,
+      })
+
+      // Check if the table exists in the datasets
+      if (!datasets[rule.table]) {
+        console.error(`Table ${rule.table} NOT FOUND for column comparison rule ${rule.name}`)
+      } else {
+        console.log(`Table ${rule.table} FOUND with ${datasets[rule.table].length} rows`)
+
+        // Log the first row to see what columns are available
+        if (datasets[rule.table].length > 0) {
+          console.log("First row columns:", Object.keys(datasets[rule.table][0]))
+        }
+      }
+    }
+
+    // Add enhanced logging for column-comparison rules
+    if (rule.ruleType === "column-comparison") {
+      console.log("PROCESSING COLUMN COMPARISON RULE:", {
+        ruleId: rule.id,
+        ruleName: rule.name,
+        table: rule.table,
+        column: rule.column,
+        secondaryColumn: rule.parameters.secondaryColumn || rule.parameters.rightColumn,
+        operator: rule.parameters.operator || rule.parameters.comparisonOperator,
+        allowNull: rule.parameters.allowNull,
+        enabled: rule.enabled,
+      })
     }
 
     // Add debug info for date rules
@@ -1235,6 +1286,16 @@ export function validateDataset(
       switch (rule.ruleType) {
         case "column-comparison":
           validationResult = validateColumnComparison(rowWithTable, rowIndex, rule)
+          // CRITICAL: Make sure we're adding the result to the results array
+          if (validationResult) {
+            results.push(validationResult)
+            // Log that we've added a column comparison result
+            console.log("Added column comparison result:", {
+              ruleName: rule.name,
+              isValid: validationResult.severity === "success",
+              message: validationResult.message,
+            })
+          }
           break
         case "math-operation":
           validationResult = validateMathOperation(rowWithTable, rowIndex, rule)
@@ -1454,105 +1515,186 @@ export function validateDataset(
 // that ensures the rule is only applied to the correct table
 
 function validateColumnComparison(row: DataRecord, rowIndex: number, rule: DataQualityRule): ValidationResult | null {
-  const { parameters, table, column } = rule
+  try {
+    // Log that this function is being called
+    console.log("validateColumnComparison called for rule:", {
+      ruleId: rule.id,
+      ruleName: rule.name,
+      table: rule.table,
+      rowTable: row._table,
+    })
 
-  // Enhanced debug log to inspect parameters and raw rule
-  console.log("Column Comparison Validation:", {
-    ruleId: rule.id,
-    ruleName: rule.name,
-    ruleType: rule.ruleType,
-    column: rule.column,
-    table: rule.table,
-    rowTable: row._table,
-    rowIndex,
-    rawParameters: parameters,
-  })
+    const { parameters, table, column } = rule
 
-  // CRITICAL FIX: Skip validation if the row's table doesn't match the rule's table
-  // This is the most important check to ensure we're only validating against the correct table
-  if (row._table && row._table !== table) {
-    console.log(`Skipping column comparison validation - row table (${row._table}) doesn't match rule table (${table})`)
+    // Defensive check for parameters
+    if (!parameters) {
+      console.error("Missing parameters in rule", rule)
+      return {
+        rowIndex,
+        table: table || "",
+        column: column || "",
+        ruleName: rule.name,
+        message: "Rule configuration error: Missing parameters",
+        severity: rule.severity || "error",
+        ruleId: rule.id,
+      }
+    }
+
+    // Extract parameters with uniform naming to prevent inconsistencies
+    const leftColumn = parameters.leftColumn || column || parameters.column // Default to primary column if leftColumn is missing
+    const rightColumn = parameters.rightColumn || parameters.secondaryColumn
+    const comparisonOperator = parameters.comparisonOperator || parameters.operator || "==" // Default to equality
+    const allowNull = parameters.allowNull
+
+    // Log the extracted parameters
+    console.log("Column comparison parameters:", {
+      leftColumn,
+      rightColumn,
+      comparisonOperator,
+      allowNull,
+    })
+
+    // Defensive check for required parameters
+    if (!leftColumn || !rightColumn) {
+      console.error("Missing column names in rule", {
+        leftColumn,
+        rightColumn,
+        parameters,
+      })
+      return {
+        rowIndex,
+        table: table || "",
+        column: column || "",
+        ruleName: rule.name,
+        message: "Rule configuration error: Missing column names",
+        severity: rule.severity || "error",
+        ruleId: rule.id,
+      }
+    }
+
+    // Safely get values from the row
+    const leftValue = row.hasOwnProperty(leftColumn) ? row[leftColumn] : undefined
+    const rightValue = row.hasOwnProperty(rightColumn) ? row[rightColumn] : undefined
+
+    // Log the values being compared
+    console.log("Column values:", {
+      leftColumn,
+      leftValue,
+      rightColumn,
+      rightValue,
+    })
+
+    // Check if either column is missing from the row
+    if (!row.hasOwnProperty(leftColumn) || !row.hasOwnProperty(rightColumn)) {
+      console.error(`Missing columns - ${leftColumn} or ${rightColumn} not found in row`, {
+        availableColumns: Object.keys(row),
+      })
+
+      return {
+        rowIndex,
+        table: table || "",
+        column: leftColumn,
+        ruleName: rule.name,
+        message: `Column comparison failed: One or both columns (${leftColumn}, ${rightColumn}) not found in data`,
+        severity: rule.severity || "error",
+        ruleId: rule.id,
+      }
+    }
+
+    // Handle null values if allowNull is true
+    if (
+      allowNull &&
+      (leftValue === null || leftValue === undefined || rightValue === null || rightValue === undefined)
+    ) {
+      console.log("Skipping comparison - Null values and allowNull=true", {
+        leftValue,
+        rightValue,
+        allowNull,
+      })
+
+      return {
+        rowIndex,
+        table: table || "",
+        column: leftColumn,
+        ruleName: rule.name,
+        message: `Skipped validation: One or both values are null/undefined and allowNull is true`,
+        severity: "success",
+        ruleId: rule.id,
+      }
+    }
+
+    // Perform the comparison with error handling
+    let isValid = false
+    try {
+      switch (comparisonOperator) {
+        case "==":
+          isValid = leftValue == rightValue // Use loose equality for cross-type comparisons
+          break
+        case "!=":
+          isValid = leftValue != rightValue
+          break
+        case ">":
+          isValid = leftValue > rightValue
+          break
+        case ">=":
+          isValid = leftValue >= rightValue
+          break
+        case "<":
+          isValid = leftValue < rightValue
+          break
+        case "<=":
+          isValid = leftValue <= rightValue
+          break
+        default:
+          console.error("Unknown comparison operator:", comparisonOperator)
+          isValid = false
+      }
+    } catch (error) {
+      console.error("Error during comparison:", error)
+      return {
+        rowIndex,
+        table: table || "",
+        column: leftColumn,
+        ruleName: rule.name,
+        message: `Error during comparison: ${error.message || "Unknown error"}`,
+        severity: rule.severity || "error",
+        ruleId: rule.id,
+      }
+    }
+
+    // Log the comparison result
+    console.log("Comparison result:", {
+      leftValue,
+      rightValue,
+      operator: comparisonOperator,
+      comparisonString: `${leftColumn}(${leftValue}) ${comparisonOperator} ${rightColumn}(${rightValue})`,
+      isValid,
+    })
+
+    // CRITICAL: Always return a validation result, whether it passed or failed
     return {
       rowIndex,
-      table: row._table || "",
-      column: "",
+      table: table || "",
+      column: leftColumn,
       ruleName: rule.name,
-      message: `Skipped validation: Rule applies to table '${table}' but row is from table '${row._table}'`,
-      severity: "success",
+      message: isValid
+        ? `Passed validation: ${leftColumn} (${leftValue}) ${comparisonOperator} ${rightColumn} (${rightValue})`
+        : `Column comparison failed: ${leftColumn} (${leftValue}) ${comparisonOperator} ${rightColumn} (${rightValue})`,
+      severity: isValid ? "success" : rule.severity || "error",
       ruleId: rule.id,
     }
-  }
-
-  // Extract parameters with uniform naming to prevent inconsistencies
-  const leftColumn = parameters.leftColumn || column || parameters.column // Default to primary column if leftColumn is missing
-  const rightColumn = parameters.rightColumn || parameters.secondaryColumn
-  const comparisonOperator = parameters.comparisonOperator || parameters.operator
-  const allowNull = parameters.allowNull
-
-  // Explicit check that we have both columns from the correct table
-  if (!row.hasOwnProperty(leftColumn) || !row.hasOwnProperty(rightColumn)) {
-    console.log(`Missing columns for comparison: ${leftColumn} or ${rightColumn} not found in row`, {
-      availableColumns: Object.keys(row),
-    })
-    return null // Skip validation if columns don't exist in this row
-  }
-
-  // Log values from the row for debugging
-  const leftValue = row[leftColumn]
-  const rightValue = row[rightColumn]
-
-  console.log("Column Comparison Parameters:", {
-    leftColumn,
-    rightColumn,
-    comparisonOperator,
-    allowNull,
-    leftValue,
-    rightValue,
-    rowData: row,
-  })
-
-  // Perform the comparison
-  let isValid = false
-  switch (comparisonOperator) {
-    case "==":
-      isValid = leftValue == rightValue // Use loose equality for cross-type comparisons
-      break
-    case "!=":
-      isValid = leftValue != rightValue
-      break
-    case ">":
-      isValid = leftValue > rightValue
-      break
-    case ">=":
-      isValid = leftValue >= rightValue
-      break
-    case "<":
-      isValid = leftValue < rightValue
-      break
-    case "<=":
-      isValid = leftValue <= rightValue
-      break
-    default:
-      isValid = false
-      console.error("Unknown comparison operator:", comparisonOperator)
-  }
-
-  console.log("Column comparison result:", {
-    isValid,
-    comparisonString: `${leftColumn}(${leftValue}) ${comparisonOperator} ${rightColumn}(${rightValue})`,
-  })
-
-  // Return a validation result object for both passing and failing cases
-  return {
-    rowIndex,
-    table,
-    column,
-    ruleName: rule.name,
-    message: isValid
-      ? `Passed validation: ${leftColumn} (${leftValue}) ${comparisonOperator} ${rightColumn} (${rightValue})`
-      : `Column comparison failed: ${leftColumn} (${leftValue}) ${comparisonOperator} ${rightColumn} (${rightValue})`,
-    severity: isValid ? "success" : rule.severity,
-    ruleId: rule.id,
+  } catch (error) {
+    // Global error handler to prevent the function from crashing
+    console.error("Unexpected error in validateColumnComparison:", error)
+    return {
+      rowIndex,
+      table: rule.table || "",
+      column: rule.column || "",
+      ruleName: rule.name || "Unknown rule",
+      message: `Unexpected error during validation: ${error.message || "Unknown error"}`,
+      severity: rule.severity || "error",
+      ruleId: rule.id || "unknown",
+    }
   }
 }
 
