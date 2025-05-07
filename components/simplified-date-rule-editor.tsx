@@ -24,7 +24,39 @@ export function SimplifiedDateRuleEditor({ rule, tables, datasets, onSave, onCan
   // Create a working copy of the rule to avoid reference issues
   const [editedRule, setEditedRule] = useState<DataQualityRule>(() => {
     // Deep clone the rule to avoid reference issues
-    return JSON.parse(JSON.stringify(rule))
+    const clonedRule = JSON.parse(JSON.stringify(rule))
+
+    // Initialize default parameters based on rule type
+    if (clonedRule.ruleType === "date-before" || clonedRule.ruleType === "date-after") {
+      if (!clonedRule.parameters.compareDate) {
+        // Set default to today's date
+        const today = new Date()
+        const formattedDate = today.toISOString().split("T")[0] // YYYY-MM-DD format
+        clonedRule.parameters.compareDate = formattedDate
+        console.log(`Initialized ${clonedRule.ruleType} with default compareDate:`, formattedDate)
+      }
+    } else if (clonedRule.ruleType === "date-between") {
+      if (!clonedRule.parameters.startDate || !clonedRule.parameters.endDate) {
+        // Set default start date to 30 days ago and end date to today
+        const today = new Date()
+        const thirtyDaysAgo = new Date()
+        thirtyDaysAgo.setDate(today.getDate() - 30)
+
+        clonedRule.parameters.startDate = thirtyDaysAgo.toISOString().split("T")[0]
+        clonedRule.parameters.endDate = today.toISOString().split("T")[0]
+        console.log("Initialized date-between with default dates:", {
+          startDate: clonedRule.parameters.startDate,
+          endDate: clonedRule.parameters.endDate,
+        })
+      }
+    } else if (clonedRule.ruleType === "date-format") {
+      if (!clonedRule.parameters.format) {
+        clonedRule.parameters.format = "iso"
+        console.log("Initialized date-format with default format: iso")
+      }
+    }
+
+    return clonedRule
   })
 
   const [tableColumns, setTableColumns] = useState<string[]>([])
@@ -109,7 +141,13 @@ export function SimplifiedDateRuleEditor({ rule, tables, datasets, onSave, onCan
     return true
   }
 
-  // Handle save
+  // Add this debug log at the beginning of the component
+  useEffect(() => {
+    console.log("SimplifiedDateRuleEditor - Initial rule:", rule)
+    console.log("SimplifiedDateRuleEditor - Initial parameters:", rule.parameters)
+  }, [])
+
+  // Find the handleSave function and modify it to ensure parameters are properly set
   const handleSave = () => {
     if (!validateRule()) {
       toast({
@@ -131,17 +169,53 @@ export function SimplifiedDateRuleEditor({ rule, tables, datasets, onSave, onCan
       return
     }
 
-    // Ensure the rule has the ID in the name
-    let finalName = editedRule.name
-    if (editedRule.id && !finalName.includes(`[ID: ${editedRule.id}]`)) {
-      finalName = `${finalName} [ID: ${editedRule.id}]`
-    }
-
+    // Ensure parameters are properly set before saving
     const finalRule = {
       ...editedRule,
-      name: finalName,
+      name:
+        editedRule.id && !editedRule.name.includes(`[ID: ${editedRule.id}]`)
+          ? `${editedRule.name} [ID: ${editedRule.id}]`
+          : editedRule.name,
+      parameters: {
+        ...editedRule.parameters,
+      },
     }
 
+    // For date-before and date-after rules, ensure compareDate is set
+    if (finalRule.ruleType === "date-before" || finalRule.ruleType === "date-after") {
+      if (!finalRule.parameters.compareDate) {
+        setValidationError("Please select a comparison date")
+        toast({
+          title: "Validation Error",
+          description: "Please select a comparison date",
+          variant: "destructive",
+        })
+        return
+      }
+      console.log(`Saving ${finalRule.ruleType} rule with compareDate:`, finalRule.parameters.compareDate)
+    }
+
+    // For date-between rules, ensure startDate and endDate are set
+    if (finalRule.ruleType === "date-between") {
+      if (!finalRule.parameters.startDate || !finalRule.parameters.endDate) {
+        setValidationError("Please select both start and end dates")
+        toast({
+          title: "Validation Error",
+          description: "Please select both start and end dates",
+          variant: "destructive",
+        })
+        return
+      }
+      console.log(`Saving date-between rule with startDate:`, finalRule.parameters.startDate)
+      console.log(`Saving date-between rule with endDate:`, finalRule.parameters.endDate)
+    }
+
+    // For date-format rules, ensure format is set
+    if (finalRule.ruleType === "date-format" && !finalRule.parameters.format) {
+      finalRule.parameters.format = "iso" // Default to ISO format
+    }
+
+    console.log("Saving date rule with parameters:", finalRule.parameters)
     console.log("Saving date rule with column:", finalRule.column)
     onSave(finalRule)
   }

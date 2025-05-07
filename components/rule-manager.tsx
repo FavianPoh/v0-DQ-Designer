@@ -1,14 +1,16 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { PlusCircle, Pencil, Trash2, Loader2, Eye, EyeOff, AlertTriangle } from "lucide-react"
+import { PlusCircle, Pencil, Trash2, Loader2, AlertTriangle, EyeOff, Eye } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { RuleForm } from "@/components/rule-form"
+import { DateRuleEditor } from "@/components/date-rule-editor" // Import the DateRuleEditor component
 import type { DataQualityRule, DataTables, ValueList } from "@/lib/types"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -53,6 +55,8 @@ export function RuleManager({
   const [isAddingRule, setIsAddingRule] = useState(false)
   const [localEditingRuleId, setLocalEditingRuleId] = useState<string | null>(null)
   const [filterTable, setFilterTable] = useState<string>("")
+  const [filterRuleType, setFilterRuleType] = useState<string>("all")
+  const [hideDisabledRules, setHideDisabledRules] = useState<boolean>(false)
   const [ruleToDelete, setRuleToDelete] = useState<string | null>(null)
   const [expandedRuleId, setExpandedRuleId] = useState<string | null>(null)
   const [valueLists, setValueLists] = useState<ValueList[]>(initialValueLists || [])
@@ -107,9 +111,6 @@ export function RuleManager({
     }
   }
 
-  // Replace the handleEditClick function with this improved version that ensures a single click works properly
-  // This is the only change needed - replace the entire function
-
   const handleEditClick = (ruleId: string) => {
     // Prevent any race conditions by using a direct approach
     console.log("Edit clicked for rule:", ruleId)
@@ -161,7 +162,19 @@ export function RuleManager({
     setExpandedRuleId(expandedRuleId === ruleId ? null : ruleId)
   }
 
-  const filteredRules = filterTable ? rules.filter((rule) => rule.table === filterTable) : rules
+  // Apply table filter
+  const filteredByTableRules = filterTable ? rules.filter((rule) => rule.table === filterTable) : rules
+
+  // Apply rule type filter
+  const filteredByTypeRules =
+    filterRuleType === "all"
+      ? filteredByTableRules
+      : filteredByTableRules.filter((rule) => rule.ruleType === filterRuleType)
+
+  // Apply disabled rules filter
+  const visibleRules = hideDisabledRules
+    ? filteredByTypeRules.filter((rule) => rule.enabled !== false)
+    : filteredByTypeRules
 
   // Function to display rule name without the ID part
   const displayRuleName = (name: string) => {
@@ -212,6 +225,14 @@ export function RuleManager({
         return "List Validations"
       case "formula":
         return "Formula Validations"
+      case "date-before":
+        return "Date Before Rules"
+      case "date-after":
+        return "Date After Rules"
+      case "date-between":
+        return "Date Between Rules"
+      case "date-format":
+        return "Date Format Rules"
       default:
         return ruleType.charAt(0).toUpperCase() + ruleType.slice(1)
     }
@@ -229,6 +250,67 @@ export function RuleManager({
         console.error("Error fetching value lists:", error)
       })
   }, [])
+
+  const getUniqueRuleTypes = () => {
+    const types = new Set<string>()
+    rules.forEach((rule) => {
+      types.add(rule.ruleType)
+    })
+    return Array.from(types).sort()
+  }
+
+  // Count disabled rules
+  const disabledRulesCount = rules.filter((rule) => rule.enabled === false).length
+
+  // Add or update the section that handles date rule types
+  // This might be in a renderRuleEditor function or similar
+
+  // If there's a switch statement for rule types, ensure it includes date rules:
+  const renderRuleEditor = () => {
+    if (isAddingRule) {
+      return (
+        <RuleForm
+          onSubmit={handleAddRule}
+          onCancel={handleCancelEdit}
+          tables={tables}
+          datasets={datasets}
+          valueLists={valueLists}
+        />
+      )
+    }
+
+    if (actualEditingRuleId) {
+      const selectedRule = rules.find((r) => r.id === actualEditingRuleId)
+      if (selectedRule) {
+        // If it's a date rule, use the DateRuleEditor
+        if (selectedRule.ruleType.startsWith("date-")) {
+          return (
+            <DateRuleEditor
+              rule={selectedRule}
+              tables={tables}
+              datasets={datasets}
+              onSave={handleUpdateRule}
+              onCancel={handleCancelEdit}
+            />
+          )
+        }
+
+        // For all other rule types, use the standard RuleForm
+        return (
+          <RuleForm
+            initialRule={selectedRule}
+            onSubmit={handleUpdateRule}
+            onCancel={handleCancelEdit}
+            tables={tables}
+            datasets={datasets}
+            valueLists={valueLists}
+          />
+        )
+      }
+    }
+
+    return null
+  }
 
   return (
     <TooltipProvider>
@@ -255,6 +337,34 @@ export function RuleManager({
               </Select>
             </div>
 
+            <div className="flex items-center gap-2 ml-4">
+              <Label htmlFor="filter-rule-type" className="whitespace-nowrap">
+                Rule type:
+              </Label>
+              <Select value={filterRuleType} onValueChange={setFilterRuleType}>
+                <SelectTrigger id="filter-rule-type" className="w-[180px]">
+                  <SelectValue placeholder="All rule types" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All rule types</SelectItem>
+                  {getUniqueRuleTypes().map((ruleType) => (
+                    <SelectItem key={ruleType} value={ruleType}>
+                      {getRuleTypeDisplayName(ruleType)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center gap-2 ml-4">
+              <div className="flex items-center space-x-2">
+                <Switch id="hide-disabled-rules" checked={hideDisabledRules} onCheckedChange={setHideDisabledRules} />
+                <Label htmlFor="hide-disabled-rules" className="cursor-pointer">
+                  Hide disabled rules ({disabledRulesCount})
+                </Label>
+              </div>
+            </div>
+
             {!isAddingRule && !actualEditingRuleId && (
               <Button onClick={() => setIsAddingRule(true)} disabled={isSaving}>
                 {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlusCircle className="mr-2 h-4 w-4" />}
@@ -264,43 +374,17 @@ export function RuleManager({
           </div>
         </div>
 
-        {isAddingRule && (
+        {(isAddingRule || actualEditingRuleId) && (
           <Card>
             <CardHeader>
-              <CardTitle>Add New Rule</CardTitle>
+              <CardTitle>{isAddingRule ? "Add New Rule" : "Edit Rule"}</CardTitle>
             </CardHeader>
-            <CardContent>
-              <RuleForm
-                onSubmit={handleAddRule}
-                onCancel={handleCancelEdit}
-                tables={tables}
-                datasets={datasets}
-                valueLists={valueLists}
-              />
-            </CardContent>
-          </Card>
-        )}
-
-        {actualEditingRuleId && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Edit Rule</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <RuleForm
-                initialRule={rules.find((r) => r.id === actualEditingRuleId)}
-                onSubmit={handleUpdateRule}
-                onCancel={handleCancelEdit}
-                tables={tables}
-                datasets={datasets}
-                valueLists={valueLists}
-              />
-            </CardContent>
+            <CardContent>{renderRuleEditor()}</CardContent>
           </Card>
         )}
 
         {/* Replace the existing rule cards grid with this grouped version */}
-        {groupRulesByType(filteredRules).map(([ruleType, rulesInGroup]) => (
+        {groupRulesByType(visibleRules).map(([ruleType, rulesInGroup]) => (
           <div key={ruleType} className="mb-6">
             <h3 className="text-lg font-medium mb-3 border-b pb-2">
               {getRuleTypeDisplayName(ruleType)} ({rulesInGroup.length})
@@ -339,7 +423,10 @@ export function RuleManager({
                               onClick={(e) => {
                                 e.preventDefault()
                                 e.stopPropagation()
-                                const updatedRule = { ...rules.find((r) => r.id === rule.id)!, enabled: !rule.enabled }
+                                const updatedRule = {
+                                  ...rules.find((r) => r.id === rule.id)!,
+                                  enabled: !rule.enabled,
+                                }
                                 onUpdateRule(updatedRule)
                               }}
                               disabled={isSaving}
@@ -477,11 +564,17 @@ export function RuleManager({
           </div>
         ))}
 
-        {filteredRules.length === 0 && !isAddingRule && (
+        {visibleRules.length === 0 && !isAddingRule && (
           <div className="col-span-2 text-center py-8 border rounded-md bg-gray-50 dark:bg-gray-800">
             <p className="text-gray-500 dark:text-gray-400">
-              {filterTable ? `No rules defined for the ${filterTable} table yet.` : "No rules defined yet."}
-              Click "Add Rule" to create your first data quality rule.
+              {filterTable || filterRuleType || hideDisabledRules
+                ? `No rules match the selected filters.`
+                : "No rules defined yet."}
+              {hideDisabledRules && disabledRulesCount > 0 && " Disabled rules are currently hidden."}
+              {!filterTable &&
+                !filterRuleType &&
+                !hideDisabledRules &&
+                " Click 'Add Rule' to create your first data quality rule."}
             </p>
           </div>
         )}

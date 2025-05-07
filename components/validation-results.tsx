@@ -853,6 +853,7 @@ export function ValidationResults({
         matches.forEach((match) => {
           // Extract table name based on the pattern
           let tableName = match[1]
+
           if (pattern.toString().includes("in ")) {
             tableName = match[0].replace("in ", "")
           } else if (pattern.toString().includes("from ")) {

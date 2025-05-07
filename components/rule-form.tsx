@@ -22,6 +22,7 @@ import { JavaScriptExplainer } from "./javascript-explainer"
 import { toast } from "@/components/ui/use-toast"
 import { FormulaRuleEditor } from "./formula-rule-editor"
 import { MultiColumnConditionEditor } from "./multi-column-condition-editor" // Import the MultiColumnConditionEditor
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 
 interface RuleFormProps {
   initialRule?: DataQualityRule
@@ -1041,7 +1042,7 @@ function RuleForm(props: RuleFormProps) {
       let currentOperator = rule.parameters.operator || rule.parameters.comparisonOperator
 
       // Special case for the problematic rule
-      if (rule.id === "fdcc0ae6-38d5-49e6-a5e6-588477064070") {
+      if (rule.id === "fdcc0ae6-38d5-49e6-588477064070") {
         console.log("CRITICAL FIX: Forcing less than operator for rule ID fdcc0ae6-38d5-49e6-588477064070")
         // Force the operator to be "less than" based on the rule name
         currentOperator = "<"
@@ -1077,6 +1078,43 @@ function RuleForm(props: RuleFormProps) {
 
       // Add debug logging to verify the operator is set correctly
       console.log("Final operator value for rule ID " + rule.id + ":", rule.parameters.operator)
+    }
+
+    // Find the handleSubmit function and add this code for date rules
+    // Special handling for date rules
+    if (rule.ruleType?.startsWith("date-")) {
+      console.log("Submitting date rule:", rule)
+      console.log("Date rule parameters:", rule.parameters)
+
+      // Ensure parameters object exists
+      if (!rule.parameters) {
+        rule.parameters = {}
+      }
+
+      // For date-before and date-after rules, ensure compareDate is set
+      if ((rule.ruleType === "date-before" || rule.ruleType === "date-after") && !rule.parameters.compareDate) {
+        toast({
+          title: "Error",
+          description: `Please select a comparison date for the ${rule.ruleType} rule`,
+          variant: "destructive",
+        })
+        return
+      }
+
+      // For date-between rules, ensure startDate and endDate are set
+      if (rule.ruleType === "date-between" && (!rule.parameters.startDate || !rule.parameters.endDate)) {
+        toast({
+          title: "Error",
+          description: "Please select both start and end dates for the date-between rule",
+          variant: "destructive",
+        })
+        return
+      }
+
+      // For date-format rules, ensure format is set
+      if (rule.ruleType === "date-format" && !rule.parameters.format) {
+        rule.parameters.format = "iso" // Default to ISO format
+      }
     }
 
     // Special handling for date rules
@@ -1606,6 +1644,75 @@ function RuleForm(props: RuleFormProps) {
             )}
           </div>
         )
+      case "cross-column":
+        return (
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="secondaryColumn">Secondary Column</Label>
+              <Select
+                value={rule.parameters.secondaryColumn || rule.parameters.rightColumn || ""}
+                onValueChange={(value) => {
+                  // Store in both parameter names for backward compatibility
+                  handleParameterChange("secondaryColumn", value)
+                  handleParameterChange("rightColumn", value)
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select secondary column" />
+                </SelectTrigger>
+                <SelectContent>
+                  {tableColumns[rule.table]?.map((column) => (
+                    <SelectItem key={column} value={column}>
+                      {column}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="comparisonOperator">Comparison Operator</Label>
+              <Select
+                value={rule.parameters.operator || rule.parameters.comparisonOperator || "=="}
+                onValueChange={(value) => {
+                  // Store in both parameter names for backward compatibility
+                  handleParameterChange("operator", value)
+                  handleParameterChange("comparisonOperator", value)
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select operator" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="==">Equals (==)</SelectItem>
+                  <SelectItem value="!=">Not Equals (!=)</SelectItem>
+                  <SelectItem value="&gt;">Greater Than (&gt;)</SelectItem>
+                  <SelectItem value="&gt;=">Greater Than or Equal (&gt;=)</SelectItem>
+                  <SelectItem value="&lt;">Less Than (&lt;)</SelectItem>
+                  <SelectItem value="&lt;=">Less Than or Equal (&lt;=)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="allowNull"
+                checked={rule.parameters.allowNull === true}
+                onCheckedChange={(checked) => handleParameterChange("allowNull", checked === true)}
+              />
+              <Label htmlFor="allowNull" className="text-sm font-normal">
+                Skip validation if either value is null
+              </Label>
+            </div>
+            {rule.column && (rule.parameters.secondaryColumn || rule.parameters.rightColumn) && (
+              <div className="mt-2 p-3 bg-gray-50 rounded-md">
+                <p className="text-sm text-gray-700">
+                  <span className="font-medium">{rule.column}</span>{" "}
+                  {getOperatorDisplay(rule.parameters.operator || rule.parameters.comparisonOperator || "==")}{" "}
+                  <span className="font-medium">{rule.parameters.secondaryColumn || rule.parameters.rightColumn}</span>
+                </p>
+              </div>
+            )}
+          </div>
+        )
       case "multi-column":
         return (
           <div className="space-y-4">
@@ -1618,6 +1725,125 @@ function RuleForm(props: RuleFormProps) {
                 setRule((prev) => ({ ...prev, conditions: updatedConditions }))
               }}
             />
+          </div>
+        )
+      case "composite-reference":
+        return (
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="referenceTable">Reference Table</Label>
+              <Select
+                value={rule.parameters.referenceTable || ""}
+                onValueChange={(value) => {
+                  handleParameterChange("referenceTable", value)
+                  // Update form debug state
+                  setFormDebug((prev) => ({ ...prev, hasReferenceTable: !!value }))
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select reference table" />
+                </SelectTrigger>
+                <SelectContent>
+                  {tables.map((table) => (
+                    <SelectItem key={table} value={table}>
+                      {table}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {!formDebug.hasReferenceTable && <p className="text-red-500 text-sm">Reference Table is required.</p>}
+            </div>
+
+            <div className="space-y-2">
+              <Label>Source Columns (from {rule.table})</Label>
+              {sourceColumns.map((column, index) => (
+                <div key={`source-${index}`} className="flex items-center space-x-2">
+                  <Select value={column} onValueChange={(value) => handleSourceColumnChange(index, value)}>
+                    <SelectTrigger className="flex-1">
+                      <SelectValue placeholder="Select a column" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {tableColumns[rule.table]?.map((col) => (
+                        <SelectItem key={col} value={col}>
+                          {col}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleRemoveSourceColumn(index)}
+                    disabled={sourceColumns.length <= 1}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+              <Button type="button" variant="outline" size="sm" onClick={(e) => handleAddSourceColumn(e)}>
+                <Plus className="h-4 w-4 mr-2" />
+                Add Source Column
+              </Button>
+              {!formDebug.hasSourceColumns && (
+                <p className="text-red-500 text-sm">At least one source column is required.</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label>Reference Columns (from {rule.parameters.referenceTable || "reference table"})</Label>
+              {referenceColumns.map((column, index) => (
+                <div key={`reference-${index}`} className="flex items-center space-x-2">
+                  <Select value={column} onValueChange={(value) => handleReferenceColumnChange(index, value)}>
+                    <SelectTrigger className="flex-1">
+                      <SelectValue placeholder="Select a column" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {referenceTableColumns.map((col) => (
+                        <SelectItem key={col} value={col}>
+                          {col}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleRemoveReferenceColumn(index)}
+                    disabled={referenceColumns.length <= 1}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+              <Button type="button" variant="outline" size="sm" onClick={(e) => handleAddReferenceColumn(e)}>
+                <Plus className="h-4 w-4 mr-2" />
+                Add Reference Column
+              </Button>
+              {!formDebug.hasReferenceColumns && (
+                <p className="text-red-500 text-sm">At least one reference column is required.</p>
+              )}
+            </div>
+
+            {!formDebug.hasColumnsMatch && (
+              <p className="text-red-500 text-sm">
+                The number of source columns must match the number of reference columns.
+              </p>
+            )}
+
+            <div className="mt-4 p-3 bg-gray-50 rounded-md">
+              <p className="text-sm font-medium text-gray-700">Rule Preview:</p>
+              <p className="text-sm text-gray-700">
+                Check if the combination of{" "}
+                <span className="font-medium">{sourceColumns.filter(Boolean).join(", ") || "[source columns]"}</span>{" "}
+                from <span className="font-medium">{rule.table}</span> exists in{" "}
+                <span className="font-medium">{rule.parameters.referenceTable || "[reference table]"}</span> as{" "}
+                <span className="font-medium">
+                  {referenceColumns.filter(Boolean).join(", ") || "[reference columns]"}
+                </span>
+              </p>
+            </div>
           </div>
         )
       case "unique":
@@ -1649,6 +1875,173 @@ function RuleForm(props: RuleFormProps) {
               <Plus className="h-4 w-4 mr-2" />
               Add Column
             </Button>
+          </div>
+        )
+      case "date-before":
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="compareDate">Before Date</Label>
+              <Input
+                id="compareDate"
+                type="date"
+                value={rule.parameters.compareDate || ""}
+                onChange={(e) => handleParameterChange("compareDate", e.target.value)}
+              />
+              <p className="text-xs text-gray-500">Validates that the date value is before the specified date.</p>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="inclusive"
+                checked={rule.parameters.inclusive === true}
+                onCheckedChange={(checked) => handleParameterChange("inclusive", checked === true)}
+              />
+              <Label htmlFor="inclusive" className="text-sm font-normal">
+                Include the specified date (on or before)
+              </Label>
+            </div>
+
+            <div className="mt-2 p-3 bg-gray-50 rounded-md">
+              <p className="text-sm text-gray-700">
+                Date must be {rule.parameters.inclusive ? "on or " : ""}before{" "}
+                {rule.parameters.compareDate || "[select date]"}
+              </p>
+            </div>
+          </div>
+        )
+
+      case "date-after":
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="compareDate">After Date</Label>
+              <Input
+                id="compareDate"
+                type="date"
+                value={rule.parameters.compareDate || ""}
+                onChange={(e) => handleParameterChange("compareDate", e.target.value)}
+              />
+              <p className="text-xs text-gray-500">Validates that the date value is after the specified date.</p>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="inclusive"
+                checked={rule.parameters.inclusive === true}
+                onCheckedChange={(checked) => handleParameterChange("inclusive", checked === true)}
+              />
+              <Label htmlFor="inclusive" className="text-sm font-normal">
+                Include the specified date (on or after)
+              </Label>
+            </div>
+
+            <div className="mt-2 p-3 bg-gray-50 rounded-md">
+              <p className="text-sm text-gray-700">
+                Date must be {rule.parameters.inclusive ? "on or " : ""}after{" "}
+                {rule.parameters.compareDate || "[select date]"}
+              </p>
+            </div>
+          </div>
+        )
+
+      case "date-between":
+        return (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="startDate">Start Date</Label>
+                <Input
+                  id="startDate"
+                  type="date"
+                  value={rule.parameters.startDate || ""}
+                  onChange={(e) => handleParameterChange("startDate", e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="endDate">End Date</Label>
+                <Input
+                  id="endDate"
+                  type="date"
+                  value={rule.parameters.endDate || ""}
+                  onChange={(e) => handleParameterChange("endDate", e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="inclusive"
+                checked={rule.parameters.inclusive === true}
+                onCheckedChange={(checked) => handleParameterChange("inclusive", checked === true)}
+              />
+              <Label htmlFor="inclusive" className="text-sm font-normal">
+                Include the boundary dates (on or between)
+              </Label>
+            </div>
+
+            <div className="mt-2 p-3 bg-gray-50 rounded-md">
+              <p className="text-sm text-gray-700">
+                Date must be {rule.parameters.inclusive ? "on or " : ""}between{" "}
+                {rule.parameters.startDate || "[start date]"} and {rule.parameters.endDate || "[end date]"}
+              </p>
+            </div>
+          </div>
+        )
+
+      case "date-format":
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="format">Date Format</Label>
+              <Select
+                value={rule.parameters.format || "iso"}
+                onValueChange={(value) => handleParameterChange("format", value)}
+              >
+                <SelectTrigger id="format">
+                  <SelectValue placeholder="Select date format" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="iso">ISO (YYYY-MM-DD)</SelectItem>
+                  <SelectItem value="us">US (MM/DD/YYYY)</SelectItem>
+                  <SelectItem value="eu">EU (DD/MM/YYYY)</SelectItem>
+                  <SelectItem value="custom">Custom Format</SelectItem>
+                  <SelectItem value="any">Any Valid Date</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-500">
+                {rule.parameters.format === "any"
+                  ? "Validates that the value can be parsed as a valid date without enforcing a specific format."
+                  : "Select a specific date format to enforce."}
+              </p>
+            </div>
+
+            {rule.parameters.format === "custom" && (
+              <div className="space-y-2">
+                <Label htmlFor="customFormat">Custom Format Pattern</Label>
+                <Input
+                  id="customFormat"
+                  value={rule.parameters.customFormat || ""}
+                  onChange={(e) => handleParameterChange("customFormat", e.target.value)}
+                  placeholder="e.g., YYYY-MM-DD HH:mm:ss"
+                />
+                <p className="text-xs text-gray-500">
+                  Use YYYY for year, MM for month, DD for day, HH for hour, mm for minute, ss for second.
+                </p>
+              </div>
+            )}
+
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="required"
+                checked={rule.parameters.required === true}
+                onCheckedChange={(checked) => handleParameterChange("required", checked === true)}
+              />
+              <Label htmlFor="required" className="text-sm font-normal">
+                Field is required (must be a valid date)
+              </Label>
+            </div>
           </div>
         )
       default:
@@ -1873,6 +2266,30 @@ function RuleForm(props: RuleFormProps) {
               </Button>
             </div>
           ))}
+          {conditions.length > 1 && (
+            <div className="flex items-center space-x-4">
+              <Label className="text-sm font-medium">Combine conditions with:</Label>
+              <RadioGroup
+                value={rule.conditionType || "AND"}
+                onValueChange={(value) => {
+                  setRule({
+                    ...rule,
+                    conditionType: value as "AND" | "OR",
+                  })
+                }}
+                className="flex space-x-4"
+              >
+                <div className="flex items-center space-x-1">
+                  <RadioGroupItem value="AND" id="condition-and" />
+                  <Label htmlFor="condition-and">AND</Label>
+                </div>
+                <div className="flex items-center space-x-1">
+                  <RadioGroupItem value="OR" id="condition-or" />
+                  <Label htmlFor="condition-or">OR</Label>
+                </div>
+              </RadioGroup>
+            </div>
+          )}
           {/* Then find the Add Condition button in the conditions section (around line 2400-2500) */}
           {/* Replace: */}
           {/* <Button variant="ghost" size="sm" onClick={handleAddCondition}> */}

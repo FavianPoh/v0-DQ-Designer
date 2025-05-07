@@ -8,9 +8,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card } from "@/components/ui/card"
-import { X, Calculator, ActivityIcon as Function } from "lucide-react"
+import { X, Calculator, ActivityIcon as Function, FilterIcon } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { AggregationFunctionEditor } from "./aggregation-function-editor"
+import AggregationFunctionEditor from "@/components/aggregation-function-editor"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import type { AggregationConfig } from "@/lib/types"
 
 interface FormulaRuleEditorProps {
@@ -81,6 +82,30 @@ export function FormulaRuleEditor({
     handleFormulaChange("")
   }
 
+  // Helper function to generate the full aggregation text with filters
+  const getFullAggregationText = (agg: AggregationConfig): string => {
+    const funcName = getFunctionName(agg.function)
+
+    // Update how we format the filter text for aggregations
+    let filterText = ""
+    if (agg.filter) {
+      if ("conditions" in agg.filter) {
+        // New multi-condition filter
+        const conditions = agg.filter.conditions
+          .map((c) => `${c.column} ${c.operator} ${typeof c.value === "string" ? `"${c.value}"` : c.value}`)
+          .join(` ${agg.filter.type} `)
+        filterText = `, ${conditions}`
+      } else {
+        // Legacy single condition filter
+        filterText = `, ${agg.filter.column} ${agg.filter.operator} ${
+          typeof agg.filter.value === "string" ? `"${agg.filter.value}"` : agg.filter.value
+        }`
+      }
+    }
+
+    return `${funcName}("${agg.column}"${filterText})`
+  }
+
   // Insert an aggregation function into the formula
   const insertAggregation = (index: number, e: React.MouseEvent) => {
     e.preventDefault()
@@ -89,10 +114,61 @@ export function FormulaRuleEditor({
     if (!aggregations || index >= aggregations.length) return
 
     const agg = aggregations[index]
+    const aggText = getFullAggregationText(agg)
     const funcName = getFunctionName(agg.function)
-    const aggText = `${funcName}("${agg.column}")`
 
-    const newFormula = formulaInput ? `${formulaInput} ${aggText}` : aggText
+    // Check if this function already exists in the formula (with or without filters)
+    const basePattern = new RegExp(`${funcName}\\("${agg.column}"(,\\s*[^)]*)?\$$`, "g")
+
+    if (formulaInput.match(basePattern)) {
+      // Replace the existing function with the new one
+      const newFormula = formulaInput.replace(basePattern, aggText)
+      handleFormulaChange(newFormula)
+    } else {
+      // If it doesn't exist, append with proper spacing
+      const newFormula = formulaInput.trim()
+        ? formulaInput.trim().endsWith("+") ||
+          formulaInput.trim().endsWith("-") ||
+          formulaInput.trim().endsWith("*") ||
+          formulaInput.trim().endsWith("/") ||
+          formulaInput.trim().endsWith("(")
+          ? `${formulaInput} ${aggText}`
+          : `${formulaInput} + ${aggText}` // Default to addition if no operator
+        : aggText
+      handleFormulaChange(newFormula)
+    }
+  }
+
+  // Function to remove an aggregation function from the formula
+  const removeAggregation = (index: number, e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+
+    if (!aggregations || index >= aggregations.length) return
+
+    const agg = aggregations[index]
+    const funcName = getFunctionName(agg.function)
+
+    // Create a pattern to match the function with or without filters
+    const basePattern = new RegExp(`\\s*[+\\-*/]?\\s*${funcName}\\("${agg.column}"(,\\s*[^)]*)?\$$`, "g")
+
+    // Also match if it's at the beginning of the formula
+    const startPattern = new RegExp(`^${funcName}\\("${agg.column}"(,\\s*[^)]*)?\$$`, "g")
+
+    // Replace the function with empty string
+    let newFormula = formulaInput.replace(basePattern, "")
+    newFormula = newFormula.replace(startPattern, "")
+
+    // Clean up any double operators that might result
+    newFormula = newFormula.replace(/\s*[+\-*/]\s*[+\-*/]\s*/g, " + ")
+
+    // Clean up any trailing or leading operators
+    newFormula = newFormula.replace(/^\s*[+\-*/]\s*/, "")
+    newFormula = newFormula.replace(/\s*[+\-*/]\s*$/, "")
+
+    // Clean up any extra spaces
+    newFormula = newFormula.trim()
+
     handleFormulaChange(newFormula)
   }
 
@@ -100,6 +176,15 @@ export function FormulaRuleEditor({
     if (onAggregationsChange) {
       onAggregationsChange(newAggregations)
     }
+  }
+
+  // Helper function to check if an aggregation has filters
+  const hasFilters = (agg: AggregationConfig): boolean => {
+    return (
+      !!agg.filter &&
+      (("conditions" in agg.filter && agg.filter.conditions.length > 0) ||
+        (!("conditions" in agg.filter) && !!agg.filter.column))
+    )
   }
 
   return (
@@ -230,7 +315,7 @@ export function FormulaRuleEditor({
                   : ""
               }`}
             >
-              <Label className="mb-2 block">Insert Aggregation Functions</Label>
+              <Label className="mb-2 block">Aggregation Functions</Label>
               <p className="text-xs text-gray-500 mb-2">
                 {!formulaInput.includes("SUM(") &&
                 !formulaInput.includes("AVG(") &&
@@ -242,25 +327,54 @@ export function FormulaRuleEditor({
                     You must add at least one aggregation function to your formula. Click on a button below to add it.
                   </strong>
                 ) : (
-                  "Click on an aggregation function below to insert it into your formula."
+                  "Click to insert or remove aggregation functions from your formula."
                 )}
               </p>
               <div className="flex flex-wrap gap-2">
-                {aggregations.map((agg, index) => (
-                  <Button
-                    key={index}
-                    variant={
-                      formulaInput.includes(`${getFunctionName(agg.function)}("${agg.column}")`)
-                        ? "secondary"
-                        : "outline"
-                    }
-                    size="sm"
-                    onClick={(e) => insertAggregation(index, e)}
-                    className="text-xs"
-                  >
-                    {getFunctionName(agg.function)}("{agg.column}")
-                  </Button>
-                ))}
+                {aggregations.map((agg, index) => {
+                  const funcName = getFunctionName(agg.function)
+                  const funcPattern = new RegExp(`${funcName}\\("${agg.column}"(,\\s*[^)]*)?\$$`, "g")
+                  const isInFormula = formulaInput.match(funcPattern) !== null
+                  const hasFilter = hasFilters(agg)
+                  const fullAggText = getFullAggregationText(agg)
+
+                  return (
+                    <div key={index} className="flex items-center gap-1">
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant={isInFormula ? "secondary" : "outline"}
+                              size="sm"
+                              onClick={(e) => insertAggregation(index, e)}
+                              className={`text-xs ${hasFilter ? "pr-1" : ""}`}
+                            >
+                              {funcName}("{agg.column}")
+                              {hasFilter && <FilterIcon className="h-3 w-3 ml-1 text-blue-500" />}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p className="font-mono text-xs">{fullAggText}</p>
+                            <p className="text-xs mt-1">
+                              {hasFilter ? "Includes filters - click to insert full function" : "Click to insert"}
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                      {isInFormula && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => removeAggregation(index, e)}
+                          className="text-xs p-1 h-8 w-8"
+                          title={`Remove ${funcName}("${agg.column}") from formula`}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             </Card>
           )}

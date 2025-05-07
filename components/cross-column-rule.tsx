@@ -9,7 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import type { DataQualityRule, DataTables } from "@/lib/types"
 
-interface ColumnComparisonRuleProps {
+interface CrossColumnRuleProps {
   rule?: DataQualityRule
   tables: string[]
   datasets: DataTables
@@ -17,7 +17,7 @@ interface ColumnComparisonRuleProps {
   onCancel: () => void
 }
 
-export function ColumnComparisonRule({ rule, tables, datasets, onSave, onCancel }: ColumnComparisonRuleProps) {
+export function CrossColumnRule({ rule, tables, datasets, onSave, onCancel }: CrossColumnRuleProps) {
   const [selectedTable, setSelectedTable] = useState<string>(rule?.table || tables[0] || "")
   const [columns, setColumns] = useState<string[]>([])
   const [leftColumn, setLeftColumn] = useState<string>(rule?.column || rule?.parameters?.leftColumn || "")
@@ -31,15 +31,35 @@ export function ColumnComparisonRule({ rule, tables, datasets, onSave, onCancel 
   const [ruleName, setRuleName] = useState<string>(rule?.name || "")
   const [description, setDescription] = useState<string>(rule?.description || "")
 
+  // Debug logging for initialization
+  useEffect(() => {
+    console.log("CrossColumnRule initialized with:", {
+      rule,
+      selectedTable,
+      leftColumn,
+      rightColumn,
+      operator,
+      allowNull,
+    })
+  }, [rule])
+
   // Update columns when table changes
   useEffect(() => {
     if (selectedTable && datasets[selectedTable]?.length > 0) {
       const tableColumns = Object.keys(datasets[selectedTable][0])
       setColumns(tableColumns)
+
+      console.log("Available columns for table", selectedTable, ":", tableColumns)
+
+      // If we have columns but no left column selected, auto-select the first one
+      if (tableColumns.length > 0 && !leftColumn) {
+        setLeftColumn(tableColumns[0])
+        console.log("Auto-selected left column:", tableColumns[0])
+      }
     } else {
       setColumns([])
     }
-  }, [selectedTable, datasets])
+  }, [selectedTable, datasets, leftColumn])
 
   // Handle save
   const handleSave = () => {
@@ -53,7 +73,7 @@ export function ColumnComparisonRule({ rule, tables, datasets, onSave, onCancel 
       name: ruleName,
       table: selectedTable,
       column: leftColumn,
-      ruleType: "column-comparison",
+      ruleType: "cross-column",
       parameters: {
         leftColumn,
         rightColumn,
@@ -67,15 +87,16 @@ export function ColumnComparisonRule({ rule, tables, datasets, onSave, onCancel 
       enabled: rule?.enabled !== false, // Default to true if not specified
     }
 
+    console.log("Saving cross-column rule:", updatedRule)
     onSave(updatedRule)
   }
 
   return (
     <Card className="w-full">
       <CardHeader>
-        <CardTitle>Column Comparison Rule</CardTitle>
+        <CardTitle>Cross-Column Validation Rule</CardTitle>
         <CardDescription>
-          Compare values between two columns in the same row. For example, check if startDate is before endDate.
+          Compare values between two columns in the same row. For example, check if endDate is after startDate.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -139,10 +160,10 @@ export function ColumnComparisonRule({ rule, tables, datasets, onSave, onCancel 
             <SelectContent>
               <SelectItem value="==">Equals (==)</SelectItem>
               <SelectItem value="!=">Not Equals (!=)</SelectItem>
-              <SelectItem value=">">Greater Than (&gt;)</SelectItem>
-              <SelectItem value=">=">Greater Than or Equal (&gt;=)</SelectItem>
-              <SelectItem value="<">Less Than (&lt;)</SelectItem>
-              <SelectItem value="<=">Less Than or Equal (&lt;=)</SelectItem>
+              <SelectItem value="&gt;">Greater Than (&gt;)</SelectItem>
+              <SelectItem value="&gt;=">Greater Than or Equal (&gt;=)</SelectItem>
+              <SelectItem value="&lt;">Less Than (&lt;)</SelectItem>
+              <SelectItem value="&lt;=">Less Than or Equal (&lt;=)</SelectItem>
             </SelectContent>
           </Select>
         </div>

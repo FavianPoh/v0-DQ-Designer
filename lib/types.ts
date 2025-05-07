@@ -135,14 +135,22 @@ export interface MathOperationRuleParameters {
 // New types for aggregation functions
 export type AggregationFunction = "sum" | "avg" | "count" | "min" | "max" | "distinct-count"
 
+export interface FilterCondition {
+  column: string
+  operator: "==" | "!=" | ">" | ">=" | "<" | "<="
+  value: any
+}
+
+export interface AggregationFilter {
+  conditions: FilterCondition[]
+  type: "OR" | "AND"
+}
+
 export interface AggregationConfig {
   function: AggregationFunction
   column: string
-  filter?: {
-    column: string
-    operator: "==" | "!=" | ">" | ">=" | "<" | "<=" 
-    value: any
-  }
+  alias?: string
+  filter?: AggregationFilter | FilterCondition
 }
 
 export interface FormulaParameters {

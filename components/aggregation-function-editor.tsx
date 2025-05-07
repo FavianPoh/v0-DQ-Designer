@@ -1,23 +1,27 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card } from "@/components/ui/card"
-import { PlusCircle, Trash2, FilterIcon } from "lucide-react"
+import { PlusCircle, Trash2, FilterIcon, Plus } from "lucide-react"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { Switch } from "@/components/ui/switch"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 
-interface AggregationConfig {
+export interface AggregationConfig {
   function: string
   column: string
   alias?: string
   filter?: {
-    column: string
-    operator: string
-    value: string
+    conditions: Array<{
+      column: string
+      operator: string
+      value: any
+    }>
+    type: "OR" | "AND"
   }
 }
 
@@ -27,12 +31,37 @@ interface AggregationFunctionEditorProps {
   onAggregationsChange: (aggregations: AggregationConfig[]) => void
 }
 
-export function AggregationFunctionEditor({
+// Using default export instead of named export
+export default function AggregationFunctionEditor({
   columns,
   aggregations,
   onAggregationsChange,
 }: AggregationFunctionEditorProps) {
   const [expandedItems, setExpandedItems] = useState<string[]>([])
+
+  // Initialize filterEnabled and filterConditions states for each aggregation
+  const [filterStates, setFilterStates] = useState(
+    aggregations.map((agg) => ({
+      filterEnabled: !!agg.filter,
+      filterConditions: agg.filter
+        ? agg.filter.conditions
+        : [{ column: columns.length > 0 ? columns[0] : "", operator: "==", value: "" }],
+      filterType: agg.filter?.type || "OR",
+    })),
+  )
+
+  // Update filterStates when aggregations prop changes
+  useEffect(() => {
+    setFilterStates(
+      aggregations.map((agg) => ({
+        filterEnabled: !!agg.filter,
+        filterConditions: agg.filter
+          ? agg.filter.conditions
+          : [{ column: columns.length > 0 ? columns[0] : "", operator: "==", value: "" }],
+        filterType: agg.filter?.type || "OR",
+      })),
+    )
+  }, [aggregations, columns])
 
   const addAggregation = () => {
     const newAggregations = [
@@ -69,6 +98,7 @@ export function AggregationFunctionEditor({
 
   const toggleFilter = (index: number) => {
     const agg = aggregations[index]
+    const currentFilterType = filterStates[index]?.filterType || "OR"
 
     if (agg.filter) {
       // Remove filter
@@ -78,12 +108,27 @@ export function AggregationFunctionEditor({
       // Add default filter
       updateAggregation(index, {
         filter: {
-          column: columns.length > 0 ? columns[0] : "",
-          operator: "==",
-          value: "",
+          conditions: [
+            {
+              column: columns.length > 0 ? columns[0] : "",
+              operator: "==",
+              value: "",
+            },
+          ],
+          type: currentFilterType,
         },
       })
     }
+
+    // Update filterEnabled state
+    setFilterStates((prevFilterStates) => {
+      const newFilterStates = [...prevFilterStates]
+      newFilterStates[index] = {
+        ...newFilterStates[index],
+        filterEnabled: !newFilterStates[index].filterEnabled,
+      }
+      return newFilterStates
+    })
   }
 
   const updateFilter = (index: number, filterUpdate: Partial<AggregationConfig["filter"]>) => {
@@ -117,6 +162,101 @@ export function AggregationFunctionEditor({
     }
   }
 
+  const updateFilterType = (index: number, filterType: "AND" | "OR") => {
+    setFilterStates((prevFilterStates) => {
+      const newFilterStates = [...prevFilterStates]
+      if (newFilterStates[index]) {
+        newFilterStates[index] = {
+          ...newFilterStates[index],
+          filterType,
+        }
+      }
+      return newFilterStates
+    })
+
+    const agg = aggregations[index]
+    if (agg.filter) {
+      updateFilter(index, { type: filterType })
+    }
+  }
+
+  const addFilterCondition = (index: number) => {
+    setFilterStates((prevFilterStates) => {
+      const newFilterStates = [...prevFilterStates]
+      if (newFilterStates[index]) {
+        const newConditions = [
+          ...newFilterStates[index].filterConditions,
+          { column: columns.length > 0 ? columns[0] : "", operator: "==", value: "" },
+        ]
+
+        newFilterStates[index] = {
+          ...newFilterStates[index],
+          filterConditions: newConditions,
+        }
+
+        // Update the actual aggregation with the new conditions
+        const currentFilterType = newFilterStates[index].filterType || "OR"
+        updateAggregation(index, {
+          filter: {
+            conditions: newConditions,
+            type: currentFilterType,
+          },
+        })
+      }
+      return newFilterStates
+    })
+  }
+
+  const removeFilterCondition = (index: number, conditionIndex: number) => {
+    setFilterStates((prevFilterStates) => {
+      const newFilterStates = [...prevFilterStates]
+      if (newFilterStates[index] && newFilterStates[index].filterConditions.length > 1) {
+        const newConditions = [...newFilterStates[index].filterConditions]
+        newConditions.splice(conditionIndex, 1)
+
+        newFilterStates[index] = {
+          ...newFilterStates[index],
+          filterConditions: newConditions,
+        }
+
+        // Update the actual aggregation with the new conditions
+        const currentFilterType = newFilterStates[index].filterType || "OR"
+        updateAggregation(index, {
+          filter: {
+            conditions: newConditions,
+            type: currentFilterType,
+          },
+        })
+      }
+      return newFilterStates
+    })
+  }
+
+  const updateFilterCondition = (index: number, conditionIndex: number, field: string, value: any) => {
+    setFilterStates((prevFilterStates) => {
+      const newFilterStates = [...prevFilterStates]
+      if (newFilterStates[index] && newFilterStates[index].filterConditions[conditionIndex]) {
+        const newConditions = [...newFilterStates[index].filterConditions]
+        newConditions[conditionIndex] = { ...newConditions[conditionIndex], [field]: value }
+
+        newFilterStates[index] = {
+          ...newFilterStates[index],
+          filterConditions: newConditions,
+        }
+
+        // Update the actual aggregation with the new conditions
+        const currentFilterType = newFilterStates[index].filterType || "OR"
+        updateAggregation(index, {
+          filter: {
+            conditions: newConditions,
+            type: currentFilterType,
+          },
+        })
+      }
+      return newFilterStates
+    })
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -133,149 +273,207 @@ export function AggregationFunctionEditor({
         </div>
       ) : (
         <Accordion type="multiple" value={expandedItems} onValueChange={setExpandedItems}>
-          {aggregations.map((agg, index) => (
-            <AccordionItem key={index} value={`item-${index}`} className="border rounded-md mb-3 overflow-hidden">
-              <AccordionTrigger className="px-4 py-2 hover:no-underline">
-                <div className="flex flex-1 items-center justify-between pr-4">
-                  <div className="font-medium">
-                    {getFunctionName(agg.function)}({agg.column}){agg.alias ? ` as ${agg.alias}` : ""}
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      removeAggregation(index)
-                    }}
-                    className="h-8 w-8 p-0 text-gray-500 hover:text-red-500"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    <span className="sr-only">Remove</span>
-                  </Button>
-                </div>
-              </AccordionTrigger>
-              <AccordionContent>
-                <div className="p-4 space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor={`function-${index}`}>Function</Label>
-                      <Select
-                        value={agg.function}
-                        onValueChange={(value) => updateAggregation(index, { function: value })}
-                      >
-                        <SelectTrigger id={`function-${index}`}>
-                          <SelectValue placeholder="Select function" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="sum">Sum</SelectItem>
-                          <SelectItem value="avg">Average</SelectItem>
-                          <SelectItem value="count">Count</SelectItem>
-                          <SelectItem value="min">Minimum</SelectItem>
-                          <SelectItem value="max">Maximum</SelectItem>
-                          <SelectItem value="distinct-count">Distinct Count</SelectItem>
-                        </SelectContent>
-                      </Select>
+          {aggregations.map((agg, index) => {
+            const filterEnabled = filterStates[index]?.filterEnabled
+            const filterConditions = filterStates[index]?.filterConditions || []
+
+            return (
+              <AccordionItem key={index} value={`item-${index}`} className="border rounded-md mb-3 overflow-hidden">
+                <AccordionTrigger className="px-4 py-2 hover:no-underline">
+                  <div className="flex flex-1 items-center justify-between pr-4">
+                    <div className="font-medium">
+                      {getFunctionName(agg.function)}({agg.column}){agg.alias ? ` as ${agg.alias}` : ""}
                     </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor={`column-${index}`}>Column</Label>
-                      <Select value={agg.column} onValueChange={(value) => updateAggregation(index, { column: value })}>
-                        <SelectTrigger id={`column-${index}`}>
-                          <SelectValue placeholder="Select column" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {columns.map((column) => (
-                            <SelectItem key={column} value={column}>
-                              {column}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        removeAggregation(index)
+                      }}
+                      className="h-8 w-8 p-0 text-gray-500 hover:text-red-500"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      <span className="sr-only">Remove</span>
+                    </Button>
                   </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor={`alias-${index}`}>Alias (optional)</Label>
-                    <Input
-                      id={`alias-${index}`}
-                      value={agg.alias || ""}
-                      onChange={(e) => updateAggregation(index, { alias: e.target.value })}
-                      placeholder="Optional name for this aggregation"
-                    />
-                  </div>
-
-                  <Card className="p-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center">
-                        <FilterIcon className="h-4 w-4 mr-2 text-gray-500" />
-                        <Label htmlFor={`filter-switch-${index}`} className="text-sm font-medium cursor-pointer">
-                          Filter rows
-                        </Label>
+                </AccordionTrigger>
+                <AccordionContent>
+                  <div className="p-4 space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor={`function-${index}`}>Function</Label>
+                        <Select
+                          value={agg.function}
+                          onValueChange={(value) => updateAggregation(index, { function: value })}
+                        >
+                          <SelectTrigger id={`function-${index}`}>
+                            <SelectValue placeholder="Select function" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="sum">Sum</SelectItem>
+                            <SelectItem value="avg">Average</SelectItem>
+                            <SelectItem value="count">Count</SelectItem>
+                            <SelectItem value="min">Minimum</SelectItem>
+                            <SelectItem value="max">Maximum</SelectItem>
+                            <SelectItem value="distinct-count">Distinct Count</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
-                      <Switch
-                        id={`filter-switch-${index}`}
-                        checked={!!agg.filter}
-                        onCheckedChange={() => toggleFilter(index)}
+
+                      <div className="space-y-2">
+                        <Label htmlFor={`column-${index}`}>Column</Label>
+                        <Select
+                          value={agg.column}
+                          onValueChange={(value) => updateAggregation(index, { column: value })}
+                        >
+                          <SelectTrigger id={`column-${index}`}>
+                            <SelectValue placeholder="Select column" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {columns.map((column) => (
+                              <SelectItem key={column} value={column}>
+                                {column}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor={`alias-${index}`}>Alias (optional)</Label>
+                      <Input
+                        id={`alias-${index}`}
+                        value={agg.alias || ""}
+                        onChange={(e) => updateAggregation(index, { alias: e.target.value })}
+                        placeholder="Optional name for this aggregation"
                       />
                     </div>
 
-                    {agg.filter && (
-                      <div className="mt-3 grid grid-cols-3 gap-2">
-                        <div>
-                          <Select
-                            value={agg.filter.column}
-                            onValueChange={(value) => updateFilter(index, { column: value })}
-                          >
-                            <SelectTrigger className="h-9">
-                              <SelectValue placeholder="Column" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {columns.map((column) => (
-                                <SelectItem key={column} value={column}>
-                                  {column}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                    <Card className="p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center">
+                          <FilterIcon className="h-4 w-4 mr-2 text-gray-500" />
+                          <Label htmlFor={`filter-switch-${index}`} className="text-sm font-medium cursor-pointer">
+                            Filter rows
+                          </Label>
                         </div>
-
-                        <div>
-                          <Select
-                            value={agg.filter.operator}
-                            onValueChange={(value) => updateFilter(index, { operator: value })}
-                          >
-                            <SelectTrigger className="h-9">
-                              <SelectValue placeholder="Operator" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="==">Equal (==)</SelectItem>
-                              <SelectItem value="!=">Not equal (!=)</SelectItem>
-                              <SelectItem value=">">Greater than (&gt;)</SelectItem>
-                              <SelectItem value=">=">Greater than or equal (&gt;=)</SelectItem>
-                              <SelectItem value="<">Less than (&lt;)</SelectItem>
-                              <SelectItem value="<=">Less than or equal (&lt;=)</SelectItem>
-                              <SelectItem value="contains">Contains</SelectItem>
-                              <SelectItem value="starts-with">Starts with</SelectItem>
-                              <SelectItem value="ends-with">Ends with</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div>
-                          <Input
-                            value={agg.filter.value}
-                            onChange={(e) => updateFilter(index, { value: e.target.value })}
-                            placeholder="Value"
-                            className="h-9"
-                          />
-                        </div>
+                        <Switch
+                          id={`filter-switch-${index}`}
+                          checked={filterEnabled}
+                          onCheckedChange={() => {
+                            toggleFilter(index)
+                          }}
+                        />
                       </div>
-                    )}
-                  </Card>
-                </div>
-              </AccordionContent>
-            </AccordionItem>
-          ))}
+
+                      {filterEnabled && (
+                        <div className="space-y-2 mt-2">
+                          {filterConditions.map((condition, conditionIndex) => (
+                            <div key={conditionIndex} className="flex items-center space-x-2 bg-gray-50 p-2 rounded-md">
+                              <Select
+                                value={condition.column}
+                                onValueChange={(value) => updateFilterCondition(index, conditionIndex, "column", value)}
+                              >
+                                <SelectTrigger className="w-[30%]">
+                                  <SelectValue placeholder="Column" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {columns.map((col) => (
+                                    <SelectItem key={col} value={col}>
+                                      {col}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+
+                              <Select
+                                value={condition.operator}
+                                onValueChange={(value) =>
+                                  updateFilterCondition(index, conditionIndex, "operator", value)
+                                }
+                              >
+                                <SelectTrigger className="w-[30%]">
+                                  <SelectValue placeholder="Operator" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="==">Equal (==)</SelectItem>
+                                  <SelectItem value="!=">Not Equal (!=)</SelectItem>
+                                  <SelectItem value=">">Greater Than (&gt;)</SelectItem>
+                                  <SelectItem value=">=">Greater or Equal (&gt;=)</SelectItem>
+                                  <SelectItem value="<">Less Than (&lt;)</SelectItem>
+                                  <SelectItem value="<=">Less or Equal (&lt;=)</SelectItem>
+                                </SelectContent>
+                              </Select>
+
+                              <Input
+                                className="w-[30%]"
+                                placeholder="Value"
+                                value={condition.value}
+                                onChange={(e) => updateFilterCondition(index, conditionIndex, "value", e.target.value)}
+                              />
+
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => removeFilterCondition(index, conditionIndex)}
+                                disabled={filterConditions.length === 1}
+                                title="Remove condition"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ))}
+
+                          <div className="mt-4 border-t pt-2">
+                            <div className="flex items-center justify-between">
+                              <div className="space-y-1">
+                                <Label className="text-xs font-medium">Condition Type</Label>
+                                <RadioGroup
+                                  value={filterStates[index]?.filterType || "OR"}
+                                  onValueChange={(value) => updateFilterType(index, value as "AND" | "OR")}
+                                  className="flex space-x-3"
+                                >
+                                  <div className="flex items-center space-x-1">
+                                    <RadioGroupItem value="AND" id={`and-${index}`} />
+                                    <Label htmlFor={`and-${index}`} className="text-xs">
+                                      AND
+                                    </Label>
+                                  </div>
+                                  <div className="flex items-center space-x-1">
+                                    <RadioGroupItem value="OR" id={`or-${index}`} />
+                                    <Label htmlFor={`or-${index}`} className="text-xs">
+                                      OR
+                                    </Label>
+                                  </div>
+                                </RadioGroup>
+                              </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => addFilterCondition(index)}
+                                title="Add another condition"
+                                className="text-xs"
+                              >
+                                <Plus className="h-3 w-3 mr-1" /> Add Condition
+                              </Button>
+                            </div>
+                          </div>
+
+                          <div className="flex justify-between items-center mt-2">
+                            <p className="text-xs text-gray-500">
+                              Filter conditions are combined with {filterStates[index]?.filterType || "OR"} logic
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </Card>
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            )
+          })}
         </Accordion>
       )}
 
@@ -286,3 +484,6 @@ export function AggregationFunctionEditor({
     </div>
   )
 }
+
+// Add this line to provide both default and named exports
+export { AggregationFunctionEditor }
