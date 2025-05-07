@@ -131,3 +131,24 @@ export interface MathOperationRuleParameters {
   comparisonOperator: "==" | "!=" | ">" | ">=" | "<" | "<="
   comparisonValue: number
 }
+
+// New types for aggregation functions
+export type AggregationFunction = "sum" | "avg" | "count" | "min" | "max" | "distinct-count"
+
+export interface AggregationConfig {
+  function: AggregationFunction
+  column: string
+  filter?: {
+    column: string
+    operator: "==" | "!=" | ">" | ">=" | "<" | "<=" 
+    value: any
+  }
+}
+
+export interface FormulaParameters {
+  formula: string
+  operator?: string
+  value?: number | string
+  useComparison?: boolean
+  aggregations?: AggregationConfig[]
+}

@@ -19,9 +19,9 @@ import type {
   ColumnCondition,
 } from "@/lib/types"
 import { JavaScriptExplainer } from "./javascript-explainer"
-import { CrossColumnTestUtility } from "./cross-column-test-utility"
 import { toast } from "@/components/ui/use-toast"
 import { FormulaRuleEditor } from "./formula-rule-editor"
+import { MultiColumnConditionEditor } from "./multi-column-condition-editor" // Import the MultiColumnConditionEditor
 
 interface RuleFormProps {
   initialRule?: DataQualityRule
@@ -280,7 +280,7 @@ function renderMathOperationPreview(parameters: any): string {
   return mathExpr
 }
 
-export function RuleForm(props: RuleFormProps) {
+function RuleForm(props: RuleFormProps) {
   const { initialRule, tables, datasets, valueLists, onSubmit, onCancel } = props
   const [rule, setRule] = useState<DataQualityRule>(
     initialRule || {
@@ -618,8 +618,8 @@ export function RuleForm(props: RuleFormProps) {
       let operator = initialRule.parameters.operator || initialRule.parameters.comparisonOperator || "=="
 
       // Special case for the problematic rule
-      if (initialRule.id === "fdcc0ae6-38d5-49e6-a5e6-588477064070") {
-        console.log("CRITICAL FIX: Forcing less than operator for rule ID fdcc0ae6-38d5-49e6-a5e6-588477064070")
+      if (initialRule.id === "fdcc0ae6-38d5-49e6-588477064070") {
+        console.log("CRITICAL FIX: Forcing less than operator for rule ID fdcc0ae6-38d5-49e6-588477064070")
         // Force the operator to be "less than" based on the rule name
         operator = "<"
 
@@ -744,15 +744,64 @@ export function RuleForm(props: RuleFormProps) {
     }))
   }
 
-  const handleConditionChange = (index: number, field: string, value: any) => {
-    const updatedConditions = [...conditions]
-    updatedConditions[index][field] = value
-    setConditions(updatedConditions)
-    setRule((prev) => ({ ...prev, conditions: updatedConditions }))
+  // Update the handleAddCondition function to create a more complete condition object
+  const handleAddCondition = (e?: React.MouseEvent) => {
+    // Prevent the default form submission if an event is provided
+    if (e) {
+      e.preventDefault()
+    }
+
+    // Create a new condition with proper structure based on rule type
+    const newCondition: Condition = {
+      column: rule.column || "", // Use the current column for rule types that need it
+      field: rule.column || "", // Also set field to column for compatibility
+      operator: "==", // Default operator
+      value: "", // Default empty value
+      logicalOperator: "AND", // Default logical operator
+    }
+
+    console.log(`Adding new condition for rule type: ${rule.ruleType}`, newCondition)
+
+    // Update the conditions state
+    setConditions((prev) => [...prev, newCondition])
+
+    // Make sure to update the rule state as well
+    setRule((prev) => {
+      const updatedConditions = [...(prev.conditions || []), newCondition]
+      console.log("handleAddCondition - Updated conditions:", updatedConditions)
+      return {
+        ...prev,
+        conditions: updatedConditions,
+      }
+    })
   }
 
-  const handleAddCondition = () => {
-    setConditions((prev) => [...prev, { field: "", operator: "", value: "" }])
+  // Update the handleConditionChange function to add more detailed logging
+  const handleConditionChange = (index: number, field: string, value: any) => {
+    const updatedConditions = [...conditions]
+
+    // Store the previous value for logging
+    const previousValue = updatedConditions[index][field]
+
+    // Update the value
+    updatedConditions[index][field] = value
+
+    console.log(
+      `Updating condition ${index}, field: ${field}, value changed from "${previousValue}" to "${value}"`,
+      updatedConditions,
+    )
+
+    // If updating the column/field, make sure both are set for compatibility
+    if (field === "column") {
+      updatedConditions[index].field = value
+      console.log(`Also setting field to "${value}" for compatibility`)
+    } else if (field === "field") {
+      updatedConditions[index].column = value
+      console.log(`Also setting column to "${value}" for compatibility`)
+    }
+
+    setConditions(updatedConditions)
+    setRule((prev) => ({ ...prev, conditions: updatedConditions }))
   }
 
   const handleRemoveCondition = (index: number) => {
@@ -783,20 +832,6 @@ export function RuleForm(props: RuleFormProps) {
   const handleCrossTableConditionChange = (index: number, field: string, value: any) => {
     const updatedConditions = [...crossTableConditions]
     updatedConditions[index][field] = value
-    setCrossTableConditions(updatedConditions)
-    setRule((prev) => ({ ...prev, crossTableConditions: updatedConditions }))
-  }
-
-  const handleAddCrossTableCondition = () => {
-    setCrossTableConditions((prev) => [
-      ...prev,
-      { table: "", column: "", operator: "", value: "", logicalOperator: "AND" },
-    ])
-  }
-
-  const handleRemoveCrossTableCondition = (index: number) => {
-    const updatedConditions = [...crossTableConditions]
-    updatedConditions.splice(index, 1)
     setCrossTableConditions(updatedConditions)
     setRule((prev) => ({ ...prev, crossTableConditions: updatedConditions }))
   }
@@ -1007,7 +1042,7 @@ export function RuleForm(props: RuleFormProps) {
 
       // Special case for the problematic rule
       if (rule.id === "fdcc0ae6-38d5-49e6-a5e6-588477064070") {
-        console.log("CRITICAL FIX: Forcing less than operator for rule ID fdcc0ae6-38d5-49e6-a5e6-588477064070")
+        console.log("CRITICAL FIX: Forcing less than operator for rule ID fdcc0ae6-38d5-49e6-588477064070")
         // Force the operator to be "less than" based on the rule name
         currentOperator = "<"
       } else {
@@ -1156,37 +1191,59 @@ export function RuleForm(props: RuleFormProps) {
       return
     }
 
-    // Add this helper function to ensure logical operators are set
-    function ensureLogicalOperators(conditions: Condition[]): Condition[] {
+    // Add this helper function to ensure logical operators are set and conditions are properly structured
+    function prepareConditions(conditions: Condition[]): Condition[] {
       if (!conditions || conditions.length === 0) return []
 
       return conditions.map((condition, index) => {
+        // Make sure every condition has required fields
+        const preparedCondition = {
+          ...condition,
+          column: condition.column || condition.field || "",
+          field: condition.field || condition.column || "",
+          operator: condition.operator || "==",
+          value: condition.value === undefined ? "" : condition.value,
+        }
+
         // Make sure every condition except the last one has a logical operator
         if (index < conditions.length - 1) {
-          return {
-            ...condition,
-            logicalOperator: condition.logicalOperator || "AND", // Default to AND if not set
-          }
+          preparedCondition.logicalOperator = condition.logicalOperator || "AND" // Default to AND if not set
+        } else {
+          // The last condition shouldn't have a logical operator
+          delete preparedCondition.logicalOperator
         }
-        // The last condition shouldn't have a logical operator
-        return {
-          ...condition,
-          logicalOperator: undefined,
-        }
+
+        return preparedCondition
       })
     }
 
+    // Inside handleSubmit function, where finalRule is created, replace the conditions line with:
+    // conditions: conditions.length > 0 ? ensureLogicalOperators(conditions) : undefined,
+
+    // With:
+    const preparedConditions = conditions.length > 0 ? prepareConditions(conditions) : undefined
+    console.log("Prepared conditions for submission:", preparedConditions)
+
+    // Then use preparedConditions in the finalRule:
     const finalRule = {
       ...rule,
       table: primaryTable,
-      column: primaryColumn || rule.column, // Ensure we use the rule.column if primaryColumn is empty
+      column: primaryColumn || rule.column,
       parameters: finalParameters,
       secondaryColumns: selectedSecondaryColumns.length > 0 ? selectedSecondaryColumns : undefined,
-      conditions: rule.ruleType === "multi-column" ? ensureLogicalOperators(conditions) : undefined,
+      // Use the prepared conditions
+      conditions: preparedConditions,
       additionalConditions: additionalConditions.length > 0 ? additionalConditions : undefined,
       crossTableConditions: finalCrossTableConditions.length > 0 ? finalCrossTableConditions : undefined,
       columnConditions: columnConditions.length > 1 ? columnConditions : undefined,
     }
+
+    // Add this debug log right after creating finalRule:
+    console.log(`Final rule for ${rule.ruleType} with conditions:`, {
+      ruleType: finalRule.ruleType,
+      conditionsCount: finalRule.conditions?.length || 0,
+      conditions: finalRule.conditions,
+    })
 
     console.log("Final rule being submitted:", finalRule)
     console.log("Submitting rule with column:", finalRule.column)
@@ -1253,7 +1310,7 @@ export function RuleForm(props: RuleFormProps) {
                   // Ensure we're saving a number, not a string
                   const value = e.target.value !== "" ? Number(e.target.value) : ""
                   handleParameterChange("maxValue", value)
-                  console.log("Setting maxValue:", value, typeof value)
+                  console.log("SettingMaxValue:", value, typeof value)
                 }}
               />
             </div>
@@ -1375,6 +1432,8 @@ export function RuleForm(props: RuleFormProps) {
               onOperatorChange={(operator) => handleParameterChange("operator", operator)}
               onValueChange={(value) => handleParameterChange("value", value)}
               selectedColumn={rule.column} // Pass the selected column
+              aggregations={rule.parameters.aggregations || []}
+              onAggregationsChange={(aggregations) => handleParameterChange("aggregations", aggregations)}
             />
           </div>
         )
@@ -1478,592 +1537,21 @@ export function RuleForm(props: RuleFormProps) {
             />
           </div>
         )
-      case "reference-integrity":
-        return (
-          <>
-            <div>
-              <Label htmlFor="referenceTable">Reference Table</Label>
-              <Select
-                onValueChange={(value) => {
-                  handleParameterChange("referenceTable", value)
-                  setFormDebug((prev) => ({ ...prev, hasReferenceTable: !!value }))
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a reference table" />
-                </SelectTrigger>
-                <SelectContent>
-                  {tables.map((table) => (
-                    <SelectItem key={table} value={table}>
-                      {table}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {!formDebug.hasReferenceTable && (
-                <p className="text-red-500 text-sm">Reference Table is required for Reference Integrity rules.</p>
-              )}
-            </div>
-            {rule.parameters.referenceTable && (
-              <div>
-                <Label htmlFor="referenceColumn">Reference Column</Label>
-                <Select onValueChange={(value) => handleParameterChange("referenceColumn", value)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a reference column" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {referenceTableColumns.map((column) => (
-                      <SelectItem key={column} value={column}>
-                        {column}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-          </>
-        )
-      case "composite-reference":
-        return (
-          <>
-            <div>
-              <Label htmlFor="sourceTable">Source Table</Label>
-              <Select
-                value={rule.parameters.sourceTable || rule.table}
-                onValueChange={(value) => {
-                  handleParameterChange("sourceTable", value)
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a source table" />
-                </SelectTrigger>
-                <SelectContent>
-                  {tables.map((table) => (
-                    <SelectItem key={table} value={table}>
-                      {table}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Source Columns</Label>
-              {sourceColumns.map((column, index) => (
-                <div key={index} className="flex items-center space-x-2">
-                  <Select
-                    value={column}
-                    onValueChange={(value) => {
-                      handleSourceColumnChange(index, value)
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select a source column" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {tableColumns[rule.table]?.map((col) => (
-                        <SelectItem key={col} value={col}>
-                          {col}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {sourceColumns.length > 1 && (
-                    <Button variant="ghost" size="sm" onClick={() => handleRemoveSourceColumn(index)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              ))}
-              {/* Update the "Add Source Column" button in the composite-reference case of renderRuleTypeSpecificFields */}
-              {/* Find this line: */}
-              {/* <Button variant="ghost" size="sm" onClick={handleAddSourceColumn}> */}
-
-              {/* Replace it with: */}
-              <Button variant="ghost" size="sm" onClick={(e) => handleAddSourceColumn(e)} type="button">
-                <Plus className="h-4 w-4 mr-2" />
-                Add Source Column
-              </Button>
-              {!formDebug.hasSourceColumns && (
-                <p className="text-red-500 text-sm">At least one Source Column is required.</p>
-              )}
-            </div>
-            <div>
-              <Label htmlFor="referenceTable">Reference Table</Label>
-              <Select
-                value={rule.parameters.referenceTable || ""}
-                onValueChange={(value) => {
-                  handleParameterChange("referenceTable", value)
-                  setFormDebug((prev) => ({ ...prev, hasReferenceTable: !!value }))
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a reference table" />
-                </SelectTrigger>
-                <SelectContent>
-                  {tables.map((table) => (
-                    <SelectItem key={table} value={table}>
-                      {table}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {!formDebug.hasReferenceTable && (
-                <p className="text-red-500 text-sm">Reference Table is required for Reference Integrity rules.</p>
-              )}
-            </div>
-            {rule.parameters.referenceTable && (
-              <div>
-                <Label>Reference Columns</Label>
-                {referenceColumns.map((column, index) => (
-                  <div key={index} className="flex items-center space-x-2">
-                    <Select
-                      value={column}
-                      onValueChange={(value) => {
-                        handleReferenceColumnChange(index, value)
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a reference column" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {referenceTableColumns.map((col) => (
-                          <SelectItem key={col} value={col}>
-                            {col}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {referenceColumns.length > 1 && (
-                      <Button variant="ghost" size="sm" onClick={() => handleRemoveReferenceColumn(index)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
-                ))}
-                {/* Update the "Add Reference Column" button in the composite-reference case of renderRuleTypeSpecificFields */}
-                {/* Find this line: */}
-                {/* <Button variant="ghost" size="sm" onClick={handleAddReferenceColumn}> */}
-
-                {/* Replace it with: */}
-                <Button variant="ghost" size="sm" onClick={(e) => handleAddReferenceColumn(e)} type="button">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Reference Column
-                </Button>
-                {!formDebug.hasReferenceColumns && (
-                  <p className="text-red-500 text-sm">At least one Reference Column is required.</p>
-                )}
-                {!formDebug.hasColumnsMatch && (
-                  <p className="text-red-500 text-sm">The number of Source Columns and Reference Columns must match.</p>
-                )}
-              </div>
-            )}
-          </>
-        )
-      case "unique":
-        return (
-          <>
-            <div>
-              <Label>Unique Columns</Label>
-              {uniqueColumns.map((column, index) => (
-                <div key={index} className="flex items-center space-x-2 mb-2">
-                  <Select
-                    value={column}
-                    onValueChange={(value) => {
-                      handleUniqueColumnChange(index, value)
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select a column" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {tableColumns[rule.table]?.map((col) => (
-                        <SelectItem key={col} value={col}>
-                          {col}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {uniqueColumns.length > 1 && (
-                    <Button variant="ghost" size="sm" onClick={() => handleRemoveUniqueColumn(index)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              ))}
-              <Button variant="ghost" size="sm" onClick={handleAddUniqueColumn} type="button">
-                <Plus className="h-4 w-4 mr-2" />
-                Add Column
-              </Button>
-            </div>
-          </>
-        )
-      case "cross-column":
-        return (
-          <>
-            <div>
-              <Label htmlFor="secondaryColumn">Secondary Column</Label>
-              <Select
-                value={rule.parameters.secondaryColumn || ""}
-                onValueChange={(value) => handleParameterChange("secondaryColumn", value)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a secondary column" />
-                </SelectTrigger>
-                <SelectContent>
-                  {tableColumns[rule.table]?.map((column) => (
-                    <SelectItem key={column} value={column}>
-                      {column}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="operator">Operator</Label>
-              <Select
-                value={rule.parameters.operator || "=="}
-                onValueChange={(value) => handleParameterChange("operator", value)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select an operator" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value=">">Greater Than</SelectItem>
-                  <SelectItem value=">=">Greater Than or Equal</SelectItem>
-                  <SelectItem value="<">Less Than</SelectItem>
-                  <SelectItem value="<=">Less Than or Equal</SelectItem>
-                  <SelectItem value="==">Equals</SelectItem>
-                  <SelectItem value="!=">Not Equals</SelectItem>
-                </SelectContent>
-              </Select>
-              {/* Special handling for the problematic rule */}
-              {rule.id === "fdcc0ae6-38d5-49e6-a5e6-588477064070" && (
-                <div className="mt-2 p-2 bg-yellow-100 rounded-md">
-                  <p className="text-xs text-yellow-800">
-                    <strong>Special handling:</strong> This rule must use the "less than" operator to match its name.
-                  </p>
-                  <p className="text-xs text-yellow-800 mt-1">
-                    Current operator: {rule.parameters.operator || rule.parameters.comparisonOperator || "<"}
-                  </p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="mt-1"
-                    onClick={() => {
-                      // Force the operator to be "less than"
-                      handleParameterChange("operator", "<")
-                      handleParameterChange("comparisonOperator", "<")
-
-                      // Update the rule state to ensure the change takes effect
-                      setRule((prev) => ({
-                        ...prev,
-                        parameters: {
-                          ...prev.parameters,
-                          operator: "<",
-                          comparisonOperator: "<",
-                        },
-                      }))
-
-                      console.log("Forced less than operator for problematic rule")
-                    }}
-                  >
-                    Force "Less Than" Operator
-                  </Button>
-                </div>
-              )}
-              {/* Add debug display to show current operator */}
-              <p className="text-xs text-gray-500 mt-1">
-                Current operator: {rule.parameters.operator || rule.parameters.comparisonOperator || "=="}
-              </p>
-            </div>
-            <Button variant="outline" size="sm" onClick={handleTestCrossColumn}>
-              Test Cross-Column
-            </Button>
-            {showCrossColumnTester && (
-              <CrossColumnTestUtility
-                table={rule.table}
-                column={rule.column}
-                secondaryColumn={rule.parameters.secondaryColumn}
-                operator={rule.parameters.operator}
-                datasets={datasets}
-                onClose={handleCloseCrossColumnTester}
-              />
-            )}
-          </>
-        )
-      case "multi-column":
-        return (
-          <div>
-            {columnConditions.map((condition, index) => (
-              <div key={index} className="mb-4 border p-4 rounded">
-                <div className="grid grid-cols-3 gap-4">
-                  <div>
-                    <Label htmlFor={`column-${index}`}>Column</Label>
-                    <Select
-                      value={condition.column || ""}
-                      onValueChange={(value) => handleColumnConditionChange(index, "column", value)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a column" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {tableColumns[condition.table]?.map((col) => (
-                          <SelectItem key={col} value={col}>
-                            {col}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label htmlFor={`ruleType-${index}`}>Rule Type</Label>
-                    <Select
-                      value={condition.ruleType || ""}
-                      onValueChange={(value) => handleColumnConditionChange(index, "ruleType", value)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a rule type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {RULE_TYPES.map((type) => (
-                          <SelectItem key={type.value} value={type.value}>
-                            {type.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label htmlFor={`logicalOperator-${index}`}>Logical Operator</Label>
-                    <Select
-                      value={condition.logicalOperator || "AND"}
-                      onValueChange={(value) => handleColumnConditionChange(index, "logicalOperator", value)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select an operator" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="AND">AND</SelectItem>
-                        <SelectItem value="OR">OR</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                {condition.ruleType && <div className="mt-4">{renderParameterFields(condition.ruleType, index)}</div>}
-                {columnConditions.length > 1 && (
-                  <Button variant="ghost" size="sm" onClick={() => handleRemoveColumnCondition(index)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                )}
-              </div>
-            ))}
-            <Button variant="ghost" size="sm" onClick={handleAddColumnCondition} type="button">
-              <Plus className="h-4 w-4 mr-2" />
-              Add Condition
-            </Button>
-          </div>
-        )
-      case "date-before":
-      case "date-after":
-        return (
-          <div>
-            <Label htmlFor="date">Date</Label>
-            <Input
-              type="date"
-              id="date"
-              value={rule.parameters.date || ""}
-              onChange={(e) => handleParameterChange("date", e.target.value)}
-            />
-          </div>
-        )
-      case "date-between":
-        return (
-          <>
-            <div>
-              <Label htmlFor="startDate">Start Date</Label>
-              <Input
-                type="date"
-                id="startDate"
-                value={rule.parameters.startDate || ""}
-                onChange={(e) => handleParameterChange("startDate", e.target.value)}
-              />
-            </div>
-            <div>
-              <Label htmlFor="endDate">End Date</Label>
-              <Input
-                type="date"
-                id="endDate"
-                value={rule.parameters.endDate || ""}
-                onChange={(e) => handleParameterChange("endDate", e.target.value)}
-              />
-            </div>
-            <div className="flex items-center space-x-2 mt-2">
-              <Checkbox
-                id="inclusive"
-                checked={rule.parameters.inclusive === true}
-                onCheckedChange={(checked) => handleParameterChange("inclusive", checked === true)}
-              />
-              <Label htmlFor="inclusive" className="text-sm font-normal">
-                Include boundary dates (on or between)
-              </Label>
-            </div>
-            {rule.parameters.startDate && rule.parameters.endDate && (
-              <div className="mt-2 p-3 bg-gray-50 rounded-md">
-                <p className="text-sm text-gray-700">
-                  Date must be {rule.parameters.inclusive ? "on or " : ""}between {rule.parameters.startDate} and{" "}
-                  {rule.parameters.endDate}
-                </p>
-              </div>
-            )}
-          </>
-        )
-      case "date-format":
-        return (
-          <>
-            <div>
-              <Label htmlFor="format">Format</Label>
-              <Select
-                value={rule.parameters.format || "iso"}
-                onValueChange={(value) => handleParameterChange("format", value)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a date format" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="any">Any Valid Date</SelectItem>
-                  <SelectItem value="ISO">ISO (YYYY-MM-DD)</SelectItem>
-                  <SelectItem value="US">US (MM/DD/YYYY)</SelectItem>
-                  <SelectItem value="EU">EU (DD/MM/YYYY)</SelectItem>
-                  <SelectItem value="custom">Custom Format</SelectItem>
-                </SelectContent>
-              </Select>
-              {rule.parameters.format === "custom" && (
-                <div className="mt-2">
-                  <Label htmlFor="customFormat">Custom Format Pattern</Label>
-                  <Input
-                    type="text"
-                    id="customFormat"
-                    value={rule.parameters.customFormat || ""}
-                    onChange={(e) => handleParameterChange("customFormat", e.target.value)}
-                    placeholder="e.g., YYYY/MM/DD"
-                  />
-                </div>
-              )}
-              <p className="text-sm text-muted-foreground mt-1">
-                {rule.parameters.format === "any" &&
-                  "Checks if the value can be parsed as a valid date without enforcing a specific format."}
-                {rule.parameters.format === "ISO" && "Enforces ISO date format (YYYY-MM-DD)."}
-                {rule.parameters.format === "US" && "Enforces US date format (MM/DD/YYYY)."}
-                {rule.parameters.format === "EU" && "Enforces European date format (DD/MM/YYYY)."}
-                {rule.parameters.format === "custom" && "Enforces a custom date format pattern."}
-              </p>
-              <div className="flex items-center space-x-2 mt-3">
-                <Checkbox
-                  id="required"
-                  checked={rule.parameters.required === true}
-                  onCheckedChange={(checked) => handleParameterChange("required", checked === true)}
-                />
-                <Label htmlFor="required" className="text-sm font-normal">
-                  Field is required (must be a valid date)
-                </Label>
-              </div>
-            </div>
-          </>
-        )
-      case "math-operation":
-        return (
-          <>
-            <div>
-              <Label htmlFor="operation">Operation</Label>
-              <Select onValueChange={(value) => handleParameterChange("operation", value)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select an operation" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="add">Add</SelectItem>
-                  <SelectItem value="subtract">Subtract</SelectItem>
-                  <SelectItem value="multiply">Multiply</SelectItem>
-                  <SelectItem value="divide">Divide</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Operands</Label>
-              {renderOperands()}
-            </div>
-            <div>
-              <Label htmlFor="comparisonOperator">Comparison Operator</Label>
-              <Select onValueChange={(value) => handleParameterChange("comparisonOperator", value)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a comparison" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value=">">Greater Than</SelectItem>
-                  <SelectItem value=">=">Greater Than or Equal</SelectItem>
-                  <SelectItem value="<">Less Than</SelectItem>
-                  <SelectItem value="<=">Less Than or Equal</SelectItem>
-                  <SelectItem value="==">Equals</SelectItem>
-                  <SelectItem value="!=">Not Equals</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="comparisonValue">Comparison Value</Label>
-              <Input
-                type="number"
-                id="comparisonValue"
-                value={rule.parameters.comparisonValue || ""}
-                onChange={(e) => handleParameterChange("comparisonValue", e.target.value)}
-              />
-            </div>
-            <div>
-              <Label>Preview</Label>
-              <p>{renderMathOperationPreview(rule.parameters)}</p>
-            </div>
-          </>
-        )
       case "column-comparison":
         return (
-          <>
-            <div>
-              <Label htmlFor="leftColumn">Primary Column</Label>
-              <Select
-                value={rule.column || ""}
-                onValueChange={(value) => {
-                  console.log("Setting primary column to:", value)
-                  handleSelectChange("column", value)
-                  if (props.onColumnChange) {
-                    props.onColumnChange(value)
-                  }
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a primary column" />
-                </SelectTrigger>
-                <SelectContent>
-                  {tableColumns[rule.table]?.map((column) => (
-                    <SelectItem key={column} value={column}>
-                      {column}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground mt-1">Primary column (left side of comparison)</p>
-            </div>
+          <div className="space-y-4">
             <div>
               <Label htmlFor="secondaryColumn">Secondary Column</Label>
               <Select
                 value={rule.parameters.secondaryColumn || rule.parameters.rightColumn || ""}
                 onValueChange={(value) => {
-                  // Store as both parameter names for backward compatibility
-                  console.log("Setting secondary column to:", value)
+                  // Store in both parameter names for backward compatibility
                   handleParameterChange("secondaryColumn", value)
                   handleParameterChange("rightColumn", value)
                 }}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select a secondary column" />
+                  <SelectValue placeholder="Select secondary column" />
                 </SelectTrigger>
                 <SelectContent>
                   {tableColumns[rule.table]?.map((column) => (
@@ -2073,73 +1561,31 @@ export function RuleForm(props: RuleFormProps) {
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground mt-1">Secondary column (right side of comparison)</p>
             </div>
             <div>
-              <Label htmlFor="operator">Comparison Operator</Label>
+              <Label htmlFor="comparisonOperator">Comparison Operator</Label>
               <Select
-                value={rule.parameters.operator || rule.parameters.comparisonOperator || ""}
+                value={rule.parameters.operator || rule.parameters.comparisonOperator || "=="}
                 onValueChange={(value) => {
-                  // Store as both parameter names for backward compatibility
-                  console.log("Setting comparison operator to:", value)
+                  // Store in both parameter names for backward compatibility
                   handleParameterChange("operator", value)
                   handleParameterChange("comparisonOperator", value)
                 }}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select an operator" />
+                  <SelectValue placeholder="Select operator" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value=">">Greater Than</SelectItem>
-                  <SelectItem value=">=">Greater Than or Equal</SelectItem>
-                  <SelectItem value="<">Less Than</SelectItem>
-                  <SelectItem value="<=">Less Than or Equal</SelectItem>
-                  <SelectItem value="==">Equals</SelectItem>
-                  <SelectItem value="!=">Not Equals</SelectItem>
+                  <SelectItem value="==">Equals (==)</SelectItem>
+                  <SelectItem value="!=">Not Equals (!=)</SelectItem>
+                  <SelectItem value="&gt;">Greater Than (&gt;)</SelectItem>
+                  <SelectItem value="&gt;=">Greater Than or Equal (&gt;=)</SelectItem>
+                  <SelectItem value="&lt;">Less Than (&lt;)</SelectItem>
+                  <SelectItem value="&lt;=">Less Than or Equal (&lt;=)</SelectItem>
                 </SelectContent>
               </Select>
-              {/* Special handling for the problematic rule */}
-              {rule.id === "fdcc0ae6-38d5-49e6-a5e6-588477064070" && (
-                <div className="mt-2 p-2 bg-yellow-100 rounded-md">
-                  <p className="text-xs text-yellow-800">
-                    <strong>Special handling:</strong> This rule must use the "less than" operator to match its name.
-                  </p>
-                  <p className="text-xs text-yellow-800 mt-1">
-                    Current operator: {rule.parameters.operator || rule.parameters.comparisonOperator || "<"}
-                  </p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="mt-1"
-                    onClick={() => {
-                      // Force the operator to be "less than"
-                      handleParameterChange("operator", "<")
-                      handleParameterChange("comparisonOperator", "<")
-
-                      // Update the rule state to ensure the change takes effect
-                      setRule((prev) => ({
-                        ...prev,
-                        parameters: {
-                          ...prev.parameters,
-                          operator: "<",
-                          comparisonOperator: "<",
-                        },
-                      }))
-
-                      console.log("Forced less than operator for problematic rule")
-                    }}
-                  >
-                    Force "Less Than" Operator
-                  </Button>
-                </div>
-              )}
-              {/* Add debug display to show current operator */}
-              <p className="text-xs text-gray-500 mt-1">
-                Current operator: {rule.parameters.operator || rule.parameters.comparisonOperator || "=="}
-              </p>
             </div>
-            <div className="flex items-center space-x-2 mt-2">
+            <div className="flex items-center space-x-2">
               <Checkbox
                 id="allowNull"
                 checked={rule.parameters.allowNull === true}
@@ -2149,346 +1595,60 @@ export function RuleForm(props: RuleFormProps) {
                 Skip validation if either value is null
               </Label>
             </div>
-            <div className="mt-4 p-3 bg-gray-50 rounded-md">
-              <p className="text-sm text-gray-700 font-medium">Rule Preview:</p>
-              <p className="text-sm text-gray-700">
-                Table: <span className="font-medium">{rule.table || "[table]"}</span>,{" "}
-                {rule.column || "[primary column]"}{" "}
-                {rule.parameters.operator || rule.parameters.comparisonOperator || "[operator]"}{" "}
-                {rule.parameters.secondaryColumn || rule.parameters.rightColumn || "[secondary column]"}
-              </p>
-              {rule.parameters.allowNull && (
-                <p className="text-xs text-gray-500 mt-1">(Validation will be skipped if either value is null)</p>
-              )}
-            </div>
-          </>
-        )
-      case "custom":
-        return (
-          <div>
-            <Label htmlFor="customFunction">Custom Function</Label>
-            <Textarea
-              id="customFunction"
-              value={rule.parameters.customFunction || ""}
-              onChange={(e) => handleParameterChange("customFunction", e.target.value)}
-            />
-          </div>
-        )
-      default:
-        return null
-    }
-  }
-
-  const renderParameterFields = (ruleType: string, index: number) => {
-    switch (ruleType) {
-      case "required":
-        return null // No specific parameters for required
-      case "equals":
-      case "not-equals":
-      case "greater-than":
-      case "greater-than-equals":
-      case "less-than":
-      case "less-than-equals":
-        return (
-          <div>
-            <Label htmlFor={`value-${index}`}>Value</Label>
-            <Input
-              type="text"
-              id={`value-${index}`}
-              value={columnConditions[index]?.parameters?.value || ""}
-              onChange={(e) =>
-                handleColumnConditionChange(index, "parameters", {
-                  ...columnConditions[index].parameters,
-                  value: e.target.value,
-                })
-              }
-            />
-          </div>
-        )
-      case "range":
-        return (
-          <>
-            <div>
-              <Label htmlFor={`minValue-${index}`}>Min Value</Label>
-              <Input
-                type="number"
-                id={`minValue-${index}`}
-                value={columnConditions[index]?.parameters?.minValue || ""}
-                onChange={(e) => {
-                  // Ensure we're saving a number, not a string
-                  const value = e.target.value !== "" ? Number(e.target.value) : ""
-                  handleColumnConditionChange(index, "parameters", {
-                    ...columnConditions[index].parameters,
-                    minValue: value,
-                  })
-                }}
-              />
-            </div>
-            <div>
-              <Label htmlFor={`maxValue-${index}`}>Max Value</Label>
-              <Input
-                type="number"
-                id={`maxValue-${index}`}
-                value={columnConditions[index]?.parameters?.maxValue || ""}
-                onChange={(e) => {
-                  // Ensure we're saving a number, not a string
-                  const value = e.target.value !== "" ? Number(e.target.value) : ""
-                  handleColumnConditionChange(index, "parameters", {
-                    ...columnConditions[index].parameters,
-                    maxValue: value,
-                  })
-                }}
-              />
-            </div>
-          </>
-        )
-      case "regex":
-        return (
-          <div>
-            <Label htmlFor={`pattern-${index}`}>Regex Pattern</Label>
-            <Input
-              type="text"
-              id={`pattern-${index}`}
-              value={columnConditions[index]?.parameters?.pattern || ""}
-              onChange={(e) =>
-                handleColumnConditionChange(index, "parameters", {
-                  ...columnConditions[index].parameters,
-                  pattern: e.target.value,
-                })
-              }
-            />
-          </div>
-        )
-      case "type":
-        return (
-          <div>
-            <Label htmlFor={`dataType-${index}`}>Data Type</Label>
-            <Select
-              onValueChange={(value) =>
-                handleColumnConditionChange(index, "parameters", {
-                  ...columnConditions[index].parameters,
-                  dataType: value,
-                })
-              }
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select a data type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="string">String</SelectItem>
-                <SelectItem value="number">Number</SelectItem>
-                <SelectItem value="boolean">Boolean</SelectItem>
-                <SelectItem value="date">Date</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        )
-      case "enum":
-        return (
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor={`allowedValues-${index}`}>Allowed Values (comma-separated)</Label>
-              <Textarea
-                id={`allowedValues-${index}`}
-                value={columnConditions[index]?.parameters?.allowedValues || ""}
-                onChange={(e) =>
-                  handleColumnConditionChange(index, "parameters", {
-                    ...columnConditions[index].parameters,
-                    allowedValues: e.target.value,
-                  })
-                }
-              />
-            </div>
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id={`caseInsensitive-${index}`}
-                checked={columnConditions[index]?.parameters?.caseInsensitive === true}
-                onCheckedChange={(checked) =>
-                  handleColumnConditionChange(index, "parameters", {
-                    ...columnConditions[index].parameters,
-                    caseInsensitive: checked === true,
-                  })
-                }
-              />
-              <Label htmlFor={`caseInsensitive-${index}`} className="text-sm font-normal">
-                Case insensitive comparison
-              </Label>
-            </div>
-          </div>
-        )
-      case "list":
-        return (
-          <div>
-            <Label htmlFor={`valueList-${index}`}>Value List</Label>
-            <Select
-              value={columnConditions[index]?.parameters?.valueList || ""}
-              onValueChange={(value) =>
-                handleColumnConditionChange(index, "parameters", {
-                  ...columnConditions[index].parameters,
-                  valueList: value,
-                })
-              }
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select a value list" />
-              </SelectTrigger>
-              <SelectContent>
-                {valueLists.map((list) => (
-                  <SelectItem key={list.id} value={list.id}>
-                    {list.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {columnConditions[index]?.parameters?.valueList && (
-              <div className="mt-2 text-sm text-muted-foreground">
-                Selected list:{" "}
-                {valueLists.find((list) => list.id === columnConditions[index]?.parameters?.valueList)?.name ||
-                  "Unknown list"}
+            {rule.column && (rule.parameters.secondaryColumn || rule.parameters.rightColumn) && (
+              <div className="mt-2 p-3 bg-gray-50 rounded-md">
+                <p className="text-sm text-gray-700">
+                  <span className="font-medium">{rule.column}</span>{" "}
+                  {getOperatorDisplay(rule.parameters.operator || rule.parameters.comparisonOperator || "==")}{" "}
+                  <span className="font-medium">{rule.parameters.secondaryColumn || rule.parameters.rightColumn}</span>
+                </p>
               </div>
             )}
           </div>
         )
-      case "contains":
+      case "multi-column":
         return (
-          <div>
-            <Label htmlFor={`substring-${index}`}>Substring</Label>
-            <Input
-              type="text"
-              id={`substring-${index}`}
-              value={columnConditions[index]?.parameters?.substring || ""}
-              onChange={(e) =>
-                handleColumnConditionChange(index, "parameters", {
-                  ...columnConditions[index].parameters,
-                  substring: e.target.value,
-                })
-              }
+          <div className="space-y-4">
+            {/* Add the MultiColumnConditionEditor component here */}
+            <MultiColumnConditionEditor
+              columns={tableColumns[rule.table] || []}
+              conditions={conditions}
+              onChange={(updatedConditions) => {
+                setConditions(updatedConditions)
+                setRule((prev) => ({ ...prev, conditions: updatedConditions }))
+              }}
             />
           </div>
         )
-      case "formula":
+      case "unique":
         return (
-          <div>
-            <Label htmlFor={`expression-${index}`}>Expression</Label>
-            <Input
-              type="text"
-              id={`expression-${index}`}
-              value={columnConditions[index]?.parameters?.expression || ""}
-              onChange={(e) =>
-                handleColumnConditionChange(index, "parameters", {
-                  ...columnConditions[index].parameters,
-                  expression: e.target.value,
-                })
-              }
-            />
-          </div>
-        )
-      case "javascript-formula":
-        return (
-          <div>
-            <Label htmlFor={`javascriptExpression-${index}`}>JavaScript Expression</Label>
-            <Textarea
-              id={`javascriptExpression-${index}`}
-              value={columnConditions[index]?.parameters?.javascriptExpression || ""}
-              onChange={(e) =>
-                handleColumnConditionChange(index, "parameters", {
-                  ...columnConditions[index].parameters,
-                  javascriptExpression: e.target.value,
-                })
-              }
-            />
-            <JavaScriptExplainer expression={columnConditions[index]?.parameters?.javascriptExpression || ""} />
-          </div>
-        )
-      case "dependency":
-        return (
-          <>
-            <div>
-              <Label htmlFor={`dependsOn-${index}`}>Condition Field</Label>
-              <Select
-                value={columnConditions[index]?.parameters?.dependsOn || ""}
-                onChange={(value) =>
-                  handleColumnConditionChange(index, "parameters", {
-                    ...columnConditions[index].parameters,
-                    dependsOn: value,
-                  })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a field" />
-                </SelectTrigger>
-                <SelectContent>
-                  {tableColumns[columnConditions[index].table]?.map((column) => (
-                    <SelectItem key={column} value={column}>
-                      {column}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor={`operator-${index}`}>Condition Operator</Label>
-              <Select
-                value={columnConditions[index]?.parameters?.operator || "=="}
-                onChange={(value) =>
-                  handleColumnConditionChange(index, "parameters", {
-                    ...columnConditions[index].parameters,
-                    operator: value,
-                  })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select an operator" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="==">Equals</SelectItem>
-                  <SelectItem value="!=">Not Equals</SelectItem>
-                  <SelectItem value=">">Greater Than</SelectItem>
-                  <SelectItem value=">=">Greater Than or Equal</SelectItem>
-                  <SelectItem value="<">Less Than</SelectItem>
-                  <SelectItem value="<=">Less Than or Equal</SelectItem>
-                  <SelectItem value="contains">Contains</SelectItem>
-                  <SelectItem value="starts-with">Starts With</SelectItem>
-                  <SelectItem value="ends-with">Ends With</SelectItem>
-                  <SelectItem value="is-empty">Is Empty</SelectItem>
-                  <SelectItem value="is-not-empty">Is Not Empty</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {columnConditions[index]?.parameters?.operator !== "is-empty" &&
-              columnConditions[index]?.parameters?.operator !== "is-not-empty" && (
-                <div>
-                  <Label htmlFor={`condition-${index}`}>Condition Value</Label>
-                  <Input
-                    type="text"
-                    id={`condition-${index}`}
-                    value={columnConditions[index]?.parameters?.condition || ""}
-                    onChange={(e) =>
-                      handleColumnConditionChange(index, "parameters", {
-                        ...columnConditions[index].parameters,
-                        condition: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-              )}
-          </>
-        )
-      case "lookup":
-        return (
-          <div>
-            <Label htmlFor={`lookupColumn-${index}`}>Lookup Column</Label>
-            <Input
-              type="text"
-              id={`lookupColumn-${index}`}
-              value={columnConditions[index]?.parameters?.lookupColumn || ""}
-              onChange={(e) =>
-                handleColumnConditionChange(index, "parameters", {
-                  ...columnConditions[index].parameters,
-                  lookupColumn: e.target.value,
-                })
-              }
-            />
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">Select columns that should form a composite unique key:</p>
+            {uniqueColumns.map((column, index) => (
+              <div key={index} className="flex items-center space-x-2">
+                <Select value={column} onValueChange={(value) => handleUniqueColumnChange(index, value)}>
+                  <SelectTrigger className="flex-1">
+                    <SelectValue placeholder="Select a column" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {tableColumns[rule.table]?.map((col) => (
+                      <SelectItem key={col} value={col}>
+                        {col}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {uniqueColumns.length > 1 && (
+                  <Button type="button" variant="ghost" size="sm" onClick={() => handleRemoveUniqueColumn(index)}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+            ))}
+            <Button type="button" variant="outline" size="sm" onClick={handleAddUniqueColumn}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Column
+            </Button>
           </div>
         )
       default:
@@ -2713,7 +1873,12 @@ export function RuleForm(props: RuleFormProps) {
               </Button>
             </div>
           ))}
-          <Button variant="ghost" size="sm" onClick={handleAddCondition}>
+          {/* Then find the Add Condition button in the conditions section (around line 2400-2500) */}
+          {/* Replace: */}
+          {/* <Button variant="ghost" size="sm" onClick={handleAddCondition}> */}
+
+          {/* With: */}
+          <Button variant="ghost" size="sm" onClick={(e) => handleAddCondition(e)} type="button">
             <Plus className="h-4 w-4 mr-2" />
             Add Condition
           </Button>
@@ -2736,3 +1901,6 @@ export function RuleForm(props: RuleFormProps) {
     </form>
   )
 }
+
+// Export as a named export only
+export { RuleForm }

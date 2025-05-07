@@ -85,14 +85,15 @@ export function MultiColumnConditionEditor({ columns, conditions, onChange }: Mu
 
   // Update newCondition when conditions change (e.g., when editing a rule)
   useEffect(() => {
+    // Only update the newCondition when conditions array changes length
+    // This prevents copying the last condition when just viewing the form
     if (conditions && conditions.length > 0) {
-      console.log("Updating newCondition from conditions:", conditions)
-      // Use the last condition as a template for the next one to add
-      const lastCondition = conditions[conditions.length - 1]
+      console.log("Conditions array changed:", conditions)
+      // Reset to default values instead of copying the last condition
       setNewCondition({
-        column: lastCondition.column || "",
-        operator: lastCondition.operator || "==",
-        value: lastCondition.value === undefined ? "" : lastCondition.value,
+        column: "",
+        operator: "==",
+        value: "",
         logicalOperator: "AND",
       })
     }
@@ -436,17 +437,14 @@ export function MultiColumnConditionEditor({ columns, conditions, onChange }: Mu
               const operator =
                 operatorOptions.find((op) => op.value === condition.operator)?.label || condition.operator
               const value = condition.value === null ? "null" : String(condition.value)
-              const logicalOp = condition.logicalOperator || ""
 
               return (
                 <span key={index}>
+                  {/* Only show logical operator before conditions after the first one */}
                   {index > 0 && <span className="font-bold"> {conditions[index - 1].logicalOperator} </span>}
                   <span>
                     ({column} {operator} {value})
                   </span>
-                  {index < conditions.length - 1 && index === conditions.length - 2 && (
-                    <span className="font-bold"> {logicalOp} </span>
-                  )}
                 </span>
               )
             })}

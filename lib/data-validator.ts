@@ -58,6 +58,99 @@ function debugListValidation(value: any, listId: string, list: ValueList | undef
   console.log("============================")
 }
 
+// Add this logging function at the top of the file, after the existing debug functions
+function debugConditions(
+  rule: DataQualityRule,
+  conditions: Condition[],
+  result: { isValid: boolean; message: string },
+) {
+  console.log("=== Conditions Validation Debug ===")
+  console.log("Rule:", {
+    id: rule.id,
+    name: rule.name,
+    ruleType: rule.ruleType,
+    conditions: conditions,
+  })
+  console.log("Conditions count:", conditions?.length || 0)
+
+  if (conditions && conditions.length > 0) {
+    conditions.forEach((condition, index) => {
+      console.log(`Condition ${index}:`, {
+        column: condition.column,
+        field: condition.field,
+        operator: condition.operator,
+        value: condition.value,
+        logicalOperator: condition.logicalOperator,
+      })
+    })
+  } else {
+    console.log("No conditions found for this rule")
+  }
+
+  console.log("Validation result:", result)
+  console.log("===============================")
+}
+
+// Add this near the top of the file with the other helper functions
+function computeAggregation(dataset: DataRecord[], config: AggregationConfig): number {
+  // Apply filter if it exists
+  let filteredData = dataset
+  if (config.filter) {
+    filteredData = dataset.filter((row) => {
+      const columnValue = row[config.filter!.column]
+      const filterValue = config.filter!.value
+
+      switch (config.filter!.operator) {
+        case "==":
+          return columnValue == filterValue
+        case "!=":
+          return columnValue != filterValue
+        case ">":
+          return columnValue > filterValue
+        case ">=":
+          return columnValue >= filterValue
+        case "<":
+          return columnValue < filterValue
+        case "<=":
+          return columnValue <= filterValue
+        default:
+          return true
+      }
+    })
+  }
+
+  // Get the values from the specified column
+  const values = filteredData
+    .map((row) => {
+      const val = row[config.column]
+      return typeof val === "string" ? Number(val) : val
+    })
+    .filter((val) => typeof val === "number" && !isNaN(val))
+
+  if (values.length === 0) {
+    return 0 // Default for empty datasets
+  }
+
+  // Apply the aggregation function
+  switch (config.function) {
+    case "sum":
+      return values.reduce((sum, val) => sum + val, 0)
+    case "avg":
+      return values.reduce((sum, val) => sum + val, 0) / values.length
+    case "count":
+      return values.length
+    case "min":
+      return Math.min(...values)
+    case "max":
+      return Math.max(...values)
+    case "distinct-count":
+      return new Set(values).size
+    default:
+      console.error(`Unknown aggregation function: ${config.function}`)
+      return 0
+  }
+}
+
 // Define all validation functions at the top level, before they're used
 
 // Define validateList at the top level so it's available to all functions
@@ -301,26 +394,87 @@ function validateDependency(
 }
 
 // Define validateMultiColumn at the top level
+// Find the `validateMultiColumn` function and replace it with this improved version that correctly handles logical operators between conditions:
+
 function validateMultiColumn(
   row: DataRecord,
   conditions: any[],
   datasets: DataTables,
   valueLists: ValueList[],
 ): { isValid: boolean; message: string } {
-  let isValid = true
-  let message = ""
+  console.log("validateMultiColumn called with:", {
+    rowKeys: Object.keys(row),
+    conditionsCount: conditions?.length || 0,
+    conditions,
+  })
 
-  for (const condition of conditions) {
-    const columnValue = row[condition.column]
-    const conditionResult = validateSingleColumnCondition(columnValue, row, condition, datasets, valueLists)
-
-    if (!conditionResult.isValid) {
-      isValid = false
-      message = conditionResult.message
-      break
-    }
+  // If no conditions, validation passes
+  if (!conditions || conditions.length === 0) {
+    console.log("No conditions to validate")
+    return { isValid: true, message: "" }
   }
 
+  // Start with the first condition
+  const firstCondition = conditions[0]
+
+  // Determine which field to use (column or field)
+  const firstFieldName = firstCondition.column || firstCondition.field
+
+  if (!firstFieldName || !(firstFieldName in row)) {
+    console.warn(`First field ${firstFieldName} not found in row. Available fields:`, Object.keys(row))
+    return { isValid: false, message: `Column ${firstFieldName} not found in data` }
+  }
+
+  const firstColumnValue = row[firstFieldName]
+
+  // Validate the first condition
+  const result = validateSingleColumnCondition(firstColumnValue, row, firstCondition, datasets, valueLists)
+  let isValid = result.isValid
+  let message = result.message
+
+  console.log(`First condition (${firstFieldName}) validation result:`, result)
+
+  // Process subsequent conditions with their logical operators
+  for (let i = 1; i < conditions.length; i++) {
+    const condition = conditions[i]
+    const prevCondition = conditions[i - 1]
+    const logicalOp = prevCondition.logicalOperator || "AND"
+
+    // Determine which field to use (column or field)
+    const fieldName = condition.column || condition.field
+
+    if (!fieldName || !(fieldName in row)) {
+      console.warn(`Field ${fieldName} not found in row. Available fields:`, Object.keys(row))
+      continue
+    }
+
+    const columnValue = row[fieldName]
+
+    // Validate this condition
+    const conditionResult = validateSingleColumnCondition(columnValue, row, condition, datasets, valueLists)
+
+    console.log(`Condition ${i} (${fieldName}) validation result:`, {
+      result: conditionResult,
+      logicalOperator: logicalOp,
+    })
+
+    // Apply logical operator
+    if (logicalOp === "AND") {
+      isValid = isValid && conditionResult.isValid
+      if (!conditionResult.isValid) {
+        message = conditionResult.message
+      }
+    } else if (logicalOp === "OR") {
+      isValid = isValid || conditionResult.isValid
+      if (isValid && conditionResult.isValid) {
+        message = "" // Clear error message if OR condition passes
+      }
+    }
+
+    console.log(`After condition ${i}, combined result:`, { isValid, message })
+  }
+
+  console.log(`Final multi-column validation result: ${isValid}`)
   return {
     isValid,
     message,
@@ -403,6 +557,26 @@ function validateCustom(
       isValid: false,
       message: `Error evaluating custom function: ${error.message}\nFunction: ${functionBody}`,
     }
+  }
+}
+
+// Add this helper function
+function getFunctionFromName(name: string): string {
+  switch (name.toLowerCase()) {
+    case "sum":
+      return "sum"
+    case "avg":
+      return "avg"
+    case "count":
+      return "count"
+    case "min":
+      return "min"
+    case "max":
+      return "max"
+    case "distinct_count":
+      return "distinct-count"
+    default:
+      return name.toLowerCase()
   }
 }
 
@@ -1282,6 +1456,11 @@ export function validateDataset(
         return // Skip the rest of the processing for date rules
       }
 
+      // Inside the main rule processing loop in validateDataset, add this before checking conditions:
+      if (rule.conditions && rule.conditions.length > 0) {
+        console.log(`Processing rule ${rule.name} with ${rule.conditions.length} conditions:`, rule.conditions)
+      }
+
       // Process rule based on its type
       switch (rule.ruleType) {
         // Find the validateColumnComparison function and completely replace it with this new implementation
@@ -1367,6 +1546,11 @@ export function validateDataset(
             let isValid = true
             let message = ""
 
+            // Add this logging for conditions
+            if (rule.conditions && rule.conditions.length > 0) {
+              console.log(`Validating ${rule.conditions.length} conditions for rule ${rule.name}:`, rule.conditions)
+            }
+
             // Validate based on rule type
             switch (rule.ruleType) {
               case "required":
@@ -1377,6 +1561,11 @@ export function validateDataset(
                 break
               case "not-equals":
                 ;({ isValid, message } = validateNotEquals(value, rule.parameters.value))
+                console.log(`Not equals validation result for ${rule.name}:`, {
+                  value,
+                  compareValue: rule.parameters.value,
+                  isValid,
+                })
                 break
               case "greater-than":
                 ;({ isValid, message } = validateGreaterThan(value, rule.parameters.value))
@@ -1391,6 +1580,15 @@ export function validateDataset(
                 ;({ isValid, message } = validateLessThanEquals(value, rule.parameters.value))
                 break
               case "range":
+                // Add debug logging for range rule
+                console.log("Processing range rule:", {
+                  ruleName: rule.name,
+                  value,
+                  min: rule.parameters.min,
+                  max: rule.parameters.max,
+                  allParameters: rule.parameters,
+                })
+                // Make sure we're passing the correct parameters
                 ;({ isValid, message } = validateRange(
                   value,
                   rule.parameters.min !== undefined ? rule.parameters.min : rule.parameters.minValue,
@@ -1404,7 +1602,16 @@ export function validateDataset(
                 ;({ isValid, message } = validateType(value, rule.parameters.dataType))
                 break
               case "enum":
+                // Add debug logging for enum rule
+                console.log("Processing enum rule:", {
+                  ruleName: rule.name,
+                  value,
+                  allowedValues: rule.parameters.allowedValues,
+                  caseInsensitive: rule.parameters.caseInsensitive,
+                })
+
                 if (rule.parameters.caseInsensitive === true) {
+                  // Ensure allowedValues exists and is an array
                   const allowedValues = Array.isArray(rule.parameters.allowedValues)
                     ? rule.parameters.allowedValues
                     : typeof rule.parameters.allowedValues === "string"
@@ -1412,8 +1619,11 @@ export function validateDataset(
                       : rule.parameters.allowedValues
                         ? [rule.parameters.allowedValues]
                         : []
+
+                  console.log("Enum validation with values:", allowedValues)
                   ;({ isValid, message } = validateEnumCaseInsensitive(value, allowedValues))
                 } else {
+                  // Ensure allowedValues exists and is an array
                   const allowedValues = Array.isArray(rule.parameters.allowedValues)
                     ? rule.parameters.allowedValues
                     : typeof rule.parameters.allowedValues === "string"
@@ -1421,6 +1631,8 @@ export function validateDataset(
                       : rule.parameters.allowedValues
                         ? [rule.parameters.allowedValues]
                         : []
+
+                  console.log("Enum validation with values:", allowedValues)
                   ;({ isValid, message } = validateEnum(value, allowedValues))
                 }
                 break
@@ -1428,6 +1640,13 @@ export function validateDataset(
                 const listResult = validateList(value, rule.parameters.listId || rule.parameters.valueList, valueLists)
                 isValid = listResult.isValid
                 message = listResult.message
+
+                // Log the list validation result
+                console.log(`List rule validation (${rule.name}): ${isValid ? "PASS" : "FAIL"}`, {
+                  value,
+                  listId: rule.parameters.listId || rule.parameters.valueList,
+                  message,
+                })
                 break
               case "contains":
                 const searchString = rule.parameters.searchString || rule.parameters.containsValue || ""
@@ -1445,7 +1664,14 @@ export function validateDataset(
                 ))
                 break
               case "multi-column":
-                ;({ isValid, message } = validateMultiColumn(rowWithTable, rule.conditions || [], datasets, valueLists))
+                const multiColumnResult = validateMultiColumn(rowWithTable, rule.conditions || [], datasets, valueLists)
+                console.log(`Multi-column rule "${rule.name}" validation result:`, {
+                  isValid: multiColumnResult.isValid,
+                  message: multiColumnResult.message,
+                  conditions: rule.conditions,
+                })
+                isValid = multiColumnResult.isValid
+                message = multiColumnResult.message
                 break
               case "lookup":
                 ;({ isValid, message } = validateLookup(
@@ -1460,18 +1686,125 @@ export function validateDataset(
               case "custom":
                 ;({ isValid, message } = validateCustom(value, rowWithTable, rule.parameters.functionBody, datasets))
                 break
+              // Add or modify the validateFormula function to handle the new searchString parameter
+              // Find the validateFormula function and update it to properly handle direct boolean expressions
+              // Replace the existing validateFormula function with this improved version:
               case "formula":
+                // Log formula rule details
+                console.log("Processing formula rule:", {
+                  ruleName: rule.name,
+                  formula: rule.parameters.formula,
+                  operator: rule.parameters.operator,
+                  value: rule.parameters.value,
+                  aggregations: rule.parameters.aggregations,
+                  allParameters: rule.parameters,
+                })
+
+                // Check if we're using comparison or direct boolean evaluation
                 if (rule.parameters.operator && rule.parameters.value !== undefined) {
+                  // Use comparison operator
                   ;({ isValid, message } = validateFormula(
                     rowWithTable,
                     rule.parameters.formula,
                     rule.parameters.operator,
                     rule.parameters.value,
+                    rule.parameters.aggregations,
+                    datasets[rule.table],
                   ))
                 } else {
-                  ;({ isValid, message } = validateFormula(rowWithTable, rule.parameters.formula))
+                  // Direct boolean evaluation (like "score / age > 2")
+                  ;({ isValid, message } = validateFormula(
+                    rowWithTable,
+                    rule.parameters.formula,
+                    undefined,
+                    undefined,
+                    rule.parameters.aggregations,
+                    datasets[rule.table],
+                  ))
                 }
+
+                console.log("Formula rule validation result:", {
+                  ruleName: rule.name,
+                  isValid,
+                  message,
+                  rowData: {
+                    score: rowWithTable.score,
+                    age: rowWithTable.age,
+                    scoreType: typeof rowWithTable.score,
+                    ageType: typeof rowWithTable.age,
+                    calculatedValue:
+                      rowWithTable.score !== undefined && rowWithTable.age !== undefined
+                        ? rowWithTable.score / rowWithTable.age
+                        : "N/A",
+                  },
+                })
                 break
+
+              // CRITICAL: Do NOT return immediately - just set the validation result
+              // This makes formula rules consistent with other rule types
+              // Also update the validateRule function to check both formula and javascriptExpression:
+
+              // Find this case in the switch statement in validateRule:
+              //case "javascript-formula":
+              //  ;({ isValid, message } = validateJavaScriptFormula(row, rule.parameters.formula))
+              //  break
+              case "javascript-formula":
+                ;({ isValid, message } = validateJavaScriptFormula(
+                  row,
+                  rule.parameters.formula || rule.parameters.javascriptExpression,
+                ))
+                break
+
+              case "date-before":
+              case "date-after":
+              case "date-between":
+              case "date-format":
+                // Date rules are handled separately in validateDateRule
+                console.log(`Processing date rule: ${rule.ruleType}, column: ${rule.column}, value: ${value}`)
+                // Check if the column is defined
+                if (!rule.column) {
+                  return {
+                    rowIndex,
+                    table: rule.table,
+                    column: "",
+                    ruleName: rule.name,
+                    message: `Invalid rule configuration: missing column name for date rule`,
+                    severity: rule.severity,
+                    ruleId: rule.id,
+                  }
+                }
+
+                // Make sure we're passing the correct column value to validateDateRule
+                if (rule.column && row[rule.column] !== undefined) {
+                  return validateDateRule(row, rowIndex, rule)
+                } else {
+                  console.error(`Missing column data for date rule: ${rule.name}, column: ${rule.column}`)
+                  return {
+                    rowIndex,
+                    table: rule.table,
+                    column: rule.column || "",
+                    ruleName: rule.name,
+                    message: `Cannot validate date: column "${rule.column}" not found in data`,
+                    severity: rule.severity,
+                    ruleId: rule.id,
+                  }
+                }
+
+              default:
+                isValid = true
+            }
+
+            // If the primary rule passes, check additional conditions if they exist
+            if (isValid && rule.conditions && rule.conditions.length > 0) {
+              console.log(
+                `Primary rule passed, checking ${rule.conditions.length} additional conditions for rule ${rule.name}`,
+              )
+              const conditionsResult = validateMultiColumn(row, rule.conditions, datasets, valueLists)
+              console.log(`Conditions validation result:`, conditionsResult)
+              isValid = conditionsResult.isValid
+              if (!isValid) {
+                message = conditionsResult.message
+              }
             }
 
             if (!isValid) {
@@ -2302,6 +2635,8 @@ function validateColumnConditions(
 }
 
 // Update the validateSingleColumnCondition function to use the correct parameter name
+// Also update the `validateSingleColumnCondition` function to better handle blank/non-blank checks:
+
 function validateSingleColumnCondition(
   value: any,
   row: DataRecord,
@@ -2309,6 +2644,27 @@ function validateSingleColumnCondition(
   datasets: DataTables,
   valueLists: ValueList[],
 ): { isValid: boolean; message: string } {
+  console.log("validateSingleColumnCondition called with:", {
+    value,
+    condition,
+    availableColumns: Object.keys(row),
+  })
+
+  // Special handling for blank/non-blank checks
+  if (condition.operator === "is-blank" || condition.operator === "is-not-blank") {
+    const isBlank = value === null || value === undefined || value === ""
+    const isValid = condition.operator === "is-blank" ? isBlank : !isBlank
+
+    console.log(
+      `Blank check for ${condition.column || condition.field}: value="${value}", isBlank=${isBlank}, isValid=${isValid}`,
+    )
+
+    return {
+      isValid,
+      message: isValid ? "" : condition.operator === "is-blank" ? `Value must be blank` : `Value must not be blank`,
+    }
+  }
+
   switch (condition.ruleType) {
     case "required":
       return validateRequired(value)
@@ -2317,9 +2673,8 @@ function validateSingleColumnCondition(
       return validateEquals(value, condition.parameters.value)
 
     case "not-equals":
-      return validateNotEquals(value, condition.parameters.compareValue)
+      return validateNotEquals(value, condition.parameters.value)
 
-    // In the validateSingleColumnCondition function, find the "greater-than" case and update it to use "value" instead of "compareValue"
     case "greater-than":
       return validateGreaterThan(value, condition.parameters.value)
 
@@ -2342,9 +2697,7 @@ function validateSingleColumnCondition(
       return validateType(value, condition.parameters.dataType)
 
     case "enum":
-      // Check if case-insensitive flag is enabled
       if (condition.parameters.caseInsensitive === true) {
-        // Ensure allowedValues exists and is an array
         const allowedValues = Array.isArray(condition.parameters.allowedValues)
           ? condition.parameters.allowedValues
           : condition.parameters.allowedValues
@@ -2353,7 +2706,6 @@ function validateSingleColumnCondition(
 
         return validateEnumCaseInsensitive(value, allowedValues)
       } else {
-        // Ensure allowedValues exists and is an array
         const allowedValues = Array.isArray(condition.parameters.allowedValues)
           ? condition.parameters.allowedValues
           : condition.parameters.allowedValues
@@ -2363,15 +2715,10 @@ function validateSingleColumnCondition(
         return validateEnum(value, allowedValues)
       }
 
-    // Also update the validateSingleColumnCondition function to handle both parameter names
-    // Find the "list" case in the switch statement and update it:
     case "list":
       return validateList(value, condition.parameters.listId || condition.parameters.valueList, valueLists)
 
-    // Also update the validateSingleColumnCondition function's "contains" case
-    // Find this section in the validateSingleColumnCondition function:
     case "contains":
-      // Add debug logging
       console.log("Contains condition parameters:", {
         column: condition.column,
         value,
@@ -2411,7 +2758,6 @@ function validateSingleColumnCondition(
     case "date-format":
       return validateDateFormat(value, condition.parameters.format, condition.parameters.customFormat)
 
-    // And update validateSingleColumnCondition for the dependency case:
     case "dependency":
       return validateDependency(
         value,
@@ -2421,6 +2767,39 @@ function validateSingleColumnCondition(
       )
 
     default:
+      // Handle direct operator-based conditions (from the UI)
+      if (condition.operator) {
+        switch (condition.operator) {
+          case "==":
+            return validateEquals(value, condition.value)
+          case "!=":
+            return validateNotEquals(value, condition.value)
+          case ">":
+            return validateGreaterThan(value, condition.value)
+          case ">=":
+            return validateGreaterThanEquals(value, condition.value)
+          case "<":
+            return validateLessThan(value, condition.value)
+          case "<=":
+            return validateLessThanEquals(value, condition.value)
+          case "contains":
+            return validateContains(value, condition.value, "contains", false)
+          case "not-contains":
+            const containsResult = validateContains(value, condition.value, "contains", false)
+            return {
+              isValid: !containsResult.isValid,
+              message: containsResult.isValid ? "Value should not contain the specified text" : "",
+            }
+          case "starts-with":
+            return validateContains(value, condition.value, "starts-with", false)
+          case "ends-with":
+            return validateContains(value, condition.value, "ends-with", false)
+          case "matches":
+            return validateRegex(value, condition.value)
+          // is-blank and is-not-blank are handled at the beginning of the function
+        }
+      }
+
       return { isValid: true, message: "" }
   }
 }
@@ -2692,7 +3071,14 @@ function validateRule(
       break
 
     case "multi-column":
-      ;({ isValid, message } = validateMultiColumn(row, rule.conditions || [], datasets, valueLists))
+      const multiColumnResult = validateMultiColumn(row, rule.conditions || [], datasets, valueLists)
+      console.log(`Multi-column rule "${rule.name}" validation result:`, {
+        isValid: multiColumnResult.isValid,
+        message: multiColumnResult.message,
+        conditions: rule.conditions,
+      })
+      isValid = multiColumnResult.isValid
+      message = multiColumnResult.message
       break
 
     case "lookup":
@@ -2720,6 +3106,7 @@ function validateRule(
         formula: rule.parameters.formula,
         operator: rule.parameters.operator,
         value: rule.parameters.value,
+        aggregations: rule.parameters.aggregations,
         allParameters: rule.parameters,
       })
 
@@ -2727,14 +3114,23 @@ function validateRule(
       if (rule.parameters.operator && rule.parameters.value !== undefined) {
         // Use comparison operator
         ;({ isValid, message } = validateFormula(
-          row,
+          rowWithTable,
           rule.parameters.formula,
           rule.parameters.operator,
           rule.parameters.value,
+          rule.parameters.aggregations,
+          datasets[rule.table],
         ))
       } else {
         // Direct boolean evaluation (like "score / age > 2")
-        ;({ isValid, message } = validateFormula(row, rule.parameters.formula))
+        ;({ isValid, message } = validateFormula(
+          rowWithTable,
+          rule.parameters.formula,
+          undefined,
+          undefined,
+          rule.parameters.aggregations,
+          datasets[rule.table],
+        ))
       }
 
       console.log("Formula rule validation result:", {
@@ -2742,13 +3138,17 @@ function validateRule(
         isValid,
         message,
         rowData: {
-          score: row.score,
-          age: row.age,
-          scoreType: typeof row.score,
-          ageType: typeof row.age,
-          calculatedValue: row.score !== undefined && row.age !== undefined ? row.score / row.age : "N/A",
+          score: rowWithTable.score,
+          age: rowWithTable.age,
+          scoreType: typeof rowWithTable.score,
+          ageType: typeof rowWithTable.age,
+          calculatedValue:
+            rowWithTable.score !== undefined && rowWithTable.age !== undefined
+              ? rowWithTable.score / rowWithTable.age
+              : "N/A",
         },
       })
+      break
 
     // CRITICAL: Do NOT return immediately - just set the validation result
     // This makes formula rules consistent with other rule types
@@ -3063,12 +3463,16 @@ Row data: ${JSON.stringify(row)}`,
 }
 
 // Also add the missing validateFormula function
+// Find the validateFormula function and completely replace it with this version that fixes the SUM function issue:
+
 // Improved validateFormula function with better handling of all Math Formula rules
 function validateFormula(
   row: DataRecord,
   formula?: string,
   operator?: string,
   value?: number,
+  aggregations?: AggregationConfig[],
+  dataset?: DataRecord[],
 ): { isValid: boolean; message: string } {
   if (!formula || formula.trim() === "") {
     console.warn("Empty formula provided to validateFormula")
@@ -3083,116 +3487,96 @@ function validateFormula(
       value,
       hasOperator: operator !== undefined,
       hasValue: value !== undefined,
-      rowData: {
-        score: row.score,
-        age: row.age,
-        scoreType: typeof row.score,
-        ageType: typeof row.age,
-        calculatedValue: row.score !== undefined && row.age !== undefined ? row.score / row.age : "N/A",
-      },
+      aggregationsCount: aggregations?.length || 0,
+      datasetRowCount: dataset?.length || 0,
+      rowData: row,
     })
 
-    // Create a function that has access to row properties as parameters
-    const paramNames = Object.keys(row)
-    const paramValues = paramNames.map((key) => row[key])
+    // CRITICAL FIX: Create a lookup table for aggregation functions to replace them with concrete values
+    const aggregationValues: Record<string, number> = {}
+
+    if (aggregations?.length && dataset?.length) {
+      // Pre-compute all aggregation values and store them in the lookup table
+      aggregations.forEach((agg) => {
+        const funcName = getFunctionName(agg.function).toUpperCase()
+        const columnName = agg.column.replace(/"/g, "") // Remove any quotes
+
+        // Compute the aggregation
+        const value = computeAggregation(dataset, agg)
+
+        // Store with both quoted and unquoted versions to handle all cases
+        const key1 = `${funcName}("${columnName}")`
+        const key2 = `${funcName}(${columnName})`
+
+        aggregationValues[key1] = value
+        aggregationValues[key2] = value
+
+        console.log(`Pre-computed aggregation: ${key1} = ${value}`)
+      })
+    }
+
+    // Modified approach: Replace aggregation functions in the formula with their values
+    let processedFormula = formula
+
+    // Replace aggregation function patterns with their pre-computed values
+    if (Object.keys(aggregationValues).length > 0) {
+      // Start with the longer keys (with quotes) to avoid partial replacements
+      const sortedKeys = Object.keys(aggregationValues).sort((a, b) => b.length - a.length)
+
+      for (const key of sortedKeys) {
+        // Replace all occurrences of this aggregation function with its numerical value
+        processedFormula = processedFormula.replace(
+          new RegExp(key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"),
+          aggregationValues[key].toString(),
+        )
+      }
+
+      console.log(`Preprocessed formula: ${formula} -> ${processedFormula}`)
+    }
 
     // Check if the formula already contains a comparison operator
-
-    const hasComparisonOperator = /[<>]=?|[!=]=/.test(formula)
-
-    // SPECIAL CASE: Handle "score / age" formula specifically
-    // This pattern matches any variation of score/age with optional whitespace
-    if (formula.trim() === "score / age" || formula.trim() === "score/age" || formula.match(/score\s*\/\s*age/)) {
-      console.log("Found 'score / age' formula pattern")
-
-      // Get the score and age values
-      const score = typeof row.score === "string" ? Number(row.score) : row.score
-      const age = typeof row.age === "string" ? Number(row.age) : row.age
-
-      // Check for null/undefined/zero values
-      if (score === undefined || score === null || age === undefined || age === null || age === 0) {
-        console.log("Invalid score or age values:", { score, age })
-        return {
-          isValid: false,
-          message: `Cannot evaluate formula: Invalid values. score=${score}, age=${age}`,
-        }
-      }
-
-      // Calculate the ratio
-      const ratio = score / age
-
-      // CRITICAL: Use the provided comparison operator and value from the UI
-      // If they're not provided, we'll use the default > 0 (but this should not happen with proper UI)
-      const comparisonOperator = operator || ">"
-      const comparisonValue = value !== undefined ? value : 0
-
-      console.log(`Using comparison: ${comparisonOperator} ${comparisonValue} (from UI parameters)`)
-
-      // Perform the comparison
-      let isValid = false
-      switch (comparisonOperator) {
-        case "==":
-          isValid = ratio == comparisonValue
-          break
-        case "!=":
-          isValid = ratio != comparisonValue
-          break
-        case ">":
-          isValid = ratio > comparisonValue
-          break
-        case ">=":
-          isValid = ratio >= comparisonValue
-          break
-        case "<":
-          isValid = ratio < comparisonValue
-          break
-        case "<=":
-          isValid = ratio <= comparisonValue
-          break
-        default:
-          isValid = ratio > comparisonValue // Default to > if operator is unknown
-      }
-
-      console.log(
-        `score/age evaluation: ${score} / ${age} = ${ratio} ${comparisonOperator} ${comparisonValue} = ${isValid}`,
-      )
-
-      return {
-        isValid,
-        message: isValid
-          ? `Passed validation: ${ratio} ${comparisonOperator} ${comparisonValue}`
-          : `Failed validation: ${ratio} is not ${comparisonOperator} ${comparisonValue}`,
-      }
-    }
+    const hasComparisonOperator = /[<>]=?|[!=]=/.test(processedFormula)
 
     // Case 1: Formula contains its own comparison operator
     if (hasComparisonOperator) {
-      console.log(`MATH FORMULA DEBUG: Formula contains comparison operator: ${formula}`)
+      console.log(`MATH FORMULA DEBUG: Formula contains comparison operator: ${processedFormula}`)
 
       // Evaluate the entire expression including the comparison
-      const evalFunc = new Function(
-        ...paramNames,
-        `"use strict";
+      try {
+        // Define a sandbox with only the row properties and math functions
+        const sandbox: Record<string, any> = { ...row }
+        // Add Math functions that might be used
+        sandbox.Math = Math
+
+        // Create parameter list and values array
+        const paramNames = Object.keys(sandbox)
+        const paramValues = paramNames.map((key) => sandbox[key])
+
+        // Create a function that safely evaluates the formula
+        const evalFunc = new Function(
+          ...paramNames,
+          `"use strict";
           try {
-            return Boolean(${formula});
+            return Boolean(${processedFormula});
           } catch(err) {
             console.error("Math Formula evaluation error:", err.message);
             throw new Error("Invalid formula: " + err.message);
           }`,
-      )
+        )
 
-      try {
-        // Execute the function with row values
+        // Execute the function with sandbox values
         const result = evalFunc(...paramValues)
         const isValid = Boolean(result)
 
         console.log(
-          `Formula with comparison: ${formula} evaluated to: ${result} (${typeof result}), isValid = ${isValid}`,
+          `Formula with comparison: ${processedFormula} evaluated to: ${result} (${typeof result}), isValid = ${isValid}`,
         )
 
         return {
           isValid,
-          message: isValid ? `Passed validation: ${formula}` : `Failed validation: ${formula} evaluated to false`,
+          message: isValid
+            ? `Passed validation: ${processedFormula}`
+            : `Failed validation: ${processedFormula} evaluated to false`,
         }
       } catch (error) {
         console.error("Error executing formula with comparison:", error)
@@ -3201,22 +3585,31 @@ function validateFormula(
     }
     // Case 2: Formula without comparison operator but with separate operator and value parameters
     else if (operator !== undefined && value !== undefined) {
-      console.log(`MATH FORMULA DEBUG: Using provided operator and value: ${formula} ${operator} ${value}`)
+      console.log(`MATH FORMULA DEBUG: Using provided operator and value: ${processedFormula} ${operator} ${value}`)
 
       // First evaluate the formula to get a numeric result
-      const evalFunc = new Function(
-        ...paramNames,
-        `"use strict";
+      try {
+        // Define a sandbox with only the row properties and math functions
+        const sandbox: Record<string, any> = { ...row }
+        // Add Math functions that might be used
+        sandbox.Math = Math
+
+        // Create parameter list and values array
+        const paramNames = Object.keys(sandbox)
+        const paramValues = paramNames.map((key) => sandbox[key])
+
+        // Create a function that safely evaluates the formula
+        const evalFunc = new Function(
+          ...paramNames,
+          `"use strict";
           try {
-            const result = ${formula};
-            return result;
+            return ${processedFormula};
           } catch(err) {
             console.error("Math Formula evaluation error:", err.message);
             throw new Error("Invalid formula: " + err.message);
           }`,
-      )
+        )
 
-      try {
         // Get the computed value
         let computedValue = evalFunc(...paramValues)
 
@@ -3258,13 +3651,13 @@ function validateFormula(
         }
 
         console.log(
-          `MATH FORMULA RESULT: Formula "${formula}" = ${computedValue}, comparison: ${computedValue} ${operator} ${value} = ${isValid}`,
+          `MATH FORMULA RESULT: Formula "${processedFormula}" = ${computedValue}, comparison: ${computedValue} ${operator} ${value} = ${isValid}`,
         )
 
         return {
           isValid,
           message: isValid
-            ? `Passed validation: ${formula} ${operator} ${value}`
+            ? `Passed validation: ${processedFormula} ${operator} ${value}`
             : `Failed validation: ${computedValue} ${operator} ${value} is false`,
         }
       } catch (error) {
@@ -3274,21 +3667,31 @@ function validateFormula(
     }
     // Case 3: Formula without comparison operator and without separate operator/value
     else {
-      console.log(`MATH FORMULA DEBUG: Formula has no comparison: ${formula}`)
+      console.log(`MATH FORMULA DEBUG: Formula has no comparison: ${processedFormula}`)
 
       // For other formulas without explicit comparison
-      const evalFunc = new Function(
-        ...paramNames,
-        `"use strict";
+      try {
+        // Define a sandbox with only the row properties and math functions
+        const sandbox: Record<string, any> = { ...row }
+        // Add Math functions that might be used
+        sandbox.Math = Math
+
+        // Create parameter list and values array
+        const paramNames = Object.keys(sandbox)
+        const paramValues = paramNames.map((key) => sandbox[key])
+
+        // Create a function that safely evaluates the formula
+        const evalFunc = new Function(
+          ...paramNames,
+          `"use strict";
           try {
-            return ${formula};
+            return ${processedFormula};
           } catch(err) {
             console.error("Math Formula evaluation error:", err.message);
             throw new Error("Invalid formula: " + err.message);
           }`,
-      )
+        )
 
-      try {
         const result = evalFunc(...paramValues)
         console.log(`Formula without comparison evaluated to: ${result} (${typeof result})`)
 
@@ -3302,8 +3705,8 @@ function validateFormula(
           return {
             isValid,
             message: isValid
-              ? `Passed validation: ${formula} evaluated to ${result} (> 0)`
-              : `Failed validation: ${formula} evaluated to ${result} (not > 0)`,
+              ? `Passed validation: ${processedFormula} evaluated to ${result} (> 0)`
+              : `Failed validation: ${processedFormula} evaluated to ${result} (not > 0)`,
           }
         }
         // For boolean results, use directly
@@ -3313,22 +3716,22 @@ function validateFormula(
           return {
             isValid: result,
             message: result
-              ? `Passed validation: ${formula} evaluated to true`
-              : `Failed validation: ${formula} evaluated to false`,
+              ? `Passed validation: ${processedFormula} evaluated to true`
+              : `Failed validation: ${processedFormula} evaluated to false`,
           }
         }
         // For other types, convert to boolean but log a warning
         else {
           console.warn(
-            `Formula "${formula}" returned non-numeric, non-boolean result: ${result}. Converting to boolean.`,
+            `Formula "${processedFormula}" returned non-numeric, non-boolean result: ${result}. Converting to boolean.`,
           )
 
           const isValid = Boolean(result)
           return {
             isValid,
             message: isValid
-              ? `Passed validation: ${formula} evaluated to truthy value`
-              : `Failed validation: ${formula} evaluated to falsy value`,
+              ? `Passed validation: ${processedFormula} evaluated to truthy value`
+              : `Failed validation: ${processedFormula} evaluated to falsy value`,
           }
         }
       } catch (error) {
@@ -3343,6 +3746,26 @@ function validateFormula(
       message: `Error in math formula: ${error.message}
 Formula: ${formula}`,
     }
+  }
+}
+
+// Helper function to extract the function name from a string
+function getFunctionName(name: string): string {
+  switch (name.toLowerCase()) {
+    case "sum":
+      return "sum"
+    case "avg":
+      return "avg"
+    case "count":
+      return "count"
+    case "min":
+      return "min"
+    case "max":
+      return "max"
+    case "distinct_count":
+      return "distinct-count"
+    default:
+      return name.toLowerCase()
   }
 }
 
@@ -3466,4 +3889,23 @@ function validateUnique(
 
   // No duplicates found
   return null
+}
+
+// Define AggregationConfig interface
+interface AggregationConfig {
+  column: string
+  function: string
+  filter?: {
+    column: string
+    operator: string
+    value: any
+  }
+}
+
+interface Condition {
+  column: string
+  field: string
+  operator: string
+  value: any
+  logicalOperator: string
 }
