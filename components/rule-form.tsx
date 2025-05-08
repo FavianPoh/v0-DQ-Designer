@@ -665,6 +665,34 @@ function RuleForm(props: RuleFormProps) {
     }
   }, [])
 
+  // Add the new useEffect right after the above one:
+  // Ensure formula parameters have defaults
+  useEffect(() => {
+    if (rule.ruleType === "formula") {
+      // If operator is not set, default to "=="
+      if (!rule.parameters.operator) {
+        setRule((prev) => ({
+          ...prev,
+          parameters: {
+            ...prev.parameters,
+            operator: "==",
+          },
+        }))
+      }
+
+      // If value is not set, default to 0
+      if (rule.parameters.value === undefined || rule.parameters.value === null) {
+        setRule((prev) => ({
+          ...prev,
+          parameters: {
+            ...prev.parameters,
+            value: 0,
+          },
+        }))
+      }
+    }
+  }, [rule.ruleType, rule.parameters.operator, rule.parameters.value])
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
     setRule((prev) => ({ ...prev, [name]: value }))

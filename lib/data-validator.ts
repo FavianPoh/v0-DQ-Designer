@@ -22,7 +22,7 @@ interface AggregationConfig {
   }
 }
 
-// Define validateFormula at the very beginning
+// Define validateFormula with a complete implementation
 function validateFormula(
   row: DataRecord,
   formula?: string,
@@ -31,16 +31,25 @@ function validateFormula(
   aggregations?: AggregationConfig[],
   dataset?: DataRecord[],
 ): { isValid: boolean; message: string } {
+  // ADDED: Detailed logging of input parameters
+  console.log("FORMULA VALIDATION INPUT:", {
+    formula: formula,
+    operator: operator,
+    value: value,
+    operatorType: typeof operator,
+    valueType: typeof value,
+    valueIsZero: value === 0,
+    valueIsZeroString: value === "0",
+    valueToString: String(value),
+    valueToNumber: Number(value),
+  })
+
   if (!formula || formula.trim() === "") {
     console.warn("Empty formula provided to validateFormula")
     return { isValid: false, message: "Empty formula provided" }
   }
 
   try {
-    // Check if the formula already contains a comparison operator
-    const originalHasComparison = /[<>]=?|[!=]=/.test(formula)
-
-    // Add these debug logs
     console.log("FORMULA DEBUG - Raw inputs:", {
       formula,
       operator,
@@ -52,7 +61,19 @@ function validateFormula(
       rowData: row,
     })
 
-    // CRITICAL FIX: Create a lookup table for aggregation functions to replace them with concrete values
+    // ADDED: Check for undefined/null values
+    console.log("COMPARISON CHECK:", {
+      hasOperator: operator !== undefined && operator !== null,
+      hasValue: value !== undefined && value !== null,
+      operatorIsEmpty: operator === "",
+      valueIsZero: value === 0,
+      valueIsZeroString: value === "0",
+      valueIsEmptyString: value === "",
+      valueIsUndefined: value === undefined,
+      valueIsNull: value === null,
+    })
+
+    // Create a lookup table for aggregation functions to replace them with concrete values
     const aggregationValues: Record<string, number> = {}
 
     if (aggregations?.length && dataset?.length) {
@@ -124,7 +145,7 @@ function validateFormula(
       })
     }
 
-    // Modified approach: Replace aggregation functions in the formula with their values
+    // Replace aggregation function patterns with their pre-computed values
     let processedFormula = formula
 
     // Replace aggregation function patterns with their pre-computed values
@@ -141,114 +162,138 @@ function validateFormula(
       }
 
       console.log(`Preprocessed formula: ${formula} -> ${processedFormula}`)
+    }
 
-      // Check if the formula already contains a comparison operator
-      // This regex needs to be more thorough to catch all comparison patterns
-      const hasComparisonOperator = /[<>]=?|[!=]=/.test(processedFormula)
-
-      console.log(`Checking for comparison operator in: ${processedFormula}, found: ${hasComparisonOperator}`)
-      console.log(`Original formula has comparison: ${originalHasComparison}`)
-
-      // CRITICAL FIX: If the original formula has a comparison but the processed formula doesn't,
-      // extract the comparison from the original formula and apply it directly
-      if (!hasComparisonOperator && originalHasComparison) {
-        console.log("CRITICAL FIX: Original formula has comparison but processed formula doesn't")
-
-        // Extract the comparison operator and value using a more robust regex
-        // This looks for patterns like "SUM(...) == 0" or "SUM(...)==0" at the end of the formula
-        const comparisonRegex = /SUM\s*$$[^)]+$$\s*([<>]=?|[!=]=)\s*(\d+)/i
-        const match = formula.match(comparisonRegex)
-
-        if (match) {
-          const [_, operator, valueStr] = match
-          const compareValue = Number(valueStr)
-          const numericResult = Number(processedFormula)
-
-          console.log(`DIRECT COMPARISON EXTRACTION: Found ${operator} ${compareValue} in original formula`)
-          console.log(`Comparing numeric result ${numericResult} ${operator} ${compareValue}`)
-
-          // Perform the comparison directly
-          let isValid = false
-          switch (operator) {
-            case "==":
-              isValid = numericResult == compareValue
-              break
-            case "!=":
-              isValid = numericResult != compareValue
-              break
-            case ">":
-              isValid = numericResult > compareValue
-              break
-            case ">=":
-              isValid = numericResult >= compareValue
-              break
-            case "<":
-              isValid = numericResult < compareValue
-              break
-            case "<=":
-              isValid = numericResult <= compareValue
-              break
-            default:
-              isValid = false
-          }
-
-          console.log(`DIRECT COMPARISON RESULT: ${numericResult} ${operator} ${compareValue} = ${isValid}`)
-
-          return {
-            isValid,
-            message: isValid
-              ? `Passed validation: ${formula}`
-              : `Failed validation: ${numericResult} ${operator} ${compareValue} is false`,
-          }
-        }
+    // Replace column references with actual values from the row
+    const columnNames = Object.keys(row).sort((a, b) => b.length - a.length) // Sort by length to avoid partial replacements
+    for (const colName of columnNames) {
+      const colValue = row[colName]
+      if (colValue !== undefined && colValue !== null) {
+        // Replace the column name with its value, being careful about word boundaries
+        const regex = new RegExp(`\\b${colName}\\b`, "g")
+        processedFormula = processedFormula.replace(
+          regex,
+          typeof colValue === "string" ? `"${colValue}"` : String(colValue),
+        )
       }
     }
 
-    // CRITICAL FIX: Define SUM, AVG, COUNT, etc. functions in the evaluation context
-    // This ensures that if any aggregation functions weren't replaced, they'll still work
-    const mathFunctions = `
-      function SUM(column, filter) { 
-        console.error("SUM function called directly - this should have been preprocessed"); 
-        return 0; 
-      }
-      function AVG(column, filter) { 
-        console.error("AVG function called directly - this should have been preprocessed"); 
-        return 0; 
-      }
-      function COUNT(column, filter) { 
-        console.error("COUNT function called directly - this should have been preprocessed"); 
-        return 0; 
-      }
-      function MIN(column, filter) { 
-        console.error("MIN function called directly - this should have been preprocessed"); 
-        return 0; 
-      }
-      function MAX(column, filter) { 
-        console.error("MAX function called directly - this should have been preprocessed"); 
-        return 0; 
-      }
-      function DISTINCT_COUNT(column, filter) { 
-        console.error("DISTINCT_COUNT function called directly - this should have been preprocessed"); 
-        return 0; 
-      }
-    `
+    console.log(`Formula after column replacement: ${processedFormula}`)
 
-    // Make sure we have a defined value for originalHasComparison
-    console.log(`Original formula has comparison: ${originalHasComparison}`)
-    // CRITICAL FIX: Define SUM, AVG, COUNT, etc. functions in the evaluation context
-    // This ensures that if any aggregation functions weren't replaced, they'll still work
-    console.log(`Original formula has comparison: ${originalHasComparison}`)
+    // Check if the formula already contains a comparison operator
+    const hasComparisonOperator = /[<>]=?|[!=]=/.test(processedFormula)
+
+    // Create a safe evaluation function to get the formula result
+    const evalFormula = new Function("return " + processedFormula)
+
+    // Evaluate the formula to get the numeric result
+    const formulaResult = evalFormula()
+    console.log(`Formula evaluation result: ${formulaResult}`)
+
+    // Handle NaN results
+    if (isNaN(formulaResult)) {
+      console.log("Formula evaluated to NaN, treating as 0 for comparison")
+      const isValid = false // NaN should fail validation
+      return {
+        isValid,
+        message: `Failed validation: Formula "${formula}" evaluated to NaN`,
+      }
+    }
+
+    // If the formula already has a comparison operator, the result should be a boolean
+    if (hasComparisonOperator) {
+      const isValid = Boolean(formulaResult)
+      return {
+        isValid,
+        message: isValid
+          ? `Passed validation: ${formula}`
+          : `Failed validation: Formula "${formula}" evaluated to false`,
+      }
+    }
+
+    // CRITICAL FIX: For Math Formula rules, use default operator and value if they're undefined
+    let finalOperator = operator
+    let finalValue = value
+
+    // If operator is undefined, default to "==" for Math Formula rules
+    if (finalOperator === undefined || finalOperator === null) {
+      finalOperator = "=="
+      console.log("Using default operator '==' because operator is undefined")
+    }
+
+    // If value is undefined, default to 0 for Math Formula rules
+    if (finalValue === undefined || finalValue === null) {
+      finalValue = 0
+      console.log("Using default value 0 because value is undefined")
+    }
+
+    // ADDED: Force parameter conversion to ensure correct types
+    const operatorStr = String(finalOperator)
+    const valueNum = Number(finalValue)
+
+    console.log("PARAMETER CONVERSION:", {
+      originalOperator: operator,
+      originalValue: value,
+      finalOperator: finalOperator,
+      finalValue: finalValue,
+      convertedOperator: operatorStr,
+      convertedValue: valueNum,
+    })
+
+    // Now perform the comparison with the final values
+    let isValid = false
+    const numericResult = Number(formulaResult)
+
+    console.log(`CRITICAL COMPARISON: ${numericResult} ${operatorStr} ${valueNum}`)
+
+    // ADDED: Detailed logging for equality comparison
+    if (operatorStr === "==") {
+      console.log("EQUALITY COMPARISON DETAILS:", {
+        numericResult: numericResult,
+        valueNum: valueNum,
+        difference: Math.abs(numericResult - valueNum),
+        epsilon: 0.000001,
+        isCloseToZero: Math.abs(numericResult) < 0.000001,
+        valueIsCloseToZero: Math.abs(valueNum) < 0.000001,
+      })
+    }
+
+    // CRITICAL FIX: Handle equality comparison separately from other operators
+    if (operatorStr === "==") {
+      // Use a small epsilon for floating-point comparison
+      const epsilon = 0.000001
+      isValid = Math.abs(numericResult - valueNum) < epsilon
+      console.log(`EQUALITY CHECK: Math.abs(${numericResult} - ${valueNum}) < ${epsilon} = ${isValid}`)
+    } else if (operatorStr === "!=") {
+      const epsilon = 0.000001
+      isValid = Math.abs(numericResult - valueNum) >= epsilon
+    } else if (operatorStr === ">") {
+      isValid = numericResult > valueNum
+    } else if (operatorStr === ">=") {
+      isValid = numericResult >= valueNum
+    } else if (operatorStr === "<") {
+      isValid = numericResult < valueNum
+    } else if (operatorStr === "<=") {
+      isValid = numericResult <= valueNum
+    } else {
+      console.warn(`Unknown operator: ${operatorStr}`)
+      isValid = false
+    }
+
+    console.log(`COMPARISON RESULT: ${numericResult} ${operatorStr} ${valueNum} = ${isValid}`)
+
+    return {
+      isValid,
+      message: isValid
+        ? `Passed validation: ${formula} ${operatorStr} ${valueNum}`
+        : `Failed validation: ${numericResult} ${operatorStr} ${valueNum} is false`,
+    }
   } catch (error) {
     console.error("Error in validateFormula:", error)
     return {
       isValid: false,
       message: `Validation failed: ${error.message}`,
     }
-  }
-
-  return {
-    isValid: false,
-    message: "Validation failed",
   }
 }
 
@@ -263,23 +308,65 @@ function computeAggregation(dataset: DataRecord[], aggregationConfig: Aggregatio
   // Filter the dataset based on the filter config
   const filteredData = filterData(dataset, filter)
 
+  // Log the filtered data for debugging
+  console.log(`Filtered data for ${funcName}("${column}"): ${filteredData.length} rows`)
+
+  // Check if filtered data is empty
+  if (filteredData.length === 0) {
+    console.log(`No data matches the filter criteria for ${funcName}("${column}")`)
+    // Return appropriate default values based on function type
+    switch (funcName.toUpperCase()) {
+      case "SUM":
+        return 0
+      case "AVG":
+        return 0
+      case "COUNT":
+        return 0
+      case "MIN":
+        return 0
+      case "MAX":
+        return 0
+      case "DISTINCT_COUNT":
+        return 0
+      default:
+        return 0
+    }
+  }
+
   // Extract values from the specified column
-  const values = filteredData.map((record) => record[column])
+  const values = filteredData.map((record) => {
+    const value = record[column]
+    // Handle null/undefined values
+    return value === null || value === undefined ? 0 : Number(value)
+  })
+
+  // Log the extracted values for debugging
+  console.log(
+    `Values for ${funcName}("${column}"): ${JSON.stringify(values.slice(0, 5))}${values.length > 5 ? "..." : ""}`,
+  )
 
   // Perform the aggregation based on the function name
   switch (funcName.toUpperCase()) {
     case "SUM":
-      return values.reduce((sum, value) => sum + Number(value), 0)
+      // Filter out NaN values and sum the rest
+      const validValues = values.filter((v) => !isNaN(v))
+      console.log(`Valid values for SUM: ${validValues.length} of ${values.length}`)
+      return validValues.reduce((sum, value) => sum + value, 0)
     case "AVG":
-      return values.length > 0 ? values.reduce((sum, value) => sum + Number(value), 0) / values.length : 0
+      const validAvgValues = values.filter((v) => !isNaN(v))
+      return validAvgValues.length > 0
+        ? validAvgValues.reduce((sum, value) => sum + value, 0) / validAvgValues.length
+        : 0
     case "COUNT":
       return values.length
     case "MIN":
-      return values.length > 0 ? Math.min(...values.map(Number)) : 0
+      const validMinValues = values.filter((v) => !isNaN(v))
+      return validMinValues.length > 0 ? Math.min(...validMinValues) : 0
     case "MAX":
-      return values.length > 0 ? Math.max(...values.map(Number)) : 0
+      const validMaxValues = values.filter((v) => !isNaN(v))
+      return validMaxValues.length > 0 ? Math.max(...validMaxValues) : 0
     case "DISTINCT_COUNT": {
-      const distinctValues = new Set(values)
+      const distinctValues = new Set(values.filter((v) => !isNaN(v)))
       return distinctValues.size
     }
     default:
@@ -297,7 +384,7 @@ function filterData(dataset: DataRecord[], filterConfig?: AggregationConfig["fil
 
   if ("conditions" in filterConfig && Array.isArray(filterConfig.conditions)) {
     conditions = filterConfig.conditions
-  } else if ("column" in filterConfig && "operator" in filterConfig && "value" in filterConfig) {
+  } else if ("column" in filterConfig && filterConfig.column) {
     // Handle the legacy single-condition filter
     conditions = [
       {
@@ -311,6 +398,9 @@ function filterData(dataset: DataRecord[], filterConfig?: AggregationConfig["fil
     return dataset // Invalid filter, return the original dataset
   }
 
+  // Log the conditions for debugging
+  console.log(`Filtering with conditions: ${JSON.stringify(conditions)}`)
+
   return dataset.filter((record) => {
     let result = true // Start with true for AND, false for OR
 
@@ -323,12 +413,15 @@ function filterData(dataset: DataRecord[], filterConfig?: AggregationConfig["fil
       if (column && operator !== undefined && value !== undefined) {
         const recordValue = record[column]
 
+        // Log the comparison for debugging
+        console.log(`Comparing ${column}: ${recordValue} ${operator} ${value}`)
+
         switch (operator) {
           case "==":
-            conditionResult = recordValue == value
+            conditionResult = String(recordValue) === String(value)
             break
           case "!=":
-            conditionResult = recordValue != value
+            conditionResult = String(recordValue) !== String(value)
             break
           case ">":
             conditionResult = Number(recordValue) > Number(value)
@@ -504,6 +597,34 @@ export function validateDataset(
       const tableRules = rules.filter((rule) => rule.table === tableName && rule.enabled !== false)
 
       for (let rule of tableRules) {
+        // ADDED: Log rule configuration before validation
+        console.log(
+          "RULE CONFIG:",
+          JSON.stringify(
+            {
+              id: rule.id,
+              name: rule.name,
+              ruleType: rule.ruleType,
+              parameters: rule.parameters,
+            },
+            null,
+            2,
+          ),
+        )
+
+        // CRITICAL FIX: Ensure formula rules have default operator and value
+        if (rule.ruleType === "formula" && rule.parameters) {
+          if (rule.parameters.operator === undefined || rule.parameters.operator === null) {
+            rule.parameters.operator = "=="
+            console.log(`Set default operator '==' for formula rule: ${rule.name}`)
+          }
+
+          if (rule.parameters.value === undefined || rule.parameters.value === null) {
+            rule.parameters.value = 0
+            console.log(`Set default value 0 for formula rule: ${rule.name}`)
+          }
+        }
+
         // Apply default parameters for date rules
         if (rule.ruleType?.startsWith("date-")) {
           rule = ensureDateRuleParameters(rule)
@@ -708,6 +829,15 @@ export function validateDataset(
 
               case "formula":
                 if (rule.parameters.formula) {
+                  // ADDED: Log formula rule parameters before validation
+                  console.log("FORMULA RULE PARAMETERS:", {
+                    formula: rule.parameters.formula,
+                    operator: rule.parameters.operator,
+                    value: rule.parameters.value,
+                    operatorType: typeof rule.parameters.operator,
+                    valueType: typeof rule.parameters.value,
+                  })
+
                   const formulaResult = validateFormula(
                     row,
                     rule.parameters.formula,

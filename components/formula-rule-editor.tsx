@@ -47,6 +47,23 @@ export function FormulaRuleEditor({
     setFormulaInput(formula)
   }, [formula])
 
+  // Add this code after the existing useEffect that updates formulaInput
+
+  // Add a new useEffect to ensure operator and value are initialized with defaults
+  useEffect(() => {
+    // If operator is undefined or null, set a default
+    if (operator === undefined || operator === null) {
+      console.log("Setting default operator to '=='")
+      onOperatorChange("==")
+    }
+
+    // If value is undefined or null, set a default
+    if (value === undefined || value === null) {
+      console.log("Setting default value to 0")
+      onValueChange(0)
+    }
+  }, [operator, value, onOperatorChange, onValueChange])
+
   // Update the handleFormulaChange function to add validation
   const handleFormulaChange = (newFormula: string) => {
     setFormulaInput(newFormula)
