@@ -991,9 +991,27 @@ export function ValidationResults({
 
   // Calculate statistics
   const stats = useMemo(() => {
-    const totalIssues = initialResults.filter((r) => r.severity !== "success").length
-    const totalFailures = initialResults.filter((r) => r.severity === "failure").length
-    const totalWarnings = initialResults.filter((r) => r.severity === "warning").length
+    // For issues, failures, and warnings, always use the filtered results WITHOUT considering the showPassingValidations toggle
+    const issuesResults = initialResults.filter((r) => {
+      // Apply all filters except the passing/success filter
+      if (filterTable !== "all" && r.table !== filterTable) return false
+      if (filterColumn !== "all" && r.column !== filterColumn) return false
+      if (filterRule !== "all" && r.ruleName !== filterRule) return false
+      if (filterRuleType !== "all") {
+        const ruleDefinition = rules.find(
+          (rule) => rule.id === r.ruleId || rule.name === r.ruleName || r.ruleName.includes(`[ID: ${rule.id}]`),
+        )
+        if (!ruleDefinition || ruleDefinition.ruleType !== filterRuleType) return false
+      }
+      // Only include non-success results for issue counts
+      return r.severity !== "success"
+    })
+
+    const totalIssues = issuesResults.length
+    const totalFailures = issuesResults.filter((r) => r.severity === "failure").length
+    const totalWarnings = issuesResults.filter((r) => r.severity === "warning").length
+
+    // For success count, use the filtered results WITH the success filter
     const totalSuccess = initialResults.filter((r) => r.severity === "success").length
 
     // Calculate total records across all tables or for the filtered table
@@ -1002,9 +1020,9 @@ export function ValidationResults({
         ? initialDatasets[filterTable]?.length || 0
         : Object.values(initialDatasets).reduce((sum, tableData) => sum + tableData.length, 0)
 
-    // Calculate failure records
+    // Calculate failure records based on filtered results (excluding success filter)
     const failureRecordsByTable = new Map<string, Set<number>>()
-    initialResults
+    issuesResults
       .filter((r) => r.severity === "failure")
       .forEach((r) => {
         if (!failureRecordsByTable.has(r.table)) {
@@ -1025,7 +1043,7 @@ export function ValidationResults({
       failureRecords,
       passRate,
     }
-  }, [initialResults, initialDatasets, filterTable])
+  }, [initialResults, initialDatasets, filterTable, filterColumn, filterRule, filterRuleType, rules])
 
   return (
     <div className="space-y-6">
@@ -1197,8 +1215,8 @@ export function ValidationResults({
       <div className="flex items-center space-x-2">
         <Switch id="show-passing" checked={showPassingValidations} onCheckedChange={handleTogglePassingValidations} />
         <Label htmlFor="show-passing" className="text-sm">
-          Show passing validations {showPassingValidations ? "(on)" : "(off)"} - {stats.totalSuccess} passing
-          validations
+          Show passing validations {showPassingValidations ? "(on)" : "(off)"} -{" "}
+          {initialResults.filter((r) => r.severity === "success").length} passing validations
         </Label>
       </div>
 

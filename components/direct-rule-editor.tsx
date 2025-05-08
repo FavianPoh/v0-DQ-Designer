@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { SimplifiedDateRuleEditor } from "@/components/simplified-date-rule-editor"
 import type { DataQualityRule, DataTables, ValueList } from "@/lib/types"
+import { FormulaRuleEditor } from "@/components/formula-rule-editor"
 
 interface DirectRuleEditorProps {
   ruleId: string | null
@@ -24,6 +25,7 @@ export function DirectRuleEditor({
   onCancel,
 }: DirectRuleEditorProps) {
   const [rule, setRule] = useState<DataQualityRule | null>(null)
+  const [tableColumns, setTableColumns] = useState<{ [tableName: string]: string[] }>({})
 
   // Update the rule when the ruleId changes
   useEffect(() => {
@@ -49,6 +51,36 @@ export function DirectRuleEditor({
     }
   }, [ruleId, rules])
 
+  useEffect(() => {
+    // Extract column names for each table
+    const columnData: { [tableName: string]: string[] } = {}
+
+    // Iterate through each table in the datasets
+    for (const tableName of tables) {
+      if (datasets[tableName] && datasets[tableName].length > 0) {
+        // Get column names from the first row's keys
+        columnData[tableName] = Object.keys(datasets[tableName][0])
+      } else {
+        columnData[tableName] = []
+      }
+    }
+
+    setTableColumns(columnData)
+  }, [datasets, tables])
+
+  const handleParameterChange = (parameterName: string, newValue: any) => {
+    if (rule) {
+      const updatedRule: DataQualityRule = {
+        ...rule,
+        parameters: {
+          ...rule.parameters,
+          [parameterName]: newValue,
+        },
+      }
+      setRule(updatedRule)
+    }
+  }
+
   // If no rule is selected, don't render anything
   if (!rule) {
     return null
@@ -71,5 +103,28 @@ export function DirectRuleEditor({
   }
 
   // For other rule types, we could add specialized editors here
-  return null
+  return (
+    <div>
+      {rule.ruleType === "formula" && (
+        <FormulaRuleEditor
+          columns={tableColumns[rule.table] || []}
+          formula={rule.parameters.formula || ""}
+          operator={rule.parameters.operator || "=="}
+          value={rule.parameters.value !== undefined ? rule.parameters.value : 0}
+          onFormulaChange={(formula) => handleParameterChange("formula", formula)}
+          onOperatorChange={(operator) => handleParameterChange("operator", operator)}
+          onValueChange={(value) => {
+            console.log("DirectRuleEditor: Setting formula comparison value to:", value)
+            handleParameterChange("value", value)
+          }}
+          selectedColumn={rule.column}
+          aggregations={rule.parameters.aggregations || []}
+          onAggregationsChange={(aggregations) => {
+            console.log("DirectRuleEditor: Updating aggregations:", aggregations)
+            handleParameterChange("aggregations", aggregations)
+          }}
+        />
+      )}
+    </div>
+  )
 }

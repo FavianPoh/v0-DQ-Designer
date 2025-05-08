@@ -639,6 +639,21 @@ function RuleForm(props: RuleFormProps) {
 
       console.log("Cross-column extracted values:", { leftColumn, rightColumn, operator, allowNull })
     }
+
+    // Special handling for formula rules
+    if (initialRule && initialRule.ruleType === "formula") {
+      console.log("Loading formula rule with parameters:", initialRule.parameters)
+
+      // Ensure formula parameters are properly loaded
+      if (initialRule.parameters.formula) {
+        console.log("Setting formula from rule:", initialRule.parameters.formula)
+      }
+
+      // Ensure aggregations are properly loaded
+      if (initialRule.parameters.aggregations && initialRule.parameters.aggregations.length > 0) {
+        console.log("Setting aggregations from rule:", initialRule.parameters.aggregations)
+      }
+    }
   }, [initialRule, datasets, tables])
 
   // Ensure date rules always have a column selected
@@ -1493,13 +1508,19 @@ function RuleForm(props: RuleFormProps) {
               columns={tableColumns[rule.table] || []}
               formula={rule.parameters.formula || ""}
               operator={rule.parameters.operator || "=="}
-              value={rule.parameters.value || 0}
+              value={rule.parameters.value !== undefined ? rule.parameters.value : 0}
               onFormulaChange={(formula) => handleParameterChange("formula", formula)}
               onOperatorChange={(operator) => handleParameterChange("operator", operator)}
-              onValueChange={(value) => handleParameterChange("value", value)}
+              onValueChange={(value) => {
+                console.log("Setting formula comparison value to:", value)
+                handleParameterChange("value", value)
+              }}
               selectedColumn={rule.column} // Pass the selected column
               aggregations={rule.parameters.aggregations || []}
-              onAggregationsChange={(aggregations) => handleParameterChange("aggregations", aggregations)}
+              onAggregationsChange={(aggregations) => {
+                console.log("Updating aggregations:", aggregations)
+                handleParameterChange("aggregations", aggregations)
+              }}
             />
           </div>
         )

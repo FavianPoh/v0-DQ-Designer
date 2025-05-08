@@ -23,6 +23,9 @@ export interface AggregationConfig {
     }>
     type: "OR" | "AND"
   }
+  groupColumns?: string[]
+  distinctColumn?: string
+  resultHandling?: "ALL" | "ANY" | "MAJORITY"
 }
 
 interface AggregationFunctionEditorProps {
@@ -257,11 +260,48 @@ export default function AggregationFunctionEditor({
     })
   }
 
+  // Add support for distinct group aggregations in the AggregationFunctionEditor
+
+  // Add the new function options to the select dropdown
+  const functionOptions = [
+    { value: "sum", label: "SUM" },
+    { value: "avg", label: "AVG" },
+    { value: "count", label: "COUNT" },
+    { value: "min", label: "MIN" },
+    { value: "max", label: "MAX" },
+    { value: "distinct-count", label: "DISTINCT_COUNT" },
+    { value: "distinct-group-sum", label: "DISTINCT_GROUP_SUM" },
+    { value: "distinct-group-avg", label: "DISTINCT_GROUP_AVG" },
+    { value: "distinct-group-count", label: "DISTINCT_GROUP_COUNT" },
+    { value: "distinct-group-min", label: "DISTINCT_GROUP_MIN" },
+    { value: "distinct-group-max", label: "DISTINCT_GROUP_MAX" },
+  ]
+
+  // Add a function to check if an aggregation is a distinct group type
+  function isDistinctGroupAggregation(functionName: string): boolean {
+    return functionName.startsWith("distinct-group-")
+  }
+
+  const handleAggregationChange = (index: number, updatedAggregation: AggregationConfig) => {
+    const newAggregations = [...aggregations]
+    newAggregations[index] = updatedAggregation
+    onAggregationsChange(newAggregations)
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-medium">Aggregation Functions</h3>
-        <Button onClick={addAggregation} size="sm" variant="outline">
+        <Button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault()
+            addAggregation()
+          }}
+          variant="outline"
+          size="sm"
+          className="mt-2"
+        >
           <PlusCircle className="h-4 w-4 mr-2" />
           Add Function
         </Button>
@@ -311,12 +351,11 @@ export default function AggregationFunctionEditor({
                             <SelectValue placeholder="Select function" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="sum">Sum</SelectItem>
-                            <SelectItem value="avg">Average</SelectItem>
-                            <SelectItem value="count">Count</SelectItem>
-                            <SelectItem value="min">Minimum</SelectItem>
-                            <SelectItem value="max">Maximum</SelectItem>
-                            <SelectItem value="distinct-count">Distinct Count</SelectItem>
+                            {functionOptions.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>
@@ -469,6 +508,108 @@ export default function AggregationFunctionEditor({
                         </div>
                       )}
                     </Card>
+                    {isDistinctGroupAggregation(agg.function) && (
+                      <div className="mt-4 p-3 border rounded-md border-blue-200 bg-blue-50">
+                        <h3 className="text-sm font-medium mb-2">Distinct Group Configuration</h3>
+
+                        <div className="mb-3">
+                          <Label className="mb-1 block text-xs">Group By Columns</Label>
+                          <div className="flex flex-wrap gap-1 mb-2">
+                            {columns.map((column) => (
+                              <Button
+                                key={column}
+                                type="button"
+                                variant={agg.groupColumns?.includes(column) ? "secondary" : "outline"}
+                                size="sm"
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  const newAggregation = { ...agg }
+                                  if (!newAggregation.groupColumns) {
+                                    newAggregation.groupColumns = []
+                                  }
+
+                                  if (newAggregation.groupColumns.includes(column)) {
+                                    newAggregation.groupColumns = newAggregation.groupColumns.filter(
+                                      (c) => c !== column,
+                                    )
+                                  } else {
+                                    newAggregation.groupColumns.push(column)
+                                  }
+
+                                  handleAggregationChange(index, newAggregation)
+                                }}
+                                className="text-xs"
+                              >
+                                {column}
+                              </Button>
+                            ))}
+                          </div>
+                          <p className="text-xs text-gray-500">
+                            Select columns that form the composite key for grouping.
+                          </p>
+                        </div>
+
+                        <div className="mb-3">
+                          <Label className="mb-1 block text-xs">Distinct Values Column (optional)</Label>
+                          <Select
+                            value={agg.distinctColumn || ""}
+                            onValueChange={(value) => {
+                              const newAggregation = { ...agg }
+                              // If "none" is selected, set distinctColumn to null
+                              newAggregation.distinctColumn = value === "none" ? null : value
+                              handleAggregationChange(index, newAggregation)
+                            }}
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Select column (optional)" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">None (Optional)</SelectItem>
+                              {columns.map((column) => (
+                                <SelectItem key={column} value={column}>
+                                  {column}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-gray-500">
+                            Select the column whose distinct values you want to aggregate by, or choose "None" if not
+                            needed.
+                          </p>
+                        </div>
+
+                        <div>
+                          <Label className="mb-1 block text-xs">Result Handling</Label>
+                          <Select
+                            value={agg.resultHandling || "ALL"}
+                            onValueChange={(value) => {
+                              const newAggregation = { ...agg }
+                              newAggregation.resultHandling = value as "ALL" | "ANY" | "MAJORITY"
+                              handleAggregationChange(index, newAggregation)
+                            }}
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="How to handle results" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="ALL">ALL must pass</SelectItem>
+                              <SelectItem value="ANY">ANY must pass</SelectItem>
+                              <SelectItem value="MAJORITY">MAJORITY must pass</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-gray-500">
+                            Specify how to handle multiple results from distinct values:
+                            <br />
+                            <strong>ALL</strong>: Every distinct value must pass the validation
+                            <br />
+                            <strong>ANY</strong>: At least one distinct value must pass
+                            <br />
+                            <strong>MAJORITY</strong>: More than half of distinct values must pass
+                          </p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </AccordionContent>
               </AccordionItem>

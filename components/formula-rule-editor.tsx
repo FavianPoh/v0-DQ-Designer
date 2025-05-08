@@ -42,14 +42,33 @@ export function FormulaRuleEditor({
   const [formulaInput, setFormulaInput] = useState(formula)
   const [activeTab, setActiveTab] = useState<string>("formula")
 
-  // Update the formula input when the formula prop changes
+  // Update the useEffect hook to properly initialize the formula input when the formula prop changes
+  // This ensures that when editing an existing rule, the formula field is pre-populated
   useEffect(() => {
-    setFormulaInput(formula)
+    console.log("Formula prop changed:", formula)
+    if (formula) {
+      console.log("Setting formula input to:", formula)
+      setFormulaInput(formula)
+    }
   }, [formula])
 
-  // Add this code after the existing useEffect that updates formulaInput
+  // Ensure the component properly initializes with all props
+  useEffect(() => {
+    console.log("FormulaRuleEditor props:", {
+      formula,
+      operator,
+      value,
+      aggregations,
+    })
 
-  // Add a new useEffect to ensure operator and value are initialized with defaults
+    // Ensure formula input is initialized with the formula prop
+    if (formula && formulaInput !== formula) {
+      console.log("Initializing formula input with:", formula)
+      setFormulaInput(formula)
+    }
+  }, [formula, operator, value, aggregations, formulaInput])
+
+  // Add a new useEffect to ensure operator and value are initialized with their props
   useEffect(() => {
     // If operator is undefined or null, set a default
     if (operator === undefined || operator === null) {
@@ -61,6 +80,9 @@ export function FormulaRuleEditor({
     if (value === undefined || value === null) {
       console.log("Setting default value to 0")
       onValueChange(0)
+    } else if (value !== 0) {
+      // Log non-zero values to help with debugging
+      console.log("Using non-zero comparison value:", value)
     }
   }, [operator, value, onOperatorChange, onValueChange])
 
@@ -99,9 +121,24 @@ export function FormulaRuleEditor({
     handleFormulaChange("")
   }
 
+  // Add support for distinct group aggregations in the getFullAggregationText function
+
   // Helper function to generate the full aggregation text with filters
   const getFullAggregationText = (agg: AggregationConfig): string => {
     const funcName = getFunctionName(agg.function)
+
+    // Check if this is a distinct group aggregation
+    if (agg.function.startsWith("distinct-group-") && agg.groupColumns?.length) {
+      // Format the group columns as an array
+      const groupColumnsText = `[${agg.groupColumns.map((col) => `"${col}"`).join(", ")}]`
+
+      // Return the full distinct group function text, with or without distinctColumn
+      if (agg.distinctColumn) {
+        return `${funcName}("${agg.column}", ${groupColumnsText}, "${agg.distinctColumn}")`
+      } else {
+        return `${funcName}("${agg.column}", ${groupColumnsText})`
+      }
+    }
 
     // Update how we format the filter text for aggregations
     let filterText = ""
@@ -133,6 +170,31 @@ export function FormulaRuleEditor({
     const agg = aggregations[index]
     const aggText = getFullAggregationText(agg)
     const funcName = getFunctionName(agg.function)
+
+    // Check if this is a distinct group aggregation
+    if (agg.function.startsWith("distinct-group-")) {
+      // For distinct group aggregations, we need a different pattern
+      const basePattern = new RegExp(`${funcName}\$$"${agg.column}",[^)]+\$$`, "g")
+
+      if (formulaInput.match(basePattern)) {
+        // Replace the existing function with the new one
+        const newFormula = formulaInput.replace(basePattern, aggText)
+        handleFormulaChange(newFormula)
+      } else {
+        // If it doesn't exist, append with proper spacing
+        const newFormula = formulaInput.trim()
+          ? formulaInput.trim().endsWith("+") ||
+            formulaInput.trim().endsWith("-") ||
+            formulaInput.trim().endsWith("*") ||
+            formulaInput.trim().endsWith("/") ||
+            formulaInput.trim().endsWith("(")
+            ? `${formulaInput} ${aggText}`
+            : `${formulaInput} + ${aggText}` // Default to addition if no operator
+          : aggText
+        handleFormulaChange(newFormula)
+      }
+      return
+    }
 
     // Check if this function already exists in the formula (with or without filters)
     const basePattern = new RegExp(`${funcName}\\("${agg.column}"(,\\s*[^)]*)?\$$`, "g")
@@ -166,6 +228,39 @@ export function FormulaRuleEditor({
     const agg = aggregations[index]
     const funcName = getFunctionName(agg.function)
 
+    // Check if this is a distinct group aggregation
+    if (agg.function.startsWith("distinct-group-") && agg.groupColumns?.length && agg.distinctColumn) {
+      // Create a pattern to match the distinct group function
+      const groupColumnsText = agg.groupColumns.map((col) => `"${col}"`).join(", ")
+      const basePattern = new RegExp(
+        `\\s*[+\\-*/]?\\s*${funcName}\$$"${agg.column}"\\s*,\\s*\\[${groupColumnsText}\\]\\s*,\\s*"${agg.distinctColumn}"\$$`,
+        "g",
+      )
+
+      // Also match if it's at the beginning of the formula
+      const startPattern = new RegExp(
+        `^${funcName}\$$"${agg.column}"\\s*,\\s*\\[${groupColumnsText}\\]\\s*,\\s*"${agg.distinctColumn}"\$$`,
+        "g",
+      )
+
+      // Replace the function with empty string
+      let newFormula = formulaInput.replace(basePattern, "")
+      newFormula = newFormula.replace(startPattern, "")
+
+      // Clean up any double operators that might result
+      newFormula = newFormula.replace(/\s*[+\-*/]\s*[+\-*/]\s*/g, " + ")
+
+      // Clean up any trailing or leading operators
+      newFormula = newFormula.replace(/^\s*[+\-*/]\s*/, "")
+      newFormula = newFormula.replace(/\s*[+\-*/]\s*$/, "")
+
+      // Clean up any extra spaces
+      newFormula = newFormula.trim()
+
+      handleFormulaChange(newFormula)
+      return
+    }
+
     // Create a pattern to match the function with or without filters
     const basePattern = new RegExp(`\\s*[+\\-*/]?\\s*${funcName}\\("${agg.column}"(,\\s*[^)]*)?\$$`, "g")
 
@@ -189,12 +284,6 @@ export function FormulaRuleEditor({
     handleFormulaChange(newFormula)
   }
 
-  const handleAggregationsChange = (newAggregations: AggregationConfig[]) => {
-    if (onAggregationsChange) {
-      onAggregationsChange(newAggregations)
-    }
-  }
-
   // Helper function to check if an aggregation has filters
   const hasFilters = (agg: AggregationConfig): boolean => {
     return (
@@ -202,6 +291,17 @@ export function FormulaRuleEditor({
       (("conditions" in agg.filter && agg.filter.conditions.length > 0) ||
         (!("conditions" in agg.filter) && !!agg.filter.column))
     )
+  }
+
+  // Helper function to check if an aggregation is a distinct group type
+  const isDistinctGroupAggregation = (functionName: string): boolean => {
+    return functionName.startsWith("distinct-group-")
+  }
+
+  const handleAggregationsChange = (newAggregations: AggregationConfig[]) => {
+    if (onAggregationsChange) {
+      onAggregationsChange(newAggregations)
+    }
   }
 
   return (

@@ -133,7 +133,18 @@ export interface MathOperationRuleParameters {
 }
 
 // New types for aggregation functions
-export type AggregationFunction = "sum" | "avg" | "count" | "min" | "max" | "distinct-count"
+export type AggregationFunction =
+  | "sum"
+  | "avg"
+  | "count"
+  | "min"
+  | "max"
+  | "distinct-count"
+  | "distinct-group-sum"
+  | "distinct-group-avg"
+  | "distinct-group-count"
+  | "distinct-group-min"
+  | "distinct-group-max"
 
 export interface FilterCondition {
   column: string
@@ -151,6 +162,10 @@ export interface AggregationConfig {
   column: string
   alias?: string
   filter?: AggregationFilter | FilterCondition
+  // New properties for distinct group aggregations
+  groupColumns?: string[] // For composite key grouping
+  distinctColumn?: string // For distinct value partitioning
+  resultHandling?: "ALL" | "ANY" | "MAJORITY" // How to handle multiple results
 }
 
 export interface FormulaParameters {

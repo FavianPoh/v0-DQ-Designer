@@ -1,48 +1,886 @@
-import type { DataRecord, DataQualityRule, ValidationResult, DataTables, ValueList } from "./types"
+import type { DataQualityRule, DataRecord, ValueList, Condition } from "./types"
 
-// Declare interfaces at the top
-interface Condition {
-  column?: string
-  field?: string
-  operator: string
-  value: any
-  logicalOperator?: "AND" | "OR"
+export function validateDataset(
+  datasets: { [key: string]: DataRecord[] },
+  rules: DataQualityRule[],
+  valueLists: ValueList[],
+): any[] {
+  const results: any[] = []
+
+  // Process each table in the dataset
+  for (const tableName in datasets) {
+    const tableData = datasets[tableName]
+    const tableRules = rules.filter((rule) => rule.table === tableName && rule.enabled !== false)
+
+    // First, process unique rules at the dataset level
+    const uniqueRules = tableRules.filter((rule) => rule.ruleType === "unique")
+
+    console.log(`Processing ${uniqueRules.length} unique rules for table ${tableName}`)
+
+    for (const uniqueRule of uniqueRules) {
+      try {
+        // Get the columns to check for uniqueness
+        const uniqueColumns = uniqueRule.parameters?.uniqueColumns || [uniqueRule.column]
+
+        console.log(`Validating unique rule: ${uniqueRule.name} for columns: ${uniqueColumns.join(", ")}`)
+
+        // Create a map to track composite values and their row indices
+        const valueMap = new Map<string, number[]>()
+
+        // Track which rows have duplicates
+        const duplicateRows = new Set<number>()
+
+        // Check each row for uniqueness
+        tableData.forEach((row, rowIndex) => {
+          // Create a composite key from all specified columns
+          const compositeValues = uniqueColumns.map((column) => {
+            const value = row[column]
+            // Convert to string for consistent comparison, handle null/undefined
+            return value === null || value === undefined ? "NULL" : String(value)
+          })
+
+          // Join the values to create a composite key
+          const compositeKey = compositeValues.join("|")
+
+          console.log(`Row ${rowIndex}, Composite key: ${compositeKey}`)
+
+          if (valueMap.has(compositeKey)) {
+            // This is a duplicate composite key
+            const existingRows = valueMap.get(compositeKey) || []
+
+            // Mark all rows with this composite key as duplicates
+            duplicateRows.add(rowIndex)
+            existingRows.forEach((idx) => duplicateRows.add(idx))
+
+            // Add this row to the list of rows with this composite key
+            valueMap.set(compositeKey, [...existingRows, rowIndex])
+          } else {
+            // This is the first occurrence of this composite key
+            valueMap.set(compositeKey, [rowIndex])
+          }
+        })
+
+        console.log(`Found ${duplicateRows.size} rows with duplicate composite values`)
+
+        // Generate results for each row
+        tableData.forEach((row, rowIndex) => {
+          if (duplicateRows.has(rowIndex)) {
+            // Create a composite key to find other rows with the same values
+            const compositeValues = uniqueColumns.map((column) => {
+              const value = row[column]
+              return value === null || value === undefined ? "NULL" : String(value)
+            })
+
+            const compositeKey = compositeValues.join("|")
+            const duplicateRowIndices = valueMap.get(compositeKey) || []
+
+            // Create a failure result
+            results.push({
+              table: tableName,
+              rowIndex,
+              column: uniqueColumns.join(", "),
+              ruleName: uniqueRule.name,
+              message:
+                uniqueColumns.length > 1
+                  ? `Duplicate combination of values found in rows: ${duplicateRowIndices.map((i) => i + 1).join(", ")}`
+                  : `Duplicate value '${row[uniqueRule.column]}' found in rows: ${duplicateRowIndices.map((i) => i + 1).join(", ")}`,
+              severity: uniqueRule.severity || "failure",
+            })
+          } else {
+            // This row has a unique composite value
+            results.push({
+              table: tableName,
+              rowIndex,
+              column: uniqueColumns.join(", "),
+              ruleName: uniqueRule.name,
+              message:
+                uniqueColumns.length > 1
+                  ? `Unique validation passed for combination of columns: ${uniqueColumns.join(", ")}`
+                  : `Unique validation passed for column: ${uniqueRule.column}`,
+              severity: "success",
+            })
+          }
+        })
+      } catch (error) {
+        console.error(`Error validating unique rule ${uniqueRule.name}:`, error)
+        results.push({
+          table: tableName,
+          rowIndex: -1, // No specific row for this error
+          column: uniqueRule.column,
+          ruleName: uniqueRule.name,
+          message: `Unique validation error: ${error.message}`,
+          severity: "failure",
+        })
+      }
+    }
+
+    // Then process other rules at the row level
+    const nonUniqueRules = tableRules.filter((rule) => rule.ruleType !== "unique")
+    for (let rowIndex = 0; rowIndex < tableData.length; rowIndex++) {
+      const row = tableData[rowIndex]
+
+      for (const rule of nonUniqueRules) {
+        try {
+          const validationResult = validateRow(row, rule, valueLists, datasets)
+          if (validationResult) {
+            // Always include the result, regardless of success or failure
+            results.push({
+              ...validationResult,
+              table: tableName,
+              rowIndex,
+            })
+          }
+        } catch (error) {
+          console.error(`Error validating rule ${rule.name} on row ${rowIndex}:`, error)
+          results.push({
+            table: tableName,
+            rowIndex,
+            column: rule.column,
+            ruleName: rule.name,
+            message: `Validation error: ${error.message}`,
+            severity: "failure",
+          })
+        }
+      }
+    }
+  }
+
+  return results
 }
 
-interface AggregationConfig {
-  function: string
-  column: string
-  alias?: string
-  filter?: {
-    column?: string
-    operator?: string
-    value?: any
-    type?: "AND" | "OR"
-    conditions?: Condition[]
+function validateRow(
+  row: DataRecord,
+  rule: DataQualityRule,
+  valueLists: ValueList[],
+  datasets: { [key: string]: DataRecord[] },
+): any {
+  let isValid = true
+  let message = `Validation passed for rule "${rule.name}"`
+
+  try {
+    // Skip validation if the column doesn't exist in the row (unless it's a multi-column rule)
+    if (
+      !row.hasOwnProperty(rule.column) &&
+      rule.ruleType !== "multi-column" &&
+      rule.ruleType !== "formula" &&
+      rule.ruleType !== "composite-reference" && // Add exception for composite-reference
+      !rule.ruleType.startsWith("date-")
+    ) {
+      return {
+        table: rule.table,
+        column: rule.column,
+        ruleName: rule.name,
+        message: `Column "${rule.column}" not found in row`,
+        severity: "warning",
+      }
+    }
+
+    // Get the column value
+    const value = row[rule.column]
+
+    // Log for debugging
+    console.log(`Validating rule: ${rule.name}, type: ${rule.ruleType}, column: ${rule.column}, value:`, value)
+
+    switch (rule.ruleType) {
+      case "required":
+        if (value === undefined || value === null || String(value).trim() === "") {
+          isValid = false
+          message = `${rule.column} is required but was empty or null`
+        }
+        break
+
+      case "equals":
+        if (String(value) !== String(rule.parameters.value)) {
+          isValid = false
+          message = `${rule.column} should equal "${rule.parameters.value}" but was "${value}"`
+        }
+        break
+
+      case "not-equals":
+        if (String(value) === String(rule.parameters.value)) {
+          isValid = false
+          message = `${rule.column} should not equal "${rule.parameters.value}"`
+        }
+        break
+
+      case "greater-than":
+        if (!(Number(value) > Number(rule.parameters.value))) {
+          isValid = false
+          message = `${rule.column} should be greater than ${rule.parameters.value} but was ${value}`
+        }
+        break
+
+      case "greater-than-equals":
+        if (!(Number(value) >= Number(rule.parameters.value))) {
+          isValid = false
+          message = `${rule.column} should be greater than or equal to ${rule.parameters.value} but was ${value}`
+        }
+        break
+
+      case "less-than":
+        if (!(Number(value) < Number(rule.parameters.value))) {
+          isValid = false
+          message = `${rule.column} should be less than ${rule.parameters.value} but was ${value}`
+        }
+        break
+
+      case "less-than-equals":
+        if (!(Number(value) <= Number(rule.parameters.value))) {
+          isValid = false
+          message = `${rule.column} should be less than or equal to ${rule.parameters.value} but was ${value}`
+        }
+        break
+
+      case "range":
+        const min = Number(rule.parameters.minValue)
+        const max = Number(rule.parameters.maxValue)
+        const numValue = Number(value)
+
+        if (isNaN(numValue) || numValue < min || numValue > max) {
+          isValid = false
+          message = `${rule.column} should be between ${min} and ${max} but was ${value}`
+        }
+        break
+
+      case "formula":
+        // Add debug logging for rule parameters
+        console.log("Formula rule parameters:", JSON.stringify(rule.parameters, null, 2))
+
+        // TARGETED FIX: For formula rules, we need to handle the case where the value is not in the parameters
+        // but is stored in the rule object directly
+        let comparisonValue = rule.parameters.value
+
+        // If the value is not in the parameters, check if it's in the rule object directly
+        if (comparisonValue === undefined) {
+          console.log("Value not found in parameters, checking rule object")
+
+          // Check if the value is in the rule object directly
+          if (rule.value !== undefined) {
+            comparisonValue = rule.value
+            console.log("Found value in rule object:", comparisonValue)
+          } else {
+            // If we still don't have a value, default to 0 for Math Formula rules
+            comparisonValue = 0
+            console.log("No value found, defaulting to 0 for Math Formula rule")
+          }
+        }
+
+        // Use the validateFormula function for formula rules
+        const tableData = datasets[rule.table] || []
+        const result = validateFormula(
+          row,
+          rule.parameters.formula,
+          rule.parameters.operator,
+          comparisonValue, // Use our resolved comparison value
+          rule.parameters.aggregations,
+          tableData,
+        )
+
+        isValid = result.isValid
+        message = result.message
+        break
+
+      case "regex":
+        try {
+          const regex = new RegExp(rule.parameters.pattern)
+          if (!regex.test(String(value))) {
+            isValid = false
+            message = `${rule.column} does not match pattern "${rule.parameters.pattern}"`
+          }
+        } catch (error) {
+          isValid = false
+          message = `Invalid regex pattern: ${error.message}`
+        }
+        break
+
+      case "enum":
+        if (rule.parameters.allowedValues) {
+          const allowedValues = String(rule.parameters.allowedValues)
+            .split(",")
+            .map((v) => v.trim())
+
+          const valueStr = String(value).trim()
+          const caseInsensitive = rule.parameters.caseInsensitive === true
+
+          let found = false
+          for (const allowedValue of allowedValues) {
+            if (caseInsensitive) {
+              if (valueStr.toLowerCase() === allowedValue.toLowerCase()) {
+                found = true
+                break
+              }
+            } else if (valueStr === allowedValue) {
+              found = true
+              break
+            }
+          }
+
+          if (!found) {
+            isValid = false
+            message = `${rule.column} should be one of [${allowedValues.join(", ")}] but was "${value}"`
+          }
+        }
+        break
+
+      case "list":
+        if (rule.parameters.valueList) {
+          const valueList = valueLists.find((list) => list.id === rule.parameters.valueList)
+          if (valueList) {
+            if (!valueList.values.includes(String(value))) {
+              isValid = false
+              message = `${rule.column} is not in the allowed list "${valueList.name}"`
+            }
+          } else {
+            isValid = false
+            message = `Value list "${rule.parameters.valueList}" not found`
+          }
+        }
+        break
+
+      case "contains":
+        if (!String(value).includes(rule.parameters.substring)) {
+          isValid = false
+          message = `${rule.column} should contain "${rule.parameters.substring}" but was "${value}"`
+        }
+        break
+
+      case "type":
+        let typeValid = false
+        switch (rule.parameters.dataType) {
+          case "string":
+            typeValid = typeof value === "string"
+            break
+          case "number":
+            typeValid = typeof value === "number" && !isNaN(value)
+            break
+          case "boolean":
+            typeValid = typeof value === "boolean"
+            break
+          case "date":
+            typeValid = value instanceof Date && !isNaN(value.getTime())
+            break
+        }
+
+        if (!typeValid) {
+          isValid = false
+          message = `${rule.column} should be of type ${rule.parameters.dataType} but was ${typeof value}`
+        }
+        break
+
+      case "column-comparison":
+      case "cross-column":
+        const leftColumn = rule.column
+        const rightColumn = rule.parameters.rightColumn || rule.parameters.secondaryColumn
+        const operator = rule.parameters.operator || rule.parameters.comparisonOperator || "=="
+        const leftValue = row[leftColumn]
+        const rightValue = row[rightColumn]
+
+        let comparisonValid = false
+        switch (operator) {
+          case "==":
+            comparisonValid = leftValue == rightValue
+            break
+          case "!=":
+            comparisonValid = leftValue != rightValue
+            break
+          case ">":
+            comparisonValid = Number(leftValue) > Number(rightValue)
+            break
+          case ">=":
+            comparisonValid = Number(leftValue) >= Number(rightValue)
+            break
+          case "<":
+            comparisonValid = Number(leftValue) < Number(rightValue)
+            break
+          case "<=":
+            comparisonValid = Number(leftValue) <= Number(rightValue)
+            break
+        }
+
+        if (!comparisonValid) {
+          isValid = false
+          message = `${leftColumn} (${leftValue}) ${operator} ${rightColumn} (${rightValue}) is false`
+        }
+        break
+
+      case "javascript-formula":
+        try {
+          // Create a function that evaluates the expression with the row data
+          const paramNames = Object.keys(row)
+          const paramValues = paramNames.map((key) => row[key])
+
+          const evalFunc = new Function(
+            ...paramNames,
+            `"use strict"; 
+             try { 
+               return Boolean(${rule.parameters.javascriptExpression}); 
+             } catch(err) { 
+               console.error("JavaScript formula evaluation error:", err.message); 
+               throw new Error("Invalid JavaScript formula: " + err.message); 
+             }`,
+          )
+
+          const result = evalFunc(...paramValues)
+
+          if (typeof result !== "boolean") {
+            isValid = false
+            message = `JavaScript formula did not return a boolean value`
+          } else {
+            isValid = result
+            if (!isValid) {
+              message = `JavaScript formula validation failed`
+            }
+          }
+        } catch (error) {
+          isValid = false
+          message = `JavaScript formula error: ${error.message}`
+        }
+        break
+
+      // Add support for multi-column rule type
+      case "multi-column":
+        console.log("Validating multi-column rule:", rule.name)
+        console.log("Rule conditions:", JSON.stringify(rule.conditions, null, 2))
+
+        if (!rule.conditions || rule.conditions.length === 0) {
+          isValid = false
+          message = "No conditions defined for multi-column rule"
+          break
+        }
+
+        // Evaluate each condition
+        const conditionResults = rule.conditions.map((condition) => {
+          return evaluateCondition(row, condition)
+        })
+
+        console.log("Condition results:", conditionResults)
+
+        // Combine results based on logical operators
+        let finalResult = conditionResults[0]
+        for (let i = 1; i < conditionResults.length; i++) {
+          const logicalOp = rule.conditions[i - 1].logicalOperator || "AND"
+          if (logicalOp === "AND") {
+            finalResult = finalResult && conditionResults[i]
+          } else if (logicalOp === "OR") {
+            finalResult = finalResult || conditionResults[i]
+          }
+        }
+
+        isValid = finalResult
+        if (!isValid) {
+          message = `Multi-column condition validation failed`
+        }
+        break
+
+      // Add support for composite-reference rule type
+      case "composite-reference":
+        console.log("Validating composite-reference rule:", rule.name)
+        console.log("Rule parameters:", JSON.stringify(rule.parameters, null, 2))
+
+        // Get the reference table and columns
+        const referenceTable = rule.parameters.referenceTable
+        const sourceColumns = rule.parameters.sourceColumns || []
+        const referenceColumns = rule.parameters.referenceColumns || []
+
+        // Validate that we have the necessary parameters
+        if (!referenceTable) {
+          isValid = false
+          message = `Missing reference table in composite-reference rule`
+          break
+        }
+
+        if (!sourceColumns.length || !referenceColumns.length) {
+          isValid = false
+          message = `Missing source or reference columns in composite-reference rule`
+          break
+        }
+
+        if (sourceColumns.length !== referenceColumns.length) {
+          isValid = false
+          message = `Source columns count (${sourceColumns.length}) does not match reference columns count (${referenceColumns.length})`
+          break
+        }
+
+        // Get the reference table data
+        const referenceData = datasets[referenceTable]
+        if (!referenceData || !referenceData.length) {
+          isValid = false
+          message = `Reference table "${referenceTable}" is empty or not found`
+          break
+        }
+
+        console.log(`Checking composite key match in ${referenceTable} table with ${referenceData.length} records`)
+
+        // Extract source values from the current row
+        const sourceValues = sourceColumns.map((col) => row[col])
+        console.log("Source values:", sourceValues)
+
+        // Check if there's a matching record in the reference table
+        let foundMatch = false
+        for (const refRow of referenceData) {
+          const refValues = referenceColumns.map((col) => refRow[col])
+          console.log("Comparing with reference values:", refValues)
+
+          // Check if all values match
+          const allMatch = sourceValues.every((val, index) => {
+            const refVal = refValues[index]
+
+            // Handle different types of comparisons
+            if (val === refVal) return true
+            if (String(val) === String(refVal)) return true
+            return false
+          })
+
+          if (allMatch) {
+            foundMatch = true
+            console.log("Found matching record in reference table")
+            break
+          }
+        }
+
+        if (!foundMatch) {
+          isValid = false
+          message = `No matching record found in "${referenceTable}" for composite key [${sourceColumns.join(", ")}] with values [${sourceValues.join(", ")}]`
+        }
+        break
+
+      // Add support for date rules
+      case "date-before":
+        try {
+          // Parse the column value as a date
+          const dateValue = new Date(value)
+
+          // Check if the date is valid
+          if (isNaN(dateValue.getTime())) {
+            isValid = false
+            message = `${rule.column} contains an invalid date: "${value}"`
+            break
+          }
+
+          // Parse the compare date from the rule parameters
+          const compareDate = new Date(rule.parameters.compareDate)
+
+          // Check if the compare date is valid
+          if (isNaN(compareDate.getTime())) {
+            isValid = false
+            message = `Invalid compare date in rule: "${rule.parameters.compareDate}"`
+            break
+          }
+
+          // Check if the date is before the compare date
+          if (dateValue >= compareDate) {
+            isValid = false
+            message = `${rule.column} (${value}) should be before ${rule.parameters.compareDate}`
+          }
+        } catch (error) {
+          console.error(`Error in date-before validation:`, error)
+          isValid = false
+          message = `Date validation error: ${error.message}`
+        }
+        break
+
+      case "date-after":
+        try {
+          // Add debug logging to see what parameters are available
+          console.log("Date After rule parameters:", JSON.stringify(rule.parameters, null, 2))
+
+          // Parse the column value as a date
+          const dateValue = new Date(value)
+
+          // Check if the date is valid
+          if (isNaN(dateValue.getTime())) {
+            isValid = false
+            message = `${rule.column} contains an invalid date: "${value}"`
+            break
+          }
+
+          // Try different parameter names for the compare date
+          let compareDate: Date | null = null
+
+          // Check all possible parameter names
+          if (rule.parameters.compareDate !== undefined) {
+            compareDate = new Date(rule.parameters.compareDate)
+          } else if (rule.parameters.afterDate !== undefined) {
+            compareDate = new Date(rule.parameters.afterDate)
+          } else if (rule.parameters.referenceDate !== undefined) {
+            compareDate = new Date(rule.parameters.referenceDate)
+          } else if (rule.parameters.date !== undefined) {
+            compareDate = new Date(rule.parameters.date)
+          }
+
+          // If we still don't have a valid date, check the rule object directly
+          if (!compareDate || isNaN(compareDate.getTime())) {
+            console.log("No valid compare date found in parameters, checking rule object")
+
+            if (rule.compareDate !== undefined) {
+              compareDate = new Date(rule.compareDate)
+            } else if (rule.afterDate !== undefined) {
+              compareDate = new Date(rule.afterDate)
+            } else if (rule.referenceDate !== undefined) {
+              compareDate = new Date(rule.referenceDate)
+            } else if (rule.date !== undefined) {
+              compareDate = new Date(rule.date)
+            }
+          }
+
+          // If we still don't have a valid date, report an error
+          if (!compareDate || isNaN(compareDate.getTime())) {
+            isValid = false
+            message = `Invalid or missing compare date in rule. Available parameters: ${Object.keys(rule.parameters).join(", ")}`
+            break
+          }
+
+          // Check if the date is after the compare date
+          if (dateValue <= compareDate) {
+            isValid = false
+            message = `${rule.column} (${value}) should be after ${compareDate.toISOString()}`
+          }
+        } catch (error) {
+          console.error(`Error in date-after validation:`, error)
+          isValid = false
+          message = `Date validation error: ${error.message}`
+        }
+        break
+
+      case "date-between":
+        try {
+          // Parse the column value as a date
+          const dateValue = new Date(value)
+
+          // Check if the date is valid
+          if (isNaN(dateValue.getTime())) {
+            isValid = false
+            message = `${rule.column} contains an invalid date: "${value}"`
+            break
+          }
+
+          // Parse the start and end dates from the rule parameters
+          const startDate = new Date(rule.parameters.startDate)
+          const endDate = new Date(rule.parameters.endDate)
+
+          // Check if the start and end dates are valid
+          if (isNaN(startDate.getTime())) {
+            isValid = false
+            message = `Invalid start date in rule: "${rule.parameters.startDate}"`
+            break
+          }
+
+          if (isNaN(endDate.getTime())) {
+            isValid = false
+            message = `Invalid end date in rule: "${rule.parameters.endDate}"`
+            break
+          }
+
+          // Check if the date is between the start and end dates
+          const isAfterStart = dateValue >= startDate
+          const isBeforeEnd = dateValue <= endDate
+
+          if (!isAfterStart || !isBeforeEnd) {
+            isValid = false
+            message = `${rule.column} (${value}) should be between ${rule.parameters.startDate} and ${rule.parameters.endDate}`
+          }
+        } catch (error) {
+          console.error(`Error in date-between validation:`, error)
+          isValid = false
+          message = `Date validation error: ${error.message}`
+        }
+        break
+
+      case "date-format":
+        try {
+          // Get the expected format from the rule parameters
+          const expectedFormat = rule.parameters.format
+
+          if (!expectedFormat) {
+            isValid = false
+            message = `Missing format parameter in date-format rule`
+            break
+          }
+
+          // For date-format validation, we'll do a simple check based on common formats
+          // This is a simplified approach - a more robust solution would use a date library
+
+          // Convert the value to a string
+          const dateStr = String(value)
+
+          // Define some basic format validation functions
+          const formatValidators: Record<string, (dateStr: string) => boolean> = {
+            // YYYY-MM-DD format (ISO date)
+            "YYYY-MM-DD": (str) => /^\d{4}-\d{2}-\d{2}$/.test(str),
+
+            // MM/DD/YYYY format (US date)
+            "MM/DD/YYYY": (str) => /^\d{2}\/\d{2}\/\d{4}$/.test(str),
+
+            // DD/MM/YYYY format (European date)
+            "DD/MM/YYYY": (str) => /^\d{2}\/\d{2}\/\d{4}$/.test(str),
+
+            // YYYY/MM/DD format
+            "YYYY/MM/DD": (str) => /^\d{4}\/\d{2}\/\d{2}$/.test(str),
+
+            // ISO datetime format
+            ISO: (str) => !isNaN(new Date(str).getTime()),
+          }
+
+          // Check if the format is supported
+          if (!formatValidators[expectedFormat]) {
+            isValid = false
+            message = `Unsupported date format: "${expectedFormat}"`
+            break
+          }
+
+          // Validate the date string against the expected format
+          if (!formatValidators[expectedFormat](dateStr)) {
+            isValid = false
+            message = `${rule.column} (${value}) does not match the expected format "${expectedFormat}"`
+          }
+
+          // Additional check: verify it's a valid date
+          const dateObj = new Date(value)
+          if (isNaN(dateObj.getTime())) {
+            isValid = false
+            message = `${rule.column} contains an invalid date: "${value}"`
+          }
+        } catch (error) {
+          console.error(`Error in date-format validation:`, error)
+          isValid = false
+          message = `Date format validation error: ${error.message}`
+        }
+        break
+
+      default:
+        console.warn(`Unhandled rule type: ${rule.ruleType}`)
+        return {
+          table: rule.table,
+          column: rule.column,
+          ruleName: rule.name,
+          message: `Unsupported rule type: ${rule.ruleType}`,
+          severity: "warning",
+        }
+    }
+  } catch (error) {
+    console.error(`Error validating rule ${rule.name}:`, error)
+    return {
+      table: rule.table,
+      column: rule.column,
+      ruleName: rule.name,
+      message: `Validation error: ${error.message}`,
+      severity: "failure",
+    }
+  }
+
+  if (!isValid) {
+    return {
+      table: rule.table,
+      column: rule.column,
+      ruleName: rule.name,
+      message,
+      severity: rule.severity || "failure",
+    }
+  } else {
+    // Return success results too
+    return {
+      table: rule.table,
+      column: rule.column,
+      ruleName: rule.name,
+      message,
+      severity: "success", // Always use success for passing validations
+    }
   }
 }
 
-// Define validateFormula with a complete implementation
-function validateFormula(
+// Helper function to evaluate a single condition
+function evaluateCondition(row: DataRecord, condition: Condition): boolean {
+  console.log(`Evaluating condition: ${condition.column} ${condition.operator} ${condition.value}`)
+
+  // Get the column value from the row
+  const columnValue = row[condition.column]
+  console.log(`Column value: ${columnValue}, type: ${typeof columnValue}`)
+
+  // Handle special operators first
+  if (condition.operator === "is-blank") {
+    return columnValue === undefined || columnValue === null || String(columnValue).trim() === ""
+  }
+
+  if (condition.operator === "is-not-blank") {
+    return !(columnValue === undefined || columnValue === null || String(columnValue).trim() === "")
+  }
+
+  // For other operators, if the column value is undefined or null, the condition fails
+  if (columnValue === undefined || columnValue === null) {
+    console.log("Column value is undefined or null, condition fails")
+    return false
+  }
+
+  // Handle other operators
+  switch (condition.operator) {
+    case "==":
+      return String(columnValue) === String(condition.value)
+
+    case "!=":
+      return String(columnValue) !== String(condition.value)
+
+    case ">":
+      return Number(columnValue) > Number(condition.value)
+
+    case ">=":
+      return Number(columnValue) >= Number(condition.value)
+
+    case "<":
+      return Number(columnValue) < Number(condition.value)
+
+    case "<=":
+      return Number(columnValue) <= Number(condition.value)
+
+    case "contains":
+      return String(columnValue).includes(String(condition.value))
+
+    case "not-contains":
+      return !String(columnValue).includes(String(condition.value))
+
+    case "starts-with":
+      return String(columnValue).startsWith(String(condition.value))
+
+    case "ends-with":
+      return String(columnValue).endsWith(String(condition.value))
+
+    case "matches":
+      try {
+        const regex = new RegExp(String(condition.value))
+        return regex.test(String(columnValue))
+      } catch (error) {
+        console.error("Invalid regex in condition:", error)
+        return false
+      }
+
+    default:
+      console.warn(`Unsupported condition operator: ${condition.operator}`)
+      return false
+  }
+}
+
+export function validateFormula(
   row: DataRecord,
   formula?: string,
   operator?: string,
   value?: any,
-  aggregations?: AggregationConfig[],
+  aggregations?: any[],
   dataset?: DataRecord[],
 ): { isValid: boolean; message: string } {
-  // ADDED: Detailed logging of input parameters
-  console.log("FORMULA VALIDATION INPUT:", {
-    formula: formula,
-    operator: operator,
-    value: value,
-    operatorType: typeof operator,
-    valueType: typeof value,
-    valueIsZero: value === 0,
-    valueIsZeroString: value === "0",
-    valueToString: String(value),
-    valueToNumber: Number(value),
-  })
+  // Log inputs for debugging
+  console.log("validateFormula inputs:", { formula, operator, value, aggregationsCount: aggregations?.length })
+
+  // Log aggregations details if available
+  if (aggregations && aggregations.length > 0) {
+    console.log("Aggregations details:", JSON.stringify(aggregations, null, 2))
+  }
+
+  // Add more detailed logging for the value parameter
+  console.log("Raw value parameter:", value)
+  console.log("Type of value parameter:", typeof value)
+  console.log("Value is undefined:", value === undefined)
+  console.log("Value is null:", value === null)
+  console.log("Value is zero:", value === 0)
+  console.log("Value as string:", String(value))
 
   if (!formula || formula.trim() === "") {
     console.warn("Empty formula provided to validateFormula")
@@ -50,1314 +888,813 @@ function validateFormula(
   }
 
   try {
-    console.log("FORMULA DEBUG - Raw inputs:", {
+    // TARGETED FIX: Handle conditional SUM and other aggregation functions
+    if (aggregations && aggregations.length > 0) {
+      console.log("Using aggregations data directly for evaluation")
+
+      // Find the first aggregation (we'll handle one at a time for now)
+      const aggregation = aggregations[0]
+
+      if (aggregation && aggregation.function) {
+        console.log("Processing aggregation:", JSON.stringify(aggregation, null, 2))
+
+        // Extract the column and filter information
+        const columnName = aggregation.column
+        const filter = aggregation.filter
+
+        // Verify we have the necessary data
+        if (!columnName) {
+          console.error("Missing column name in aggregation")
+          return { isValid: false, message: "Invalid aggregation: missing column name" }
+        }
+
+        if (!dataset || !Array.isArray(dataset) || dataset.length === 0) {
+          console.warn("Empty dataset for aggregation calculation")
+          return { isValid: false, message: "Empty dataset for aggregation calculation" }
+        }
+
+        // Calculate the aggregation result based on the function type
+        let result = 0
+
+        switch (aggregation.function.toLowerCase()) {
+          case "sum":
+            result = calculateConditionalSum(dataset, columnName, filter)
+            break
+          case "avg":
+            result = calculateConditionalAverage(dataset, columnName, filter)
+            break
+          case "count":
+            result = calculateConditionalCount(dataset, columnName, filter)
+            break
+          case "min":
+            result = calculateConditionalMin(dataset, columnName, filter)
+            break
+          case "max":
+            result = calculateConditionalMax(dataset, columnName, filter)
+            break
+          case "distinct-group-sum":
+            const groupColumns = aggregation.groupColumns || []
+            result = calculateDistinctGroupSum(row, columnName, groupColumns, dataset)
+            break
+          default:
+            console.warn(`Unsupported aggregation function: ${aggregation.function}`)
+            return {
+              isValid: false,
+              message: `Unsupported aggregation function: ${aggregation.function}`,
+            }
+        }
+
+        console.log(`Aggregation ${aggregation.function} result:`, result)
+
+        // Compare with the expected value
+        const numericResult = Number(result)
+        const numericValue = Number(value || 0)
+
+        // Default to equality comparison if operator is not provided
+        const comparisonOperator = operator || "=="
+
+        let comparisonResult = false
+        switch (comparisonOperator) {
+          case "==":
+            comparisonResult = Math.abs(numericResult - numericValue) < 0.000001 // Use epsilon for floating point
+            break
+          case "!=":
+            comparisonResult = Math.abs(numericResult - numericValue) >= 0.000001
+            break
+          case ">":
+            comparisonResult = numericResult > numericValue
+            break
+          case ">=":
+            comparisonResult = numericResult >= numericValue
+            break
+          case "<":
+            comparisonResult = numericResult < numericValue
+            break
+          case "<=":
+            comparisonResult = numericResult <= numericValue
+            break
+          default:
+            return {
+              isValid: false,
+              message: `Unknown operator: ${comparisonOperator}`,
+            }
+        }
+
+        return {
+          isValid: comparisonResult,
+          message: comparisonResult
+            ? `Formula "${formula}" ${comparisonOperator} ${numericValue} is true`
+            : `Formula "${formula}" evaluated to ${numericResult}, which is not ${comparisonOperator} ${numericValue}`,
+        }
+      }
+    }
+
+    // If we get here, either there are no aggregations or none of them are recognized
+    // Try to parse the formula directly as a fallback
+    console.log("No recognized aggregation found, trying to parse formula directly:", formula)
+
+    // Check if the formula is a SUM with condition
+    const sumWithConditionRegex = /SUM\s*$$\s*"([^"]+)"\s*,\s*([^)]+)$$/i
+    const sumMatch = formula.match(sumWithConditionRegex)
+
+    if (sumMatch) {
+      console.log("Detected SUM with condition formula")
+
+      const columnName = sumMatch[1]
+      const condition = sumMatch[2]
+
+      console.log("Parsed from formula - column:", columnName, "condition:", condition)
+
+      // Create a filter object from the condition
+      // This is a simplified approach - for complex conditions, we'd need a more robust parser
+      const filterParts = condition.split(/\s*(==|!=|>=|<=|>|<)\s*/)
+
+      if (filterParts.length >= 3) {
+        const filterColumn = filterParts[0].trim()
+        const filterOperator = filterParts[1].trim()
+        let filterValue = filterParts[2].trim()
+
+        // Remove quotes if present
+        filterValue = filterValue.replace(/^["']|["']$/g, "")
+
+        console.log("Parsed condition - column:", filterColumn, "operator:", filterOperator, "value:", filterValue)
+
+        const filter = {
+          column: filterColumn,
+          operator: filterOperator,
+          value: filterValue,
+        }
+
+        // Calculate the sum with the filter
+        const result = calculateConditionalSum(dataset || [], columnName, filter)
+        console.log("Calculated conditional sum:", result)
+
+        // Compare with the expected value
+        const numericResult = Number(result)
+        const numericValue = Number(value || 0)
+
+        // Default to equality comparison if operator is not provided
+        const comparisonOperator = operator || "=="
+
+        let comparisonResult = false
+        switch (comparisonOperator) {
+          case "==":
+            comparisonResult = Math.abs(numericResult - numericValue) < 0.000001
+            break
+          case "!=":
+            comparisonResult = Math.abs(numericResult - numericValue) >= 0.000001
+            break
+          case ">":
+            comparisonResult = numericResult > numericValue
+            break
+          case ">=":
+            comparisonResult = numericResult >= numericValue
+            break
+          case "<":
+            comparisonResult = numericResult < numericValue
+            break
+          case "<=":
+            comparisonResult = numericResult <= numericValue
+            break
+          default:
+            return {
+              isValid: false,
+              message: `Unknown operator: ${comparisonOperator}`,
+            }
+        }
+
+        return {
+          isValid: comparisonResult,
+          message: comparisonResult
+            ? `Formula "${formula}" ${comparisonOperator} ${numericValue} is true`
+            : `Formula "${formula}" evaluated to ${numericResult}, which is not ${comparisonOperator} ${numericValue}`,
+        }
+      }
+    }
+
+    // For other formulas, use the standard evaluation approach
+    console.log("Using standard evaluation for formula:", formula)
+
+    // Create a safe evaluation context with all row values
+    const context: Record<string, any> = { ...row }
+
+    // Add aggregation functions
+    const aggregationFunctions = {
+      SUM: (column: string) => 0,
+      AVG: (column: string) => 0,
+      COUNT: (column: string) => 0,
+      MIN: (column: string) => 0,
+      MAX: (column: string) => 0,
+      DISTINCT_COUNT: (column: string) => 0,
+      DISTINCT: (column: string) => 0,
+      GROUP: (column: string) => 0,
+      GROUP_BY: (column: string) => 0,
+      DISTINCT_GROUP: (column: string) => 0,
+      DISTINCT_GROUP_SUM: (column: string) => 0,
+      DISTINCT_GROUP_COUNT: (column: string) => 0,
+      DISTINCT_GROUP_AVG: (column: string) => 0,
+    }
+
+    Object.assign(context, aggregationFunctions)
+
+    // Sanitize column names for use as variables
+    Object.keys(row).forEach((key) => {
+      if (/[^a-zA-Z0-9_]/.test(key)) {
+        const sanitizedKey = key.replace(/[^a-zA-Z0-9_]/g, "_")
+        context[sanitizedKey] = row[key]
+      }
+    })
+
+    // Create a function to evaluate the formula safely
+    // Use a safer approach with Function constructor instead of eval
+    const paramNames = Object.keys(context)
+    const paramValues = paramNames.map((key) => context[key])
+
+    // Create a function that evaluates the formula with the provided context
+    const evalFunc = new Function(
+      ...paramNames,
+      `try {
+        return ${formula};
+      } catch (e) {
+        console.error("Formula evaluation error:", e);
+        throw e;
+      }`,
+    )
+
+    // Execute the function with the context values
+    const result = evalFunc(...paramValues)
+    console.log("Formula evaluation result:", result)
+
+    // If the formula already contains a comparison operator, the result should be a boolean
+    if (typeof result === "boolean") {
+      return {
+        isValid: result,
+        message: result ? `Formula "${formula}" evaluated to true` : `Formula "${formula}" evaluated to false`,
+      }
+    }
+
+    // Otherwise, compare the result with the provided value using the operator
+    const numericResult = Number(result)
+
+    // TARGETED FIX: Handle the case where value is undefined or NaN
+    // For Math Formula rules, default to 0 if value is undefined or NaN
+    let numericValue = Number(value)
+
+    if (isNaN(numericValue) || value === undefined) {
+      // Default to 0 for Math Formula rules
+      numericValue = 0
+      console.log("Value is undefined or NaN, defaulting to 0 for Math Formula rule")
+    }
+
+    // Default to equality comparison if operator is not provided
+    const comparisonOperator = operator || "=="
+
+    // Add detailed logging for comparison values
+    console.log("Comparison details:", {
       formula,
-      operator,
-      value,
-      hasOperator: operator !== undefined,
-      hasValue: value !== undefined,
-      aggregationsCount: aggregations?.length || 0,
-      datasetRowCount: dataset?.length || 0,
-      rowData: row,
-    })
-
-    // ADDED: Check for undefined/null values
-    console.log("COMPARISON CHECK:", {
-      hasOperator: operator !== undefined && operator !== null,
-      hasValue: value !== undefined && value !== null,
-      operatorIsEmpty: operator === "",
-      valueIsZero: value === 0,
-      valueIsZeroString: value === "0",
-      valueIsEmptyString: value === "",
+      formulaResult: result,
+      numericResult,
+      operator: comparisonOperator,
+      rawComparisonValue: value,
+      numericComparisonValue: numericValue,
       valueIsUndefined: value === undefined,
-      valueIsNull: value === null,
+      valueIsZero: value === 0,
+      valueAfterNumberConversion: Number(value),
     })
 
-    // Create a lookup table for aggregation functions to replace them with concrete values
-    const aggregationValues: Record<string, number> = {}
-
-    if (aggregations?.length && dataset?.length) {
-      // Pre-compute all aggregation values and store them in the lookup table
-      aggregations.forEach((agg) => {
-        const funcName = getFunctionName(agg.function).toUpperCase()
-        const columnName = agg.column.replace(/"/g, "") // Remove any quotes
-
-        // Compute the aggregation
-        const value = computeAggregation(dataset, agg)
-
-        // Log the computed value for debugging
-        console.log(`Computed aggregation ${funcName}("${columnName}") = ${value}`)
-
-        // Store with both quoted and unquoted versions to handle all cases
-        const key1 = `${funcName}("${columnName}")`
-        const key2 = `${funcName}(${columnName})`
-
-        // Also store versions with filter conditions
-        let filterText = ""
-        if (agg.filter) {
-          if ("conditions" in agg.filter) {
-            // Multi-condition filter
-            const conditions = agg.filter.conditions
-              .map((c) => `${c.column} ${c.operator} ${typeof c.value === "string" ? `"${c.value}"` : c.value}`)
-              .join(" OR ")
-            filterText = `, ${conditions}`
-          } else {
-            // Legacy single condition filter
-            filterText = `, ${agg.filter.column} ${agg.filter.operator || "=="} ${
-              typeof agg.filter.value === "string" ? `"${agg.filter.value}"` : agg.filter.value
-            }`
-          }
+    let comparisonResult = false
+    switch (comparisonOperator) {
+      case "==":
+        comparisonResult = Math.abs(numericResult - numericValue) < 0.000001 // Use epsilon for floating point
+        break
+      case "!=":
+        comparisonResult = Math.abs(numericResult - numericValue) >= 0.000001
+        break
+      case ">":
+        comparisonResult = numericResult > numericValue
+        break
+      case ">=":
+        comparisonResult = numericResult >= numericValue
+        break
+      case "<":
+        comparisonResult = numericResult < numericValue
+        break
+      case "<=":
+        comparisonResult = numericResult <= numericValue
+        break
+      default:
+        return {
+          isValid: false,
+          message: `Unknown operator: ${comparisonOperator}`,
         }
-
-        if (filterText) {
-          const key3 = `${funcName}("${columnName}"${filterText})`
-          const key4 = `${funcName}(${columnName}${filterText})`
-          aggregationValues[key3] = value
-          aggregationValues[key4] = value
-
-          // Also add versions with spaces removed around operators for more robust matching
-          const compactFilterText = filterText.replace(/\s+/g, "")
-          const key5 = `${funcName}("${columnName}"${compactFilterText})`
-          const key6 = `${funcName}(${columnName}${compactFilterText})`
-          aggregationValues[key5] = value
-          aggregationValues[key6] = value
-        }
-
-        aggregationValues[key1] = value
-        aggregationValues[key2] = value
-
-        console.log(`Pre-computed aggregation: ${key1} = ${value}`)
-
-        // Special case for SUM("age", category == "A") pattern
-        if (funcName === "SUM" && filterText.includes("==")) {
-          // Create additional keys for the common pattern without spaces
-          const compactKey = `${funcName}("${columnName}",${filterText.replace(/\s+/g, "")})`
-          aggregationValues[compactKey] = value
-          console.log(`Added compact key: ${compactKey} = ${value}`)
-
-          // Also try with single quotes for string values
-          if (filterText.includes('"')) {
-            const singleQuoteKey = `${funcName}("${columnName}",${filterText.replace(/"/g, "'").replace(/\s+/g, "")})`
-            aggregationValues[singleQuoteKey] = value
-            console.log(`Added single quote key: ${singleQuoteKey} = ${value}`)
-          }
-        }
-      })
     }
-
-    // Replace aggregation function patterns with their pre-computed values
-    let processedFormula = formula
-
-    // Replace aggregation function patterns with their pre-computed values
-    if (Object.keys(aggregationValues).length > 0) {
-      // Start with the longer keys (with quotes) to avoid partial replacements
-      const sortedKeys = Object.keys(aggregationValues).sort((a, b) => b.length - a.length)
-
-      for (const key of sortedKeys) {
-        // Replace all occurrences of this aggregation function with its numerical value
-        processedFormula = processedFormula.replace(
-          new RegExp(key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"),
-          aggregationValues[key].toString(),
-        )
-      }
-
-      console.log(`Preprocessed formula: ${formula} -> ${processedFormula}`)
-    }
-
-    // Replace column references with actual values from the row
-    const columnNames = Object.keys(row).sort((a, b) => b.length - a.length) // Sort by length to avoid partial replacements
-    for (const colName of columnNames) {
-      const colValue = row[colName]
-      if (colValue !== undefined && colValue !== null) {
-        // Replace the column name with its value, being careful about word boundaries
-        const regex = new RegExp(`\\b${colName}\\b`, "g")
-        processedFormula = processedFormula.replace(
-          regex,
-          typeof colValue === "string" ? `"${colValue}"` : String(colValue),
-        )
-      }
-    }
-
-    console.log(`Formula after column replacement: ${processedFormula}`)
-
-    // Check if the formula already contains a comparison operator
-    const hasComparisonOperator = /[<>]=?|[!=]=/.test(processedFormula)
-
-    // Create a safe evaluation function to get the formula result
-    const evalFormula = new Function("return " + processedFormula)
-
-    // Evaluate the formula to get the numeric result
-    const formulaResult = evalFormula()
-    console.log(`Formula evaluation result: ${formulaResult}`)
-
-    // Handle NaN results
-    if (isNaN(formulaResult)) {
-      console.log("Formula evaluated to NaN, treating as 0 for comparison")
-      const isValid = false // NaN should fail validation
-      return {
-        isValid,
-        message: `Failed validation: Formula "${formula}" evaluated to NaN`,
-      }
-    }
-
-    // If the formula already has a comparison operator, the result should be a boolean
-    if (hasComparisonOperator) {
-      const isValid = Boolean(formulaResult)
-      return {
-        isValid,
-        message: isValid
-          ? `Passed validation: ${formula}`
-          : `Failed validation: Formula "${formula}" evaluated to false`,
-      }
-    }
-
-    // CRITICAL FIX: For Math Formula rules, use default operator and value if they're undefined
-    let finalOperator = operator
-    let finalValue = value
-
-    // If operator is undefined, default to "==" for Math Formula rules
-    if (finalOperator === undefined || finalOperator === null) {
-      finalOperator = "=="
-      console.log("Using default operator '==' because operator is undefined")
-    }
-
-    // If value is undefined, default to 0 for Math Formula rules
-    if (finalValue === undefined || finalValue === null) {
-      finalValue = 0
-      console.log("Using default value 0 because value is undefined")
-    }
-
-    // ADDED: Force parameter conversion to ensure correct types
-    const operatorStr = String(finalOperator)
-    const valueNum = Number(finalValue)
-
-    console.log("PARAMETER CONVERSION:", {
-      originalOperator: operator,
-      originalValue: value,
-      finalOperator: finalOperator,
-      finalValue: finalValue,
-      convertedOperator: operatorStr,
-      convertedValue: valueNum,
-    })
-
-    // Now perform the comparison with the final values
-    let isValid = false
-    const numericResult = Number(formulaResult)
-
-    console.log(`CRITICAL COMPARISON: ${numericResult} ${operatorStr} ${valueNum}`)
-
-    // ADDED: Detailed logging for equality comparison
-    if (operatorStr === "==") {
-      console.log("EQUALITY COMPARISON DETAILS:", {
-        numericResult: numericResult,
-        valueNum: valueNum,
-        difference: Math.abs(numericResult - valueNum),
-        epsilon: 0.000001,
-        isCloseToZero: Math.abs(numericResult) < 0.000001,
-        valueIsCloseToZero: Math.abs(valueNum) < 0.000001,
-      })
-    }
-
-    // CRITICAL FIX: Handle equality comparison separately from other operators
-    if (operatorStr === "==") {
-      // Use a small epsilon for floating-point comparison
-      const epsilon = 0.000001
-      isValid = Math.abs(numericResult - valueNum) < epsilon
-      console.log(`EQUALITY CHECK: Math.abs(${numericResult} - ${valueNum}) < ${epsilon} = ${isValid}`)
-    } else if (operatorStr === "!=") {
-      const epsilon = 0.000001
-      isValid = Math.abs(numericResult - valueNum) >= epsilon
-    } else if (operatorStr === ">") {
-      isValid = numericResult > valueNum
-    } else if (operatorStr === ">=") {
-      isValid = numericResult >= valueNum
-    } else if (operatorStr === "<") {
-      isValid = numericResult < valueNum
-    } else if (operatorStr === "<=") {
-      isValid = numericResult <= valueNum
-    } else {
-      console.warn(`Unknown operator: ${operatorStr}`)
-      isValid = false
-    }
-
-    console.log(`COMPARISON RESULT: ${numericResult} ${operatorStr} ${valueNum} = ${isValid}`)
 
     return {
-      isValid,
-      message: isValid
-        ? `Passed validation: ${formula} ${operatorStr} ${valueNum}`
-        : `Failed validation: ${numericResult} ${operatorStr} ${valueNum} is false`,
+      isValid: comparisonResult,
+      message: comparisonResult
+        ? `Formula "${formula}" ${comparisonOperator} ${numericValue} is true`
+        : `Formula "${formula}" evaluated to ${numericResult}, which is not ${comparisonOperator} ${numericValue}`,
     }
   } catch (error) {
     console.error("Error in validateFormula:", error)
     return {
       isValid: false,
-      message: `Validation failed: ${error.message}`,
+      message: `Formula validation error: ${error.message}`,
     }
   }
 }
 
-function getFunctionName(functionString: string): string {
-  const match = functionString.match(/^([A-Za-z_]+)/)
-  return match ? match[1] : functionString
-}
-
-function computeAggregation(dataset: DataRecord[], aggregationConfig: AggregationConfig): number {
-  const { function: funcName, column, filter } = aggregationConfig
-
-  // Filter the dataset based on the filter config
-  const filteredData = filterData(dataset, filter)
-
-  // Log the filtered data for debugging
-  console.log(`Filtered data for ${funcName}("${column}"): ${filteredData.length} rows`)
-
-  // Check if filtered data is empty
-  if (filteredData.length === 0) {
-    console.log(`No data matches the filter criteria for ${funcName}("${column}")`)
-    // Return appropriate default values based on function type
-    switch (funcName.toUpperCase()) {
-      case "SUM":
-        return 0
-      case "AVG":
-        return 0
-      case "COUNT":
-        return 0
-      case "MIN":
-        return 0
-      case "MAX":
-        return 0
-      case "DISTINCT_COUNT":
-        return 0
-      default:
-        return 0
-    }
-  }
-
-  // Extract values from the specified column
-  const values = filteredData.map((record) => {
-    const value = record[column]
-    // Handle null/undefined values
-    return value === null || value === undefined ? 0 : Number(value)
+// Helper function to calculate conditional SUM
+function calculateConditionalSum(dataset: DataRecord[], columnName: string, filter: any): number {
+  console.log("calculateConditionalSum inputs:", {
+    columnName,
+    filter: JSON.stringify(filter),
+    datasetSize: dataset.length,
   })
 
-  // Log the extracted values for debugging
-  console.log(
-    `Values for ${funcName}("${column}"): ${JSON.stringify(values.slice(0, 5))}${values.length > 5 ? "..." : ""}`,
-  )
-
-  // Perform the aggregation based on the function name
-  switch (funcName.toUpperCase()) {
-    case "SUM":
-      // Filter out NaN values and sum the rest
-      const validValues = values.filter((v) => !isNaN(v))
-      console.log(`Valid values for SUM: ${validValues.length} of ${values.length}`)
-      return validValues.reduce((sum, value) => sum + value, 0)
-    case "AVG":
-      const validAvgValues = values.filter((v) => !isNaN(v))
-      return validAvgValues.length > 0
-        ? validAvgValues.reduce((sum, value) => sum + value, 0) / validAvgValues.length
-        : 0
-    case "COUNT":
-      return values.length
-    case "MIN":
-      const validMinValues = values.filter((v) => !isNaN(v))
-      return validMinValues.length > 0 ? Math.min(...validMinValues) : 0
-    case "MAX":
-      const validMaxValues = values.filter((v) => !isNaN(v))
-      return validMaxValues.length > 0 ? Math.max(...validMaxValues) : 0
-    case "DISTINCT_COUNT": {
-      const distinctValues = new Set(values.filter((v) => !isNaN(v)))
-      return distinctValues.size
-    }
-    default:
-      console.warn(`Unknown aggregation function: ${funcName}`)
+  try {
+    if (!dataset || !Array.isArray(dataset) || dataset.length === 0) {
+      console.warn("Empty dataset for conditional SUM calculation")
       return 0
-  }
-}
+    }
 
-function filterData(dataset: DataRecord[], filterConfig?: AggregationConfig["filter"]): DataRecord[] {
-  if (!filterConfig) {
-    return dataset // No filter, return the original dataset
-  }
+    // Clean the column name (remove quotes if present)
+    const cleanColumnName = columnName.replace(/^["']|["']$/g, "")
+    console.log("Clean column name:", cleanColumnName)
 
-  let conditions: Condition[] = []
-
-  if ("conditions" in filterConfig && Array.isArray(filterConfig.conditions)) {
-    conditions = filterConfig.conditions
-  } else if ("column" in filterConfig && filterConfig.column) {
-    // Handle the legacy single-condition filter
-    conditions = [
-      {
-        column: filterConfig.column,
-        operator: filterConfig.operator || "==",
-        value: filterConfig.value,
-      },
-    ]
-  } else {
-    console.warn("Invalid filter configuration:", filterConfig)
-    return dataset // Invalid filter, return the original dataset
-  }
-
-  // Log the conditions for debugging
-  console.log(`Filtering with conditions: ${JSON.stringify(conditions)}`)
-
-  return dataset.filter((record) => {
-    let result = true // Start with true for AND, false for OR
-
-    for (let i = 0; i < conditions.length; i++) {
-      const condition = conditions[i]
-      const { column, operator, value, logicalOperator } = condition
-
-      let conditionResult = false // Default to false
-
-      if (column && operator !== undefined && value !== undefined) {
-        const recordValue = record[column]
-
-        // Log the comparison for debugging
-        console.log(`Comparing ${column}: ${recordValue} ${operator} ${value}`)
-
-        switch (operator) {
-          case "==":
-            conditionResult = String(recordValue) === String(value)
-            break
-          case "!=":
-            conditionResult = String(recordValue) !== String(value)
-            break
-          case ">":
-            conditionResult = Number(recordValue) > Number(value)
-            break
-          case ">=":
-            conditionResult = Number(recordValue) >= Number(value)
-            break
-          case "<":
-            conditionResult = Number(recordValue) < Number(value)
-            break
-          case "<=":
-            conditionResult = Number(recordValue) <= Number(value)
-            break
-          case "contains":
-            conditionResult = String(recordValue).includes(String(value))
-            break
-          case "not contains":
-            conditionResult = !String(recordValue).includes(String(value))
-            break
-          case "is empty":
-            conditionResult = recordValue === null || recordValue === undefined || String(recordValue).trim() === ""
-            break
-          case "is not empty":
-            conditionResult = recordValue !== null && recordValue !== undefined && String(recordValue).trim() !== ""
-            break
-          default:
-            console.warn(`Unknown operator: ${operator}`)
-            conditionResult = false
-        }
-      }
-
-      if (i === 0) {
-        result = conditionResult
-      } else if (logicalOperator === "OR") {
-        result = result || conditionResult
+    // Check if the column exists in the dataset
+    const sampleRecord = dataset[0]
+    if (!(cleanColumnName in sampleRecord)) {
+      console.warn(`Column "${cleanColumnName}" not found in dataset`)
+      // Check if it exists with different casing
+      const lowerColumnName = cleanColumnName.toLowerCase()
+      const matchingColumn = Object.keys(sampleRecord).find((key) => key.toLowerCase() === lowerColumnName)
+      if (matchingColumn) {
+        console.log(`Found column with different casing: "${matchingColumn}"`)
+        // Use the correctly cased column name
+        columnName = matchingColumn
       } else {
-        result = result && conditionResult
+        console.error(`Column "${cleanColumnName}" not found in dataset with any casing`)
+        return 0
       }
     }
 
-    return result
+    // Find all records that match the filter
+    const matchingRecords = dataset.filter((record) => {
+      // If no filter is provided, include all records
+      if (!filter) return true
+
+      // Get the filter column, operator, and value
+      const filterColumn = filter.column?.replace(/^["']|["']$/g, "")
+      const filterOperator = filter.operator
+      const filterValue = filter.value
+
+      if (!filterColumn || !filterOperator) return true
+
+      // Get the record value for the filter column
+      const recordValue = record[filterColumn]
+
+      // Compare based on the operator
+      switch (filterOperator) {
+        case "==":
+          return String(recordValue) === String(filterValue)
+        case "!=":
+          return String(recordValue) !== String(filterValue)
+        case ">":
+          return Number(recordValue) > Number(filterValue)
+        case ">=":
+          return Number(recordValue) >= Number(filterValue)
+        case "<":
+          return Number(recordValue) < Number(filterValue)
+        case "<=":
+          return Number(recordValue) <= Number(filterValue)
+        default:
+          console.warn(`Unsupported filter operator: ${filterOperator}`)
+          return true
+      }
+    })
+
+    console.log("Matching records count:", matchingRecords.length)
+    if (matchingRecords.length > 0) {
+      console.log("First matching record:", JSON.stringify(matchingRecords[0]))
+    }
+
+    // Sum the values of the specified column from matching records
+    let sum = 0
+    let validValueCount = 0
+
+    for (const record of matchingRecords) {
+      const value = record[cleanColumnName]
+      console.log(`Record ${cleanColumnName} value:`, value, "type:", typeof value)
+
+      if (value === undefined || value === null) {
+        console.log("Skipping undefined/null value")
+        continue
+      }
+
+      const numValue = Number(value)
+      if (isNaN(numValue)) {
+        console.log(`Value "${value}" is not a number, skipping`)
+        continue
+      }
+
+      console.log(`Adding ${numValue} to sum`)
+      sum += numValue
+      validValueCount++
+    }
+
+    console.log("Final calculated sum:", sum, "from", validValueCount, "valid values")
+    return sum
+  } catch (error) {
+    console.error("Error in calculateConditionalSum:", error)
+    return 0
+  }
+}
+
+// Helper function to calculate conditional AVERAGE
+function calculateConditionalAverage(dataset: DataRecord[], columnName: string, filter: any): number {
+  try {
+    const sum = calculateConditionalSum(dataset, columnName, filter)
+
+    // Count the number of matching records with valid values
+    let count = 0
+
+    // Clean the column name
+    const cleanColumnName = columnName.replace(/^["']|["']$/g, "")
+
+    // Find all records that match the filter
+    const matchingRecords = dataset.filter((record) => {
+      // If no filter is provided, include all records
+      if (!filter) return true
+
+      // Get the filter column, operator, and value
+      const filterColumn = filter.column?.replace(/^["']|["']$/g, "")
+      const filterOperator = filter.operator
+      const filterValue = filter.value
+
+      if (!filterColumn || !filterOperator) return true
+
+      // Get the record value for the filter column
+      const recordValue = record[filterColumn]
+
+      // Compare based on the operator
+      switch (filterOperator) {
+        case "==":
+          return String(recordValue) === String(filterValue)
+        case "!=":
+          return String(recordValue) !== String(filterValue)
+        case ">":
+          return Number(recordValue) > Number(filterValue)
+        case ">=":
+          return Number(recordValue) >= Number(filterValue)
+        case "<":
+          return Number(recordValue) < Number(filterValue)
+        case "<=":
+          return Number(recordValue) <= Number(filterValue)
+        default:
+          console.warn(`Unsupported filter operator: ${filterOperator}`)
+          return true
+      }
+    })
+
+    // Count records with valid numeric values
+    for (const record of matchingRecords) {
+      const value = record[cleanColumnName]
+      if (value !== undefined && value !== null && !isNaN(Number(value))) {
+        count++
+      }
+    }
+
+    // Calculate average
+    if (count === 0) {
+      console.log("No valid values found for average calculation")
+      return 0
+    }
+
+    const average = sum / count
+    console.log("Calculated average:", average, "from", count, "valid values")
+    return average
+  } catch (error) {
+    console.error("Error in calculateConditionalAverage:", error)
+    return 0
+  }
+}
+
+// Helper function to calculate conditional COUNT
+function calculateConditionalCount(dataset: DataRecord[], columnName: string, filter: any): number {
+  try {
+    // Clean the column name
+    const cleanColumnName = columnName.replace(/^["']|["']$/g, "")
+
+    // Find all records that match the filter
+    const matchingRecords = dataset.filter((record) => {
+      // If no filter is provided, include all records
+      if (!filter) return true
+
+      // Get the filter column, operator, and value
+      const filterColumn = filter.column?.replace(/^["']|["']$/g, "")
+      const filterOperator = filter.operator
+      const filterValue = filter.value
+
+      if (!filterColumn || !filterOperator) return true
+
+      // Get the record value for the filter column
+      const recordValue = record[filterColumn]
+
+      // Compare based on the operator
+      switch (filterOperator) {
+        case "==":
+          return String(recordValue) === String(filterValue)
+        case "!=":
+          return String(recordValue) !== String(filterValue)
+        case ">":
+          return Number(recordValue) > Number(filterValue)
+        case ">=":
+          return Number(recordValue) >= Number(filterValue)
+        case "<":
+          return Number(recordValue) < Number(filterValue)
+        case "<=":
+          return Number(recordValue) <= Number(filterValue)
+        default:
+          console.warn(`Unsupported filter operator: ${filterOperator}`)
+          return true
+      }
+    })
+
+    // Count records with non-null values in the specified column
+    let count = 0
+    for (const record of matchingRecords) {
+      if (record[cleanColumnName] !== undefined && record[cleanColumnName] !== null) {
+        count++
+      }
+    }
+
+    console.log("Calculated count:", count)
+    return count
+  } catch (error) {
+    console.error("Error in calculateConditionalCount:", error)
+    return 0
+  }
+}
+
+// Helper function to calculate conditional MIN
+function calculateConditionalMin(dataset: DataRecord[], columnName: string, filter: any): number {
+  try {
+    // Clean the column name
+    const cleanColumnName = columnName.replace(/^["']|["']$/g, "")
+
+    // Find all records that match the filter
+    const matchingRecords = dataset.filter((record) => {
+      // If no filter is provided, include all records
+      if (!filter) return true
+
+      // Get the filter column, operator, and value
+      const filterColumn = filter.column?.replace(/^["']|["']$/g, "")
+      const filterOperator = filter.operator
+      const filterValue = filter.value
+
+      if (!filterColumn || !filterOperator) return true
+
+      // Get the record value for the filter column
+      const recordValue = record[filterColumn]
+
+      // Compare based on the operator
+      switch (filterOperator) {
+        case "==":
+          return String(recordValue) === String(filterValue)
+        case "!=":
+          return String(recordValue) !== String(filterValue)
+        case ">":
+          return Number(recordValue) > Number(filterValue)
+        case ">=":
+          return Number(recordValue) >= Number(filterValue)
+        case "<":
+          return Number(recordValue) < Number(filterValue)
+        case "<=":
+          return Number(recordValue) <= Number(filterValue)
+        default:
+          console.warn(`Unsupported filter operator: ${filterOperator}`)
+          return true
+      }
+    })
+
+    // Find the minimum value
+    let min = Number.POSITIVE_INFINITY
+    let foundValidValue = false
+
+    for (const record of matchingRecords) {
+      const value = record[cleanColumnName]
+      if (value !== undefined && value !== null) {
+        const numValue = Number(value)
+        if (!isNaN(numValue)) {
+          min = Math.min(min, numValue)
+          foundValidValue = true
+        }
+      }
+    }
+
+    if (!foundValidValue) {
+      console.log("No valid values found for min calculation")
+      return 0
+    }
+
+    console.log("Calculated min:", min)
+    return min
+  } catch (error) {
+    console.error("Error in calculateConditionalMin:", error)
+    return 0
+  }
+}
+
+// Helper function to calculate conditional MAX
+function calculateConditionalMax(dataset: DataRecord[], columnName: string, filter: any): number {
+  try {
+    // Clean the column name
+    const cleanColumnName = columnName.replace(/^["']|["']$/g, "")
+
+    // Find all records that match the filter
+    const matchingRecords = dataset.filter((record) => {
+      // If no filter is provided, include all records
+      if (!filter) return true
+
+      // Get the filter column, operator, and value
+      const filterColumn = filter.column?.replace(/^["']|["']$/g, "")
+      const filterOperator = filter.operator
+      const filterValue = filter.value
+
+      if (!filterColumn || !filterOperator) return true
+
+      // Get the record value for the filter column
+      const recordValue = record[filterColumn]
+
+      // Compare based on the operator
+      switch (filterOperator) {
+        case "==":
+          return String(recordValue) === String(filterValue)
+        case "!=":
+          return String(recordValue) !== String(filterValue)
+        case ">":
+          return Number(recordValue) > Number(filterValue)
+        case ">=":
+          return Number(recordValue) >= Number(filterValue)
+        case "<":
+          return Number(recordValue) < Number(filterValue)
+        case "<=":
+          return Number(recordValue) <= Number(filterValue)
+        default:
+          console.warn(`Unsupported filter operator: ${filterOperator}`)
+          return true
+      }
+    })
+
+    // Find the maximum value
+    let max = Number.NEGATIVE_INFINITY
+    let foundValidValue = false
+
+    for (const record of matchingRecords) {
+      const value = record[cleanColumnName]
+      if (value !== undefined && value !== null) {
+        const numValue = Number(value)
+        if (!isNaN(numValue)) {
+          max = Math.max(max, numValue)
+          foundValidValue = true
+        }
+      }
+    }
+
+    if (!foundValidValue) {
+      console.log("No valid values found for max calculation")
+      return 0
+    }
+
+    console.log("Calculated max:", max)
+    return max
+  } catch (error) {
+    console.error("Error in calculateConditionalMax:", error)
+    return 0
+  }
+}
+
+// Helper function to calculate DISTINCT-GROUP-SUM directly
+function calculateDistinctGroupSum(
+  row: DataRecord,
+  columnName: string,
+  groupColumns: string[],
+  dataset: DataRecord[],
+): number {
+  console.log("calculateDistinctGroupSum inputs:", {
+    columnName,
+    groupColumns,
+    rowData: JSON.stringify(row),
+    datasetSize: dataset.length,
   })
-}
 
-// Add this function to set default date rule parameters
-function ensureDateRuleParameters(rule: DataQualityRule): DataQualityRule {
-  // Create a deep copy of the rule to avoid modifying the original
-  const updatedRule = JSON.parse(JSON.stringify(rule))
-
-  // Make sure parameters object exists
-  if (!updatedRule.parameters) {
-    updatedRule.parameters = {}
-  }
-
-  // Set default parameters based on rule type
-  if (updatedRule.ruleType === "date-before" || updatedRule.ruleType === "date-after") {
-    if (!updatedRule.parameters.compareDate) {
-      // Set default to today's date
-      const today = new Date()
-      updatedRule.parameters.compareDate = today.toISOString().split("T")[0] // YYYY-MM-DD format
-      console.log(`Set default compareDate for ${updatedRule.ruleType} rule:`, updatedRule.parameters.compareDate)
+  try {
+    if (!dataset || !Array.isArray(dataset) || dataset.length === 0) {
+      console.warn("Empty dataset for DISTINCT-GROUP-SUM calculation")
+      return 0
     }
-  } else if (updatedRule.ruleType === "date-between") {
-    if (!updatedRule.parameters.startDate || !updatedRule.parameters.endDate) {
-      // Set default start date to 30 days ago and end date to today
-      const today = new Date()
-      const thirtyDaysAgo = new Date()
-      thirtyDaysAgo.setDate(today.getDate() - 30)
 
-      if (!updatedRule.parameters.startDate) {
-        updatedRule.parameters.startDate = thirtyDaysAgo.toISOString().split("T")[0]
-        console.log(`Set default startDate for date-between rule:`, updatedRule.parameters.startDate)
-      }
+    // Verify that the column and group columns exist in the dataset
+    const sampleRecord = dataset[0]
+    console.log("Sample record from dataset:", JSON.stringify(sampleRecord))
 
-      if (!updatedRule.parameters.endDate) {
-        updatedRule.parameters.endDate = today.toISOString().split("T")[0]
-        console.log(`Set default endDate for date-between rule:`, updatedRule.parameters.endDate)
+    // Clean the column name (remove quotes if present)
+    const cleanColumnName = columnName.replace(/^["']|["']$/g, "")
+    console.log("Clean column name:", cleanColumnName)
+
+    // Check if the column exists in the dataset
+    if (!(cleanColumnName in sampleRecord)) {
+      console.warn(`Column "${cleanColumnName}" not found in dataset`)
+      // Check if it exists with different casing
+      const lowerColumnName = cleanColumnName.toLowerCase()
+      const matchingColumn = Object.keys(sampleRecord).find((key) => key.toLowerCase() === lowerColumnName)
+      if (matchingColumn) {
+        console.log(`Found column with different casing: "${matchingColumn}"`)
+        // Use the correctly cased column name
+        columnName = matchingColumn
+      } else {
+        console.error(`Column "${cleanColumnName}" not found in dataset with any casing`)
+        return 0
       }
     }
-  } else if (updatedRule.ruleType === "date-format" && !updatedRule.parameters.format) {
-    updatedRule.parameters.format = "iso" // Default to ISO format
-    console.log(`Set default format for date-format rule: iso`)
-  }
 
-  return updatedRule
-}
+    // Clean and verify group columns
+    const cleanGroupColumns = groupColumns.map((col) => col.replace(/^["']|["']$/g, ""))
+    console.log("Clean group columns:", cleanGroupColumns)
 
-// Helper function to evaluate a single condition
-function evaluateCondition(row: DataRecord, condition: Condition): boolean {
-  if (!condition || !condition.column || condition.operator === undefined) {
-    console.warn("Invalid condition:", condition)
-    return false
-  }
+    // Check if group columns exist in the dataset
+    for (const groupCol of cleanGroupColumns) {
+      if (!(groupCol in sampleRecord)) {
+        console.warn(`Group column "${groupCol}" not found in dataset`)
+        // Check if it exists with different casing
+        const lowerGroupCol = groupCol.toLowerCase()
+        const matchingColumn = Object.keys(sampleRecord).find((key) => key.toLowerCase() === lowerGroupCol)
+        if (matchingColumn) {
+          console.log(`Found group column with different casing: "${matchingColumn}"`)
+          // Replace the group column with the correctly cased one
+          const index = cleanGroupColumns.indexOf(groupCol)
+          if (index !== -1) {
+            cleanGroupColumns[index] = matchingColumn
+          }
+        } else {
+          console.error(`Group column "${groupCol}" not found in dataset with any casing`)
+          return 0
+        }
+      }
+    }
 
-  const { column, operator, value } = condition
-  const rowValue = row[column]
+    // Get the current row's group values
+    const currentGroupValues: any[] = []
+    for (const col of cleanGroupColumns) {
+      currentGroupValues.push(row[col])
+    }
 
-  switch (operator) {
-    case "==":
-      return rowValue == value
-    case "!=":
-      return rowValue != value
-    case ">":
-      return Number(rowValue) > Number(value)
-    case ">=":
-      return Number(rowValue) >= Number(value)
-    case "<":
-      return Number(rowValue) < Number(value)
-    case "<=":
-      return Number(rowValue) <= Number(value)
-    case "contains":
-    case "contains":
-      return String(rowValue).includes(String(value))
-    case "not-contains":
-      return !String(rowValue).includes(String(value))
-    case "starts-with":
-      return String(rowValue).startsWith(String(value))
-    case "ends-with":
-      return String(rowValue).endsWith(String(value))
-    case "matches":
-      try {
-        const regex = new RegExp(String(value))
-        return regex.test(String(rowValue))
-      } catch (error) {
-        console.error("Invalid regex in condition:", value)
+    console.log("Current group values:", currentGroupValues)
+
+    // Find all records that match the current row's group values
+    const matchingRecords = dataset.filter((record) => {
+      return cleanGroupColumns.every((col, index) => {
+        const recordValue = record[col]
+        const currentValue = currentGroupValues[index]
+
+        // Handle different types of comparisons
+        if (recordValue === currentValue) return true
+        if (String(recordValue) === String(currentValue)) return true
         return false
-      }
-    case "is-blank":
-      return rowValue === null || rowValue === undefined || String(rowValue).trim() === ""
-    case "is-not-blank":
-      return rowValue !== null && rowValue !== undefined && String(rowValue).trim() !== ""
-    default:
-      console.warn(`Unknown operator in condition: ${operator}`)
-      return false
-  }
-}
-
-// Helper function to evaluate multiple conditions with logical operators
-function evaluateMultipleConditions(row: DataRecord, conditions: Condition[]): boolean {
-  if (!conditions || conditions.length === 0) {
-    return true // No conditions means it passes
-  }
-
-  let result = evaluateCondition(row, conditions[0])
-
-  for (let i = 1; i < conditions.length; i++) {
-    const condition = conditions[i]
-    const prevCondition = conditions[i - 1]
-    const logicalOperator = prevCondition.logicalOperator || "AND"
-
-    const conditionResult = evaluateCondition(row, condition)
-
-    if (logicalOperator === "OR") {
-      result = result || conditionResult
-    } else {
-      result = result && conditionResult
-    }
-  }
-
-  return result
-}
-
-export function validateDataset(
-  data: DataTables,
-  rules: DataQualityRule[],
-  valueLists?: ValueList[],
-): ValidationResult[] {
-  const results: ValidationResult[] = []
-
-  for (const tableName in data) {
-    if (data.hasOwnProperty(tableName)) {
-      const tableData = data[tableName]
-      const tableRules = rules.filter((rule) => rule.table === tableName && rule.enabled !== false)
-
-      for (let rule of tableRules) {
-        // ADDED: Log rule configuration before validation
-        console.log(
-          "RULE CONFIG:",
-          JSON.stringify(
-            {
-              id: rule.id,
-              name: rule.name,
-              ruleType: rule.ruleType,
-              parameters: rule.parameters,
-            },
-            null,
-            2,
-          ),
-        )
-
-        // CRITICAL FIX: Ensure formula rules have default operator and value
-        if (rule.ruleType === "formula" && rule.parameters) {
-          if (rule.parameters.operator === undefined || rule.parameters.operator === null) {
-            rule.parameters.operator = "=="
-            console.log(`Set default operator '==' for formula rule: ${rule.name}`)
-          }
-
-          if (rule.parameters.value === undefined || rule.parameters.value === null) {
-            rule.parameters.value = 0
-            console.log(`Set default value 0 for formula rule: ${rule.name}`)
-          }
-        }
-
-        // Apply default parameters for date rules
-        if (rule.ruleType?.startsWith("date-")) {
-          rule = ensureDateRuleParameters(rule)
-          console.log(`Processed date rule for validation:`, {
-            id: rule.id,
-            name: rule.name,
-            type: rule.ruleType,
-            parameters: rule.parameters,
-          })
-        }
-
-        // For unique rules, validate across all rows at once
-        if (rule.ruleType === "unique") {
-          const uniqueResults = validateUniqueRule(rule, tableData, tableName)
-          results.push(...uniqueResults)
-          continue // Skip the row-by-row validation for unique rules
-        }
-
-        for (let i = 0; i < tableData.length; i++) {
-          const row = tableData[i]
-          let isValid = true
-          let message = `Row ${i + 1} in table "${tableName}" passed validation for rule "${rule.name}".`
-
-          try {
-            console.log(`Processing rule: ${rule.name}, type: "${rule.ruleType}", column: ${rule.column}`)
-
-            // Debug log for date rules
-            if (rule.ruleType?.includes("date-")) {
-              console.log("Date rule parameters:", rule.parameters)
-            }
-
-            switch (rule.ruleType) {
-              case "multi-column":
-                // For multi-column rules, evaluate all conditions with logical operators
-                if (rule.conditions && rule.conditions.length > 0) {
-                  isValid = evaluateMultipleConditions(row, rule.conditions)
-                  if (!isValid) {
-                    message = `Row ${i + 1} in table "${tableName}" failed multi-column validation for rule "${rule.name}".`
-                  }
-                } else {
-                  isValid = false
-                  message = `Row ${i + 1} in table "${tableName}" failed multi-column validation for rule "${rule.name}" because no conditions were defined.`
-                }
-                break
-
-              case "required":
-                if (
-                  row[rule.column] === undefined ||
-                  row[rule.column] === null ||
-                  String(row[rule.column]).trim() === ""
-                ) {
-                  isValid = false
-                  message = `Row ${i + 1} in table "${tableName}" failed required validation for rule "${rule.name}". Column "${rule.column}" is missing or empty.`
-                }
-                break
-
-              case "equals":
-                if (String(row[rule.column]) !== String(rule.parameters.value)) {
-                  isValid = false
-                  message = `Row ${i + 1} in table "${tableName}" failed equals validation for rule "${rule.name}". Column "${rule.column}" value "${row[rule.column]}" does not equal "${rule.parameters.value}".`
-                }
-                break
-
-              case "not-equals":
-                if (String(row[rule.column]) === String(rule.parameters.value)) {
-                  isValid = false
-                  message = `Row ${i + 1} in table "${tableName}" failed not equals validation for rule "${rule.name}". Column "${rule.column}" value "${row[rule.column]}" equals "${rule.parameters.value}".`
-                }
-                break
-
-              case "greater-than":
-                if (Number(row[rule.column]) <= Number(rule.parameters.value)) {
-                  isValid = false
-                  message = `Row ${i + 1} in table "${tableName}" failed greater than validation for rule "${rule.name}". Column "${rule.column}" value "${row[rule.column]}" is not greater than "${rule.parameters.value}".`
-                }
-                break
-
-              case "greater-than-equals":
-                if (Number(row[rule.column]) < Number(rule.parameters.value)) {
-                  isValid = false
-                  message = `Row ${i + 1} in table "${tableName}" failed greater than or equals validation for rule "${rule.name}". Column "${rule.column}" value "${row[rule.column]}" is not greater than or equal to "${rule.parameters.value}".`
-                }
-                break
-
-              case "less-than":
-                if (Number(row[rule.column]) >= Number(rule.parameters.value)) {
-                  isValid = false
-                  message = `Row ${i + 1} in table "${tableName}" failed less than validation for rule "${rule.name}". Column "${rule.column}" value "${row[rule.column]}" is not less than "${rule.parameters.value}".`
-                }
-                break
-
-              case "less-than-equals":
-                if (Number(row[rule.column]) > Number(rule.parameters.value)) {
-                  isValid = false
-                  message = `Row ${i + 1} in table "${tableName}" failed less than or equals validation for rule "${rule.name}". Column "${rule.column}" value "${row[rule.column]}" is not less than or equal to "${rule.parameters.value}".`
-                }
-                break
-
-              case "range":
-                if (rule.parameters.minValue !== undefined && rule.parameters.maxValue !== undefined) {
-                  const value = Number(row[rule.column])
-                  if (isNaN(value) || value < rule.parameters.minValue || value > rule.parameters.maxValue) {
-                    isValid = false
-                    message = `Row ${i + 1} in table "${tableName}" failed range validation for rule "${rule.name}". Column "${rule.column}" value "${row[rule.column]}" is not within the range [${rule.parameters.minValue}, ${rule.parameters.maxValue}].`
-                  }
-                }
-                break
-
-              case "regex":
-                if (rule.parameters.pattern) {
-                  const regex = new RegExp(rule.parameters.pattern)
-                  if (!regex.test(String(row[rule.column]))) {
-                    isValid = false
-                    message = `Row ${i + 1} in table "${tableName}" failed regex validation for rule "${rule.name}". Column "${rule.column}" value "${row[rule.column]}" does not match the pattern "${rule.parameters.pattern}".`
-                  }
-                }
-                break
-
-              case "type":
-                if (rule.parameters.dataType) {
-                  let typeCheckPassed = false
-                  switch (rule.parameters.dataType) {
-                    case "string":
-                      typeCheckPassed = typeof row[rule.column] === "string"
-                      break
-                    case "number":
-                      typeCheckPassed = typeof row[rule.column] === "number"
-                      break
-                    case "boolean":
-                      typeCheckPassed = typeof row[rule.column] === "boolean"
-                      break
-                    case "date":
-                      typeCheckPassed = row[rule.column] instanceof Date
-                      break
-                    default:
-                      typeCheckPassed = false
-                  }
-
-                  if (!typeCheckPassed) {
-                    isValid = false
-                    message = `Row ${i + 1} in table "${tableName}" failed type validation for rule "${rule.name}". Column "${rule.column}" value "${row[rule.column]}" is not of type "${rule.parameters.dataType}".`
-                  }
-                }
-                break
-
-              case "enum":
-                if (rule.parameters.allowedValues) {
-                  const allowedValues = String(rule.parameters.allowedValues)
-                    .split(",")
-                    .map((v: string) => v.trim())
-                  const columnValue = String(row[rule.column]).trim()
-                  const caseInsensitive = rule.parameters.caseInsensitive === true
-
-                  let valueFound = false
-                  for (const allowedValue of allowedValues) {
-                    if (caseInsensitive) {
-                      if (columnValue.toLowerCase() === allowedValue.toLowerCase()) {
-                        valueFound = true
-                        break
-                      }
-                    } else if (columnValue === allowedValue) {
-                      valueFound = true
-                      break
-                    }
-                  }
-
-                  if (!valueFound) {
-                    isValid = false
-                    message = `Row ${i + 1} in table "${tableName}" failed enum validation for rule "${rule.name}". Column "${rule.column}" value "${row[rule.column]}" is not in the allowed list: ${allowedValues.join(", ")}.`
-                  }
-                }
-                break
-
-              case "list":
-                if (rule.parameters.valueList) {
-                  // Find the value list by name
-                  const valueList = valueLists?.find((list) => list.id === rule.parameters.valueList)
-
-                  if (valueList) {
-                    const validValues = valueList.values
-                    const columnValue = String(row[rule.column]).trim()
-
-                    if (!validValues.includes(columnValue)) {
-                      isValid = false
-                      message = `Row ${i + 1} in table "${tableName}" failed list validation for rule "${rule.name}". Column "${rule.column}" value "${row[rule.column]}" is not in the allowed list: ${validValues.join(", ")}.`
-                    }
-                  } else {
-                    isValid = false
-                    message = `Row ${i + 1} in table "${tableName}" failed list validation for rule "${rule.name}". Value list "${rule.parameters.valueList}" not found.`
-                  }
-                }
-                break
-
-              case "contains":
-                if (rule.parameters.substring) {
-                  if (!String(row[rule.column]).includes(rule.parameters.substring)) {
-                    isValid = false
-                    message = `Row ${i + 1} in table "${tableName}" failed contains validation for rule "${rule.name}". Column "${rule.column}" value "${row[rule.column]}" does not contain "${rule.parameters.substring}".`
-                  }
-                }
-                break
-
-              case "formula":
-                if (rule.parameters.formula) {
-                  // ADDED: Log formula rule parameters before validation
-                  console.log("FORMULA RULE PARAMETERS:", {
-                    formula: rule.parameters.formula,
-                    operator: rule.parameters.operator,
-                    value: rule.parameters.value,
-                    operatorType: typeof rule.parameters.operator,
-                    valueType: typeof rule.parameters.value,
-                  })
-
-                  const formulaResult = validateFormula(
-                    row,
-                    rule.parameters.formula,
-                    rule.parameters.operator,
-                    rule.parameters.value,
-                    rule.parameters.aggregations,
-                    tableData,
-                  )
-                  isValid = formulaResult.isValid
-                  message = formulaResult.message
-                }
-                break
-
-              case "javascript-formula":
-                if (rule.parameters.javascriptExpression) {
-                  try {
-                    // Create a function that has access to row properties as parameters
-                    const paramNames = Object.keys(row)
-                    const paramValues = paramNames.map((key) => row[key])
-
-                    // Create a function that evaluates the expression with the row data
-                    const evalFunc = new Function(
-                      ...paramNames,
-                      `"use strict"; 
-                       try { 
-                         return Boolean(${rule.parameters.javascriptExpression}); 
-                       } catch(err) { 
-                         console.error("JavaScript formula evaluation error:", err.message); 
-                         throw new Error("Invalid JavaScript formula: " + err.message); 
-                       }`,
-                    )
-
-                    // Execute the function with the row values
-                    const result = evalFunc(...paramValues)
-
-                    if (typeof result !== "boolean") {
-                      console.warn(
-                        `JavaScript formula for rule "${rule.name}" did not return a boolean value. Returning false by default.`,
-                      )
-                      isValid = false
-                      message = `Row ${i + 1} in table "${tableName}" failed JavaScript formula validation for rule "${rule.name}". The formula did not return a boolean value.`
-                    } else {
-                      isValid = result
-                      message = `Row ${i + 1} in table "${tableName}" ${
-                        isValid ? "passed" : "failed"
-                      } JavaScript formula validation for rule "${rule.name}".`
-                    }
-                  } catch (error: any) {
-                    isValid = false
-                    message = `Row ${i + 1} in table "${tableName}" failed JavaScript formula validation for rule "${rule.name}" due to an error: ${error.message}`
-                    console.error(message, error)
-                  }
-                }
-                break
-
-              case "date-before":
-              case "date_before":
-              case "dateBefore":
-              case "DateBefore":
-                try {
-                  // Get the date values to compare
-                  const beforeDate = new Date(row[rule.column])
-                  const compareBeforeDate = new Date(rule.parameters.compareDate)
-                  const isBeforeInclusive = rule.parameters.inclusive === true
-
-                  // Skip validation if the value is not a valid date
-                  if (isNaN(beforeDate.getTime())) {
-                    isValid = false
-                    message = `Row ${i + 1} in table "${tableName}" failed date-before validation for rule "${rule.name}". Column "${rule.column}" value "${row[rule.column]}" is not a valid date.`
-                  } else if (isNaN(compareBeforeDate.getTime())) {
-                    isValid = false
-                    message = `Row ${i + 1} in table "${tableName}" failed date-before validation for rule "${rule.name}". Compare date "${rule.parameters.compareDate}" is not a valid date.`
-                  } else {
-                    // Check if the date is before the compare date
-                    if (isBeforeInclusive) {
-                      // On or before (<=)
-                      isValid = beforeDate <= compareBeforeDate
-                    } else {
-                      // Strictly before (<)
-                      isValid = beforeDate < compareBeforeDate
-                    }
-
-                    if (!isValid) {
-                      message = `Row ${i + 1} in table "${tableName}" failed date-before validation for rule "${rule.name}". Date "${row[rule.column]}" is not ${isBeforeInclusive ? "on or " : ""}before "${rule.parameters.compareDate}".`
-                    }
-                  }
-                } catch (error) {
-                  isValid = false
-                  message = `Row ${i + 1} in table "${tableName}" failed date-before validation for rule "${rule.name}" due to an error: ${error.message}`
-                }
-                break
-
-              case "date-after":
-              case "date_after":
-              case "dateAfter":
-              case "DateAfter":
-                try {
-                  // Get the date values to compare
-                  const afterDate = new Date(row[rule.column])
-                  const compareAfterDate = new Date(rule.parameters.compareDate)
-                  const isAfterInclusive = rule.parameters.inclusive === true
-
-                  // Skip validation if the value is not a valid date
-                  if (isNaN(afterDate.getTime())) {
-                    isValid = false
-                    message = `Row ${i + 1} in table "${tableName}" failed date-after validation for rule "${rule.name}". Column "${rule.column}" value "${row[rule.column]}" is not a valid date.`
-                  } else if (isNaN(compareAfterDate.getTime())) {
-                    isValid = false
-                    message = `Row ${i + 1} in table "${tableName}" failed date-after validation for rule "${rule.name}". Compare date "${rule.parameters.compareDate}" is not a valid date.`
-                  } else {
-                    // Check if the date is after the compare date
-                    if (isAfterInclusive) {
-                      // On or after (>=)
-                      isValid = afterDate >= compareAfterDate
-                    } else {
-                      // Strictly after (>)
-                      isValid = afterDate > compareAfterDate
-                    }
-
-                    if (!isValid) {
-                      message = `Row ${i + 1} in table "${tableName}" failed date-after validation for rule "${rule.name}". Date "${row[rule.column]}" is not ${isAfterInclusive ? "on or " : ""}after "${rule.parameters.compareDate}".`
-                    }
-                  }
-                } catch (error) {
-                  isValid = false
-                  message = `Row ${i + 1} in table "${tableName}" failed date-after validation for rule "${rule.name}" due to an error: ${error.message}`
-                }
-                break
-
-              case "date-between":
-              case "date_between":
-              case "dateBetween":
-              case "DateBetween":
-                try {
-                  // Get the date values to compare
-                  const betweenDate = new Date(row[rule.column])
-                  const startDate = new Date(rule.parameters.startDate)
-                  const endDate = new Date(rule.parameters.endDate)
-                  const isBetweenInclusive = rule.parameters.inclusive === true
-
-                  // Skip validation if any value is not a valid date
-                  if (isNaN(betweenDate.getTime())) {
-                    isValid = false
-                    message = `Row ${i + 1} in table "${tableName}" failed date-between validation for rule "${rule.name}". Column "${rule.column}" value "${row[rule.column]}" is not a valid date.`
-                  } else if (isNaN(startDate.getTime())) {
-                    isValid = false
-                    message = `Row ${i + 1} in table "${tableName}" failed date-between validation for rule "${rule.name}". Start date "${rule.parameters.startDate}" is not a valid date.`
-                  } else if (isNaN(endDate.getTime())) {
-                    isValid = false
-                    message = `Row ${i + 1} in table "${tableName}" failed date-between validation for rule "${rule.name}". End date "${rule.parameters.endDate}" is not a valid date.`
-                  } else {
-                    // Check if the date is between start and end dates
-                    if (isBetweenInclusive) {
-                      // Inclusive range (>=, <=)
-                      isValid = betweenDate >= startDate && betweenDate <= endDate
-                    } else {
-                      // Exclusive range (>, <)
-                      isValid = betweenDate > startDate && betweenDate < endDate
-                    }
-
-                    if (!isValid) {
-                      message = `Row ${i + 1} in table "${tableName}" failed date-between validation for rule "${rule.name}". Date "${row[rule.column]}" is not ${isBetweenInclusive ? "on or " : ""}between "${rule.parameters.startDate}" and "${rule.parameters.endDate}".`
-                    }
-                  }
-                } catch (error) {
-                  isValid = false
-                  message = `Row ${i + 1} in table "${tableName}" failed date-between validation for rule "${rule.name}" due to an error: ${error.message}`
-                }
-                break
-
-              case "date-format":
-              case "date_format":
-              case "dateFormat":
-              case "DateFormat":
-                try {
-                  const formatValue = String(row[rule.column])
-                  const formatType = rule.parameters.format || "iso"
-                  const isRequired = rule.parameters.required === true
-
-                  // Skip validation if the value is empty and not required
-                  if (!isRequired && (!formatValue || formatValue.trim() === "")) {
-                    isValid = true
-                    break
-                  }
-
-                  // Validate based on format type
-                  let formatRegex
-                  switch (formatType) {
-                    case "iso":
-                      formatRegex = /^\d{4}-\d{2}-\d{2}$/ // YYYY-MM-DD
-                      break
-                    case "us":
-                      formatRegex = /^\d{2}\/\d{2}\/\d{4}$/ // MM/DD/YYYY
-                      break
-                    case "eu":
-                      formatRegex = /^\d{2}\/\d{2}\/\d{4}$/ // DD/MM/YYYY
-                      break
-                    case "custom":
-                      if (rule.parameters.customFormat) {
-                        // Convert the custom format to a regex
-                        // This is a simplified version - a real implementation would be more complex
-                        const customRegex = rule.parameters.customFormat
-                          .replace(/YYYY/g, "\\d{4}")
-                          .replace(/MM/g, "\\d{2}")
-                          .replace(/DD/g, "\\d{2}")
-                          .replace(/HH/g, "\\d{2}")
-                          .replace(/mm/g, "\\d{2}")
-                          .replace(/ss/g, "\\d{2}")
-                        formatRegex = new RegExp(`^${customRegex}$`)
-                      } else {
-                        formatRegex = /.*/ // Any format if custom format is not specified
-                      }
-                      break
-                    case "any":
-                      // For "any" format, just check if it's a valid date
-                      isValid = !isNaN(new Date(formatValue).getTime())
-                      if (!isValid) {
-                        message = `Row ${i + 1} in table "${tableName}" failed date format validation for rule "${rule.name}". Value "${formatValue}" is not a valid date.`
-                      }
-                      break
-                    default:
-                      formatRegex = /.*/ // Any format if not specified
-                  }
-
-                  // If we're using a regex for validation
-                  if (formatType !== "any" && formatRegex) {
-                    isValid = formatRegex.test(formatValue)
-                    if (!isValid) {
-                      message = `Row ${i + 1} in table "${tableName}" failed date format validation for rule "${rule.name}". Value "${formatValue}" does not match the ${formatType} format.`
-                    }
-
-                    // For specific formats, also check if it's a valid date
-                    if (isValid && ["iso", "us", "eu"].includes(formatType)) {
-                      let dateObj
-                      if (formatType === "iso") {
-                        dateObj = new Date(formatValue)
-                      } else if (formatType === "us") {
-                        const [month, day, year] = formatValue.split("/")
-                        dateObj = new Date(`${year}-${month}-${day}`)
-                      } else if (formatType === "eu") {
-                        const [day, month, year] = formatValue.split("/")
-                        dateObj = new Date(`${year}-${month}-${day}`)
-                      }
-
-                      isValid = !isNaN(dateObj.getTime())
-                      if (!isValid) {
-                        message = `Row ${i + 1} in table "${tableName}" failed date format validation for rule "${rule.name}". Value "${formatValue}" matches the format but is not a valid date.`
-                      }
-                    }
-                  }
-                } catch (error) {
-                  isValid = false
-                  message = `Row ${i + 1} in table "${tableName}" failed date format validation for rule "${rule.name}" due to an error: ${error.message}`
-                }
-                break
-
-              case "column-comparison":
-              case "column_comparison":
-              case "columnComparison":
-              case "ColumnComparison":
-                // Get the column values to compare
-                const leftColumn = rule.column
-                const rightColumn = rule.parameters.rightColumn || rule.parameters.secondaryColumn
-                const operator = rule.parameters.operator || rule.parameters.comparisonOperator || "=="
-                const allowNull = rule.parameters.allowNull === true
-
-                // Skip validation if either value is null and allowNull is true
-                if (
-                  allowNull &&
-                  (row[leftColumn] === null ||
-                    row[leftColumn] === undefined ||
-                    row[rightColumn] === null ||
-                    row[rightColumn] === undefined)
-                ) {
-                  isValid = true
-                  message = `Row ${i + 1} in table "${tableName}" skipped column comparison validation for rule "${rule.name}" because one of the values is null.`
-                } else {
-                  // Get the values to compare
-                  const leftValue = row[leftColumn]
-                  const rightValue = row[rightColumn]
-
-                  // Perform the comparison based on the operator
-                  switch (operator) {
-                    case "==":
-                      isValid = leftValue == rightValue
-                      break
-                    case "!=":
-                      isValid = leftValue != rightValue
-                      break
-                    case ">":
-                      isValid = Number(leftValue) > Number(rightValue)
-                      break
-                    case ">=":
-                      isValid = Number(leftValue) >= Number(rightValue)
-                      break
-                    case "<":
-                      isValid = Number(leftValue) < Number(rightValue)
-                      break
-                    case "<=":
-                      isValid = Number(leftValue) <= Number(rightValue)
-                      break
-                    default:
-                      isValid = false
-                      message = `Row ${i + 1} in table "${tableName}" failed column comparison validation for rule "${rule.name}" due to unknown operator "${operator}".`
-                  }
-
-                  if (!isValid && !message.includes("unknown operator")) {
-                    message = `Row ${i + 1} in table "${tableName}" failed column comparison validation for rule "${rule.name}". ${leftColumn} (${leftValue}) ${operator} ${rightColumn} (${rightValue}) is false.`
-                  }
-                }
-                break
-
-              case "cross-column":
-              case "cross_column":
-              case "crossColumn":
-              case "CrossColumn":
-                // Get the column values to compare
-                const leftColName = rule.column
-                const rightColName = rule.parameters.rightColumn || rule.parameters.secondaryColumn
-                const compOperator = rule.parameters.operator || rule.parameters.comparisonOperator || "=="
-                const skipNull = rule.parameters.allowNull === true
-
-                console.log(`Cross-column validation: ${leftColName} ${compOperator} ${rightColName}`)
-
-                // Skip validation if either value is null and allowNull is true
-                if (
-                  skipNull &&
-                  (row[leftColName] === null ||
-                    row[leftColName] === undefined ||
-                    row[rightColName] === null ||
-                    row[rightColName] === undefined)
-                ) {
-                  isValid = true
-                  message = `Row ${i + 1} in table "${tableName}" skipped cross-column validation for rule "${rule.name}" because one of the values is null.`
-                } else {
-                  // Get the values to compare
-                  const leftColValue = row[leftColName]
-                  const rightColValue = row[rightColName]
-
-                  console.log(`Comparing values: ${leftColValue} ${compOperator} ${rightColValue}`)
-
-                  // Perform the comparison based on the operator
-                  switch (compOperator) {
-                    case "==":
-                      isValid = leftColValue == rightColValue
-                      break
-                    case "!=":
-                      isValid = leftColValue != rightColValue
-                      break
-                    case ">":
-                      isValid = Number(leftColValue) > Number(rightColValue)
-                      break
-                    case ">=":
-                      isValid = Number(leftColValue) >= Number(rightColValue)
-                      break
-                    case "<":
-                      isValid = Number(leftColValue) < Number(rightColValue)
-                      break
-                    case "<=":
-                      isValid = Number(leftColValue) <= Number(rightColValue)
-                      break
-                    default:
-                      isValid = false
-                      message = `Row ${i + 1} in table "${tableName}" failed cross-column validation for rule "${rule.name}" due to unknown operator "${compOperator}".`
-                  }
-
-                  if (!isValid && !message.includes("unknown operator")) {
-                    message = `Row ${i + 1} in table "${tableName}" failed cross-column validation for rule "${rule.name}". ${leftColName} (${leftColValue}) ${compOperator} ${rightColName} (${rightColValue}) is false.`
-                  }
-                }
-                break
-
-              case "composite-reference":
-              case "composite_reference":
-              case "compositeReference":
-              case "CompositeReference":
-                // Get the source columns (from the current table)
-                const sourceColumns = rule.parameters.sourceColumns || rule.parameters.columns || []
-
-                // Get the target table and columns
-                const targetTable = rule.parameters.targetTable || rule.parameters.referenceTable
-                const targetColumns = rule.parameters.targetColumns || rule.parameters.referenceColumns || []
-
-                // Skip validation if any required parameter is missing
-                if (!sourceColumns.length || !targetTable || !targetColumns.length || !data[targetTable]) {
-                  isValid = false
-                  message = `Row ${i + 1} in table "${tableName}" failed composite reference validation for rule "${rule.name}" due to missing configuration parameters.`
-                  break
-                }
-
-                // Extract the source values from the current row
-                const sourceValues = sourceColumns.map((col) => row[col])
-
-                // Check if any source value is null or undefined and skip if allowNull is true
-                const allowNullRef = rule.parameters.allowNull === true
-                if (allowNullRef && sourceValues.some((val) => val === null || val === undefined)) {
-                  isValid = true
-                  message = `Row ${i + 1} in table "${tableName}" skipped composite reference validation for rule "${rule.name}" because one of the source values is null.`
-                  break
-                }
-
-                // Check if the composite key exists in the target table
-                const targetData = data[targetTable]
-
-                // Find a matching row in the target table
-                const matchFound = targetData.some((targetRow) => {
-                  // Check if all columns match
-                  return sourceColumns.every((sourceCol, index) => {
-                    const targetCol = targetColumns[index]
-                    return String(row[sourceCol]) === String(targetRow[targetCol])
-                  })
-                })
-
-                if (!matchFound) {
-                  isValid = false
-                  const sourceValuesStr = sourceColumns.map((col, idx) => `${col}=${row[col]}`).join(", ")
-                  message = `Row ${i + 1} in table "${tableName}" failed composite reference validation for rule "${rule.name}". Composite key (${sourceValuesStr}) does not exist in table "${targetTable}".`
-                }
-                break
-
-              default:
-                isValid = false
-                message = `Row ${i + 1} in table "${tableName}" has an unknown rule type "${rule.ruleType}".`
-            }
-          } catch (error: any) {
-            isValid = false
-            message = `Row ${i + 1} in table "${tableName}" validation failed for rule "${rule.name}" due to an error: ${error.message}`
-            console.error(message, error)
-          }
-
-          results.push({
-            rowIndex: i,
-            table: tableName,
-            column: rule.column,
-            ruleName: rule.name,
-            message: message,
-            severity: isValid ? "success" : rule.severity, // Use rule.severity instead of hardcoding "failure"
-            ruleId: rule.id,
-          })
-        }
-      }
-    }
-  }
-
-  return results
-}
-
-// Function to validate unique rules
-function validateUniqueRule(rule: DataQualityRule, tableData: DataRecord[], tableName: string): ValidationResult[] {
-  const results: ValidationResult[] = []
-
-  // Get the columns to check for uniqueness
-  const uniqueColumns = rule.parameters.uniqueColumns || [rule.column]
-
-  if (!uniqueColumns.length) {
-    results.push({
-      rowIndex: -1,
-      table: tableName,
-      column: rule.column,
-      ruleName: rule.name,
-      message: `Failed to validate unique rule "${rule.name}" because no columns were specified.`,
-      severity: "failure",
-      ruleId: rule.id,
-    })
-    return results
-  }
-
-  // Create a map to track values and their occurrences
-  const valueMap = new Map<string, number[]>()
-
-  // Check each row for uniqueness
-  tableData.forEach((row, rowIndex) => {
-    // Create a composite key from the values of all columns
-    const values = uniqueColumns.map((col) => {
-      const val = row[col]
-      return val === null || val === undefined ? "" : String(val)
+      })
     })
 
-    const compositeKey = values.join("|")
-
-    // If this composite key already exists, it's a duplicate
-    if (valueMap.has(compositeKey)) {
-      valueMap.get(compositeKey)!.push(rowIndex)
-    } else {
-      valueMap.set(compositeKey, [rowIndex])
+    console.log("Matching records count:", matchingRecords.length)
+    if (matchingRecords.length > 0) {
+      console.log("First matching record:", JSON.stringify(matchingRecords[0]))
     }
-  })
 
-  // Find duplicates and create validation results
-  for (const [compositeKey, rowIndexes] of valueMap.entries()) {
-    if (rowIndexes.length > 1) {
-      // There are duplicates
-      const values = compositeKey.split("|")
-      const columnsWithValues = uniqueColumns.map((col, i) => `${col}="${values[i]}"`).join(", ")
+    // Sum the values of the specified column from matching records
+    let sum = 0
+    for (const record of matchingRecords) {
+      const value = record[cleanColumnName]
+      console.log(`Record ${cleanColumnName} value:`, value, "type:", typeof value)
 
-      // Create a validation result for each duplicate row
-      rowIndexes.forEach((rowIndex) => {
-        results.push({
-          rowIndex,
-          table: tableName,
-          column: uniqueColumns.join(", "),
-          ruleName: rule.name,
-          message: `Row ${rowIndex + 1} in table "${tableName}" failed unique validation for rule "${rule.name}". The combination (${columnsWithValues}) is not unique.`,
-          severity: rule.severity,
-          ruleId: rule.id,
-        })
-      })
-    } else {
-      // This row passes the uniqueness check
-      results.push({
-        rowIndex: rowIndexes[0],
-        table: tableName,
-        column: uniqueColumns.join(", "),
-        ruleName: rule.name,
-        message: `Row ${rowIndexes[0] + 1} in table "${tableName}" passed unique validation for rule "${rule.name}".`,
-        severity: "success",
-        ruleId: rule.id,
-      })
+      if (value === undefined || value === null) {
+        console.log("Skipping undefined/null value")
+        continue
+      }
+
+      const numValue = Number(value)
+      if (isNaN(numValue)) {
+        console.log(`Value "${value}" is not a number, skipping`)
+        continue
+      }
+
+      console.log(`Adding ${numValue} to sum`)
+      sum += numValue
     }
+
+    console.log("Final calculated sum:", sum)
+    return sum
+  } catch (error) {
+    console.error("Error in calculateDistinctGroupSum:", error)
+    return 0
   }
-
-  return results
 }
