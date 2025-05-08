@@ -34,7 +34,8 @@ export function DistinctGroupTest() {
 
     try {
       // Parse the formula to extract the aggregation config
-      const match = formula.match(/DISTINCT_GROUP_(\w+)$$"([^"]+)",\s*\[(.*?)\],\s*"([^"]+)"$$/)
+      const regex = /DISTINCT_GROUP_(\w+)$$"([^"]+)",\s*\[(.*?)\],\s*"([^"]+)"$$/
+      const match = formula.match(regex)
 
       if (!match) {
         throw new Error(

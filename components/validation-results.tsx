@@ -31,6 +31,8 @@ import { RuleForm } from "@/components/rule-form"
 import { Input } from "@/components/ui/input"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { toast } from "@/components/ui/use-toast"
+import { ValidationResultsGrouping } from "@/components/validation-results-grouping"
+import { ValidationDashboard } from "@/components/validation-dashboard"
 
 interface ValidationResultsProps {
   results: ValidationResult[]
@@ -45,6 +47,149 @@ interface ValidationResultsProps {
   onRowClick?: (result: ValidationResult) => void
   onViewData?: (result: ValidationResult) => void
   onEditRule?: (rule: DataQualityRule) => void
+}
+
+// Helper function to format a value for display
+const formatValue = (value: any, isDateRule = false): string => {
+  if (value === null || value === undefined) {
+    return "N/A"
+  }
+
+  // Handle date formatting for date rules
+  if (isDateRule) {
+    // Check if it's a date string (ISO format)
+    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) {
+      return value.split("T")[0] // Return only the date part (YYYY-MM-DD)
+    }
+
+    // Check if it's a Date object or can be parsed as a date
+    try {
+      const date = value instanceof Date ? value : new Date(value)
+      if (!isNaN(date.getTime())) {
+        return date.toISOString().split("T")[0] // Return only the date part
+      }
+    } catch (e) {
+      // Not a valid date, continue with normal formatting
+    }
+  }
+
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value, null, 2)
+    } catch (e) {
+      return "Object"
+    }
+  }
+
+  return String(value)
+}
+
+// Helper function to format cell values
+const formatCellValue = (result: ValidationResult, datasets: DataTables, rules: DataQualityRule[]): string => {
+  try {
+    const tableData = datasets[result.table]
+    if (!tableData || tableData.length === 0) {
+      return "Table data not found"
+    }
+
+    const row = tableData[result.rowIndex]
+    if (!row) {
+      return "Row not found"
+    }
+
+    // Check if this is a date rule
+    const isDateRule =
+      result.ruleName.toLowerCase().includes("date") ||
+      (result.ruleId && rules.find((r) => r.id === result.ruleId)?.ruleType?.includes("date"))
+
+    const value = row[result.column]
+    return formatValue(value, isDateRule)
+  } catch (error) {
+    console.error("Error formatting cell value:", error)
+    return "Error"
+  }
+}
+
+// Replace the formatDateInMessage function with this improved version that specifically targets Date Before/After rules
+
+// Helper function to format date strings in messages for Date After/Before/Between rules
+const formatDateInMessage = (message: string): string => {
+  if (!message) return message
+
+  // First, check if this is a Date Before or Date After rule message
+  if (message.includes("should be before") || message.includes("should be after")) {
+    // Extract the column name and the date string
+    const matches = message.match(/(\w+) $$([^)]+)$$ should be (before|after)/)
+
+    if (matches && matches.length >= 3) {
+      const columnName = matches[1]
+      const dateString = matches[2]
+      const comparison = matches[3]
+
+      try {
+        // Try to parse the date string
+        const date = new Date(dateString)
+        if (!isNaN(date.getTime())) {
+          // Format as YYYY-MM-DD
+          const formattedDate = date.toISOString().split("T")[0]
+          // Replace the original date string with the formatted one
+          return message.replace(`${columnName} (${dateString})`, `${columnName} (${formattedDate})`)
+        }
+      } catch (e) {
+        console.error("Error parsing date in message:", e)
+      }
+    }
+  }
+
+  // If not a Date Before/After rule or if formatting failed, return the original message
+  return message
+}
+
+// Helper function to find related row matches
+const findRelatedRowMatch = (mainRow: DataRecord, relatedRow: DataRecord): boolean => {
+  if (!mainRow || !relatedRow) return false
+
+  // Compare common keys between the two rows
+  const mainRowKeys = Object.keys(mainRow)
+  const relatedRowKeys = Object.keys(relatedRow)
+
+  const commonKeys = mainRowKeys.filter((key) => relatedRowKeys.includes(key))
+
+  // If there are no common keys, return false
+  if (commonKeys.length === 0) return false
+
+  // Check if the values for the common keys match
+  for (const key of commonKeys) {
+    if (String(mainRow[key]) === String(relatedRow[key])) {
+      return true // Found a match
+    }
+  }
+
+  return false // No match found
+}
+
+// Helper function to check if a rule is a date rule
+const isDateRule = (result: ValidationResult, rules: DataQualityRule[]): boolean => {
+  // Check if the rule name contains "date"
+  if (result.ruleName.toLowerCase().includes("date")) return true
+
+  // Check if the rule type includes "date"
+  if (result.ruleId) {
+    const rule = rules.find((r) => r.id === result.ruleId)
+    if (rule && rule.ruleType && rule.ruleType.includes("date")) return true
+  }
+
+  // Check if the message contains date comparison keywords
+  if (
+    result.message &&
+    (result.message.includes("should be before") ||
+      result.message.includes("should be after") ||
+      result.message.includes("should be between"))
+  ) {
+    return true
+  }
+
+  return false
 }
 
 export function ValidationResults({
@@ -67,7 +212,7 @@ export function ValidationResults({
   const [filterRule, setFilterRule] = useState<string>("all")
   const [filterSeverity, setFilterSeverity] = useState<string>("all")
   const [showPassingValidations, setShowPassingValidations] = useState<boolean>(showPassingRules)
-  const [activeTab, setActiveTab] = useState<string>("issues")
+  const [activeTab, setActiveTab] = useState<string>("details") // Set default to "details"
   const [filterRuleType, setFilterRuleType] = useState<string>("all")
 
   // Row data dialog state
@@ -316,7 +461,7 @@ export function ValidationResults({
       // Log the filtered results to see if any cross-column validations are being filtered out
       const filteredCrossColumn = filteredResults.filter((result) => {
         const rule = rules.find(
-          (r) => r.id === result.ruleId || r.name === result.ruleName || result.ruleName.includes(`[ID: ${r.id}]`),
+          (r) => r.id === result.ruleId || r.name === result.ruleName || r.ruleName.includes(`[ID: ${r.id}]`),
         )
 
         return rule && rule.ruleType === "column-comparison"
@@ -329,307 +474,6 @@ export function ValidationResults({
       })
     }
   }, [initialResults, filteredResults, rules])
-
-  // Compute derived data using useMemo to avoid recalculations on every render
-  /*
-  const {
-    allColumns,
-    availableColumns,
-    uniqueRules,
-    availableRules,
-    filteredResults: computedFilteredResults,
-    passingResults,
-    totalIssues,
-    totalFailures,
-    totalWarnings,
-    totalRecords,
-    failureRecords,
-    passRate,
-    ruleTypes,
-  } = useMemo(() => {
-    const results = initialResults
-    const datasets = initialDatasets
-
-    // Get all columns from all tables
-    const allColumns = new Set<string>()
-    Object.values(datasets).forEach((tableData) => {
-      if (tableData.length > 0) {
-        Object.keys(tableData[0]).forEach((col) => allColumns.add(col))
-      }
-    })
-    const columnsArray = Array.from(allColumns)
-
-    // Get all unique rules
-    const uniqueRules = [...new Set(results.map((r) => r.ruleName))]
-
-    // Filter results based on current filters
-    const filteredResults = results.filter((result) => {
-      // Get the rule definition to check its type
-      const ruleDefinition = rules.find(
-        (r) => r.id === result.ruleId || r.name === result.ruleName || result.ruleName.includes(`[ID: ${r.id}]`),
-      )
-
-      const ruleType = ruleDefinition?.ruleType || ""
-
-      // Check if rule type matches the filter
-      const matchesRuleTypeFilter = filterRuleType === "all" || ruleType === filterRuleType
-
-      return (
-        (filterTable === "all" || result.table === filterTable) &&
-        (filterColumn === "all" || result.column === filterColumn) &&
-        (filterRule === "all" || result.ruleName === filterRule) &&
-        (filterSeverity === "all" || result.severity === filterSeverity) &&
-        matchesRuleTypeFilter &&
-        result.severity !== "success"
-      ) // Only include non-success results in the issues tab
-    })
-
-    // Generate passing results if needed
-    const passingResults: any[] = []
-    if (showPassingRows) {
-      // First, include any existing success results
-      const existingSuccessResults = results.filter((r) => {
-        // Get the rule definition to check its type
-        const ruleDefinition = rules.find(
-          (r2) => r2.id === r.ruleId || r2.name === r.ruleName || r.ruleName.includes(`[ID: ${r2.id}]`),
-        )
-
-        const ruleType = ruleDefinition?.ruleType || ""
-
-        // Check if rule type matches the filter
-        const matchesRuleTypeFilter = filterRuleType === "all" || ruleType === filterRuleType
-
-        return (
-          r.severity === "success" &&
-          (filterTable === "all" || r.table === filterTable) &&
-          (filterColumn === "all" || r.column === filterColumn) &&
-          (filterRule === "all" || r.ruleName === filterRule) &&
-          matchesRuleTypeFilter
-        )
-      })
-
-      existingSuccessResults.forEach((result) => {
-        // Extract rule ID if needed
-        const ruleId = result.ruleId || result.ruleName.match(/\[ID: ([a-zA-Z0-9-]+)\]$/)?.[1] || ""
-        const ruleNameWithoutId = result.ruleName.replace(/ \[ID: [a-zA-Z0-9-]+\]$/, "")
-
-        passingResults.push({
-          ...result,
-          ruleNameWithoutId,
-          ruleId,
-        })
-      })
-
-      // For each table
-      Object.entries(datasets).forEach(([tableName, tableData]) => {
-        // Skip if we're filtering by table and this isn't the selected table
-        if (filterTable !== "all" && tableName !== filterTable) return
-
-        // For each row in the table
-        tableData.forEach((row, rowIndex) => {
-          // Get all rules that apply to this table
-          const tableRules = rules.filter((r) => {
-            // Check if rule type matches the filter
-            const matchesRuleTypeFilter = filterRuleType === "all" || r.ruleType === filterRuleType
-
-            return (
-              r.table === tableName &&
-              matchesRuleTypeFilter &&
-              (filterRule === "all" || r.name === filterRule || r.name.includes(filterRule))
-            )
-          })
-
-          // Skip if no rules match our filters
-          if (tableRules.length === 0) return
-
-          // For each applicable rule
-          tableRules.forEach((rule) => {
-            // Skip if we already have a result for this rule and row
-            const hasResult = results.some(
-              (r) =>
-                r.table === tableName &&
-                r.rowIndex === rowIndex &&
-                (r.ruleName === rule.name || r.ruleName.includes(`[ID: ${rule.id}]`) || r.ruleId === rule.id),
-            )
-
-            if (hasResult) return
-
-            // If we're filtering by column, skip if this rule doesn't apply to the column
-            if (filterColumn !== "all" && rule.column !== filterColumn) return
-
-            // Create a passing result
-            passingResults.push({
-              rowIndex,
-              table: tableName,
-              column: rule.column,
-              ruleName: rule.name,
-              ruleNameWithoutId: rule.name.replace(/ \[ID: [a-zA-Z0-9-]+\]$/, ""),
-              ruleId: rule.id,
-              message: "Passed validation",
-              severity: "success",
-            })
-          })
-        })
-      })
-    }
-
-    // Get rule types based on the active tab
-    const ruleTypes = new Set<string>()
-
-    // If we're on the issues tab, get rule types from failing rules
-    if (activeTab === "issues" || !showPassingRows) {
-      results
-        .filter((r) => r.severity !== "success")
-        .forEach((result) => {
-          const ruleDefinition = rules.find(
-            (r) => r.id === result.ruleId || r.name === result.ruleName || result.ruleName.includes(`[ID: ${r.id}]`),
-          )
-          if (ruleDefinition?.ruleType) {
-            ruleTypes.add(ruleDefinition.ruleType)
-          }
-        })
-    }
-    // If we're on the passing tab, get rule types from passing rules
-    else if (activeTab === "passing") {
-      // First from explicit success results
-      results
-        .filter((r) => r.severity === "success")
-        .forEach((result) => {
-          const ruleDefinition = rules.find(
-            (r) => r.id === result.ruleId || r.name === result.ruleName || result.ruleName.includes(`[ID: ${r.id}]`),
-          )
-          if (ruleDefinition?.ruleType) {
-            ruleTypes.add(ruleDefinition.ruleType)
-          }
-        })
-
-      // Then from inferred passing results
-      passingResults.forEach((result) => {
-        const ruleDefinition = rules.find(
-          (r) => r.id === result.ruleId || r.name === result.ruleName || result.ruleName.includes(`[ID: ${r.id}]`),
-        )
-        if (ruleDefinition?.ruleType) {
-          ruleTypes.add(ruleDefinition.ruleType)
-        }
-      })
-    }
-
-    // Get available rules based on the active tab and filters
-    let availableRules: string[] = []
-
-    if (activeTab === "issues" || !showPassingRows) {
-      // For issues tab, get rules that have failures
-      availableRules = [
-        ...new Set(
-          results
-            .filter((r) => r.severity !== "success")
-            .filter((r) => filterTable === "all" || r.table === filterTable)
-            .filter((r) => {
-              if (filterRuleType === "all") return true
-              const ruleDefinition = rules.find(
-                (rule) => rule.id === r.ruleId || rule.name === r.ruleName || r.ruleName.includes(`[ID: ${rule.id}]`),
-              )
-              return ruleDefinition?.ruleType === filterRuleType
-            })
-            .map((r) => r.ruleName),
-        ),
-      ]
-    } else if (activeTab === "passing") {
-      // For passing tab, get rules that have passed
-      const passingRuleNames = new Set<string>()
-
-      // Add explicit success results
-      results
-        .filter((r) => r.severity === "success")
-        .filter((r) => filterTable === "all" || r.table === filterTable)
-        .filter((r) => {
-          if (filterRuleType === "all") return true
-          const ruleDefinition = rules.find(
-            (rule) => rule.id === r.ruleId || rule.name === r.ruleName || r.ruleName.includes(`[ID: ${rule.id}]`),
-          )
-          return ruleDefinition?.ruleType === filterRuleType
-        })
-        .forEach((r) => passingRuleNames.add(r.ruleName))
-
-      // Add inferred passing results
-      passingResults
-        .filter((r) => filterTable === "all" || r.table === filterTable)
-        .filter((r) => {
-          if (filterRuleType === "all") return true
-          const ruleDefinition = rules.find(
-            (rule) => rule.id === r.ruleId || rule.name === r.ruleName || r.ruleName.includes(`[ID: ${rule.id}]`),
-          )
-          return ruleDefinition?.ruleType === filterRuleType
-        })
-        .forEach((r) => passingRuleNames.add(r.ruleName))
-
-      availableRules = Array.from(passingRuleNames)
-    }
-
-    // Sort rule types and available rules alphabetically
-    const sortedRuleTypes = Array.from(ruleTypes).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
-
-    availableRules.sort((a, b) => {
-      // Remove the ID part for sorting
-      const nameA = a.replace(/ \[ID: [a-zA-Z0-9-]+\]$/, "").toLowerCase()
-      const nameB = b.replace(/ \[ID: [a-zA-Z0-9-]+\]$/, "").toLowerCase()
-      return nameA.localeCompare(nameB)
-    })
-
-    // Calculate statistics
-    const totalIssues = results.filter((r) => r.severity !== "success").length
-    const totalFailures = results.filter((r) => r.severity === "failure").length
-    const totalWarnings = results.filter((r) => r.severity === "warning").length
-
-    // Calculate total records across all tables or for the filtered table
-    const totalRecords =
-      filterTable !== "all"
-        ? datasets[filterTable]?.length || 0
-        : Object.values(datasets).reduce((sum, tableData) => sum + tableData.length, 0)
-
-    // Calculate failure records
-    const failureRecordsByTable = new Map<string, Set<number>>()
-    results
-      .filter((r) => r.severity === "failure")
-      .forEach((r) => {
-        if (!failureRecordsByTable.has(r.table)) {
-          failureRecordsByTable.set(r.table, new Set())
-        }
-        failureRecordsByTable.get(r.table)?.add(r.rowIndex)
-      })
-
-    const failureRecords = Array.from(failureRecordsByTable.values()).reduce((sum, set) => sum + set.size, 0)
-
-    const passRate = totalRecords > 0 ? ((totalRecords - failureRecords) / totalRecords) * 100 : 100
-
-    return {
-      allColumns: columnsArray,
-      availableColumns: columnsArray, // Fixed: properly define availableColumns
-      uniqueRules,
-      availableRules,
-      filteredResults,
-      passingResults,
-      totalIssues,
-      totalFailures,
-      totalWarnings,
-      totalRecords,
-      failureRecords,
-      passRate,
-      ruleTypes: sortedRuleTypes,
-    }
-  }, [
-    initialResults,
-    initialDatasets,
-    filterTable,
-    filterColumn,
-    filterRule,
-    filterSeverity,
-    filterRuleType,
-    showPassingRows,
-    rules,
-    activeTab,
-  ])
-  */
 
   // Calculate optimal column widths based on content
   useEffect(() => {
@@ -666,48 +510,6 @@ export function ValidationResults({
 
     setColumnWidths(widths)
   }, [initialResults])
-
-  // Apply sorting and filtering to data
-  /*
-  useEffect(() => {
-    let filteredResults = [...initialResults]
-
-    // Apply filters
-    Object.keys(filters).forEach((key) => {
-      const filterValue = filters[key].toLowerCase()
-      if (filterValue) {
-        filteredResults = filteredResults.filter((item) => {
-          const value = (item as any)[key]
-          return value !== null && value !== undefined && String(value).toLowerCase().includes(filterValue)
-        })
-      }
-    })
-
-    // Apply sorting
-    if (sortConfig !== null) {
-      filteredResults.sort((a, b) => {
-        const aValue = (a as any)[sortConfig.key]
-        const bValue = (b as any)[sortConfig.key]
-
-        // Handle null/undefined values
-        if (aValue === null || aValue === undefined) return sortConfig.direction === "asc" ? -1 : 1
-        if (bValue === null || bValue === undefined) return sortConfig.direction === "asc" ? 1 : -1
-
-        // Special handling for rowIndex which should be sorted numerically
-        if (sortConfig.key === "rowIndex") {
-          return sortConfig.direction === "asc" ? aValue - bValue : bValue - aValue
-        }
-
-        // Default string comparison
-        const aString = String(aValue).toLowerCase()
-        const bString = String(bValue).toLowerCase()
-        return sortConfig.direction === "asc" ? aString.localeCompare(bString) : bString.localeCompare(aString)
-      })
-    }
-
-    setDisplayResults(filteredResults)
-  }, [initialResults, sortConfig, filters])
-  */
 
   // Apply sorting to filtered results
   const sortedResults = useMemo(() => {
@@ -944,50 +746,9 @@ export function ValidationResults({
     }
   }
 
-  /*
-  const handleTogglePassingRows = (checked: boolean) => {
-    setShowPassingRows(checked)
-    if (onTogglePassingRules) {
-      onTogglePassingRules()
-    }
-  }
-
-  useEffect(() => {
-    setShowPassingRows(showPassingRules)
-  }, [showPassingRules])
-  */
-
   const [selectedTable, setSelectedTable] = useState<string | null>(null)
   const [selectedRule, setSelectedRule] = useState<string | null>(null)
   const [selectedSeverity, setSelectedSeverity] = useState<string | null>(null)
-
-  /*
-  const filteredResults = useMemo(() => {
-    let filtered = initialResults
-
-    // Apply table filter if selected
-    if (filterTable !== "all") {
-      filtered = filtered.filter((result) => result.table === filterTable)
-    }
-
-    // Apply rule filter if selected
-    if (filterRule !== "all") {
-      filtered = filtered.filter((result) => result.ruleName === filterRule)
-    }
-
-    // Apply severity filter if selected
-    if (filterSeverity !== "all") {
-      filtered = filtered.filter((result) => result.severity === filterSeverity)
-    }
-
-    // Filter out passing validations unless showPassingValidations is true
-    if (!showPassingValidations) {
-      filtered = filtered.filter((result) => result.severity !== "success")
-    }
-
-    return filtered
-  }, [initialResults, filterTable, filterRule, filterSeverity, showPassingValidations])
-  */
 
   // Calculate statistics
   const stats = useMemo(() => {
@@ -1056,7 +817,7 @@ export function ValidationResults({
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card>
+        <Card className={stats.totalIssues > 0 ? "border-red-200" : "border-green-200"}>
           <CardHeader className="pb-2">
             <CardTitle className="text-lg">Total Issues</CardTitle>
             <CardDescription>All validation issues</CardDescription>
@@ -1069,7 +830,7 @@ export function ValidationResults({
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className={stats.totalFailures > 0 ? "border-red-200" : ""}>
           <CardHeader className="pb-2">
             <CardTitle className="text-lg">Failures</CardTitle>
             <CardDescription>Critical data issues</CardDescription>
@@ -1082,7 +843,7 @@ export function ValidationResults({
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className={stats.totalWarnings > 0 ? "border-amber-200" : ""}>
           <CardHeader className="pb-2">
             <CardTitle className="text-lg">Warnings</CardTitle>
             <CardDescription>Potential data issues</CardDescription>
@@ -1095,7 +856,7 @@ export function ValidationResults({
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-green-200">
           <CardHeader className="pb-2">
             <CardTitle className="text-lg">Pass Rate</CardTitle>
             <CardDescription>Records without failures</CardDescription>
@@ -1113,321 +874,494 @@ export function ValidationResults({
         </Card>
       </div>
 
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <h2 className="text-xl font-semibold">Validation Results</h2>
-        <div className="flex flex-col md:flex-row gap-2">
-          <div className="flex items-center gap-2">
-            <Filter className="h-4 w-4" />
-            <span className="text-sm">Filter:</span>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={resetAllFilters}
-              className="text-muted-foreground hover:text-foreground"
-              title="Reset all filters"
-            >
-              <XCircle className="h-4 w-4" />
-            </Button>
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="details">Detailed View</TabsTrigger>
+          <TabsTrigger value="grouped">Grouped View</TabsTrigger>
+          <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="details" className="mt-4">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Filter className="h-4 w-4" />
+              <span className="text-sm">Filter:</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={resetAllFilters}
+                className="text-muted-foreground hover:text-foreground"
+                title="Reset all filters"
+              >
+                <XCircle className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Select value={filterTable} onValueChange={handleTableFilterChange}>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="All tables" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Tables</SelectItem>
+                  {tables.map((table) => (
+                    <SelectItem key={table} value={table}>
+                      {table.charAt(0).toUpperCase() + table.slice(1)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={filterColumn} onValueChange={setFilterColumn}>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="All columns" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Columns</SelectItem>
+                  {Object.keys(initialDatasets)
+                    .flatMap((tableName) => {
+                      const tableData = initialDatasets[tableName]
+                      return tableData.length > 0 ? Object.keys(tableData[0]) : []
+                    })
+                    .filter((value, index, self) => self.indexOf(value) === index)
+                    .sort()
+                    .map((column) => (
+                      <SelectItem key={column} value={column}>
+                        {column}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={filterRuleType} onValueChange={setFilterRuleType}>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="All rule types" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Rule Types</SelectItem>
+                  {Array.from(new Set(rules.map((r) => r.ruleType)))
+                    .sort()
+                    .map((type) => (
+                      <SelectItem key={type} value={type}>
+                        {type.charAt(0).toUpperCase() + type.slice(1).replace(/-/g, " ")}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={filterRule} onValueChange={setFilterRule}>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="All rules" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Rules</SelectItem>
+                  {Array.from(new Set(initialResults.map((r) => r.ruleName)))
+                    .sort()
+                    .map((rule) => (
+                      <SelectItem key={rule} value={rule}>
+                        {rule.replace(/ \[ID: [a-zA-Z0-9-]+\]$/, "")}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={filterSeverity} onValueChange={setFilterSeverity}>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="All severities" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Severities</SelectItem>
+                  <SelectItem value="warning">Warnings Only</SelectItem>
+                  <SelectItem value="failure">Failures Only</SelectItem>
+                  <SelectItem value="success">Passing Only</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Select value={filterTable} onValueChange={handleTableFilterChange}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="All tables" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Tables</SelectItem>
-                {tables.map((table) => (
-                  <SelectItem key={table} value={table}>
-                    {table.charAt(0).toUpperCase() + table.slice(1)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
 
-            <Select value={filterColumn} onValueChange={setFilterColumn}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="All columns" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Columns</SelectItem>
-                {Object.keys(initialDatasets)
-                  .flatMap((tableName) => {
-                    const tableData = initialDatasets[tableName]
-                    return tableData.length > 0 ? Object.keys(tableData[0]) : []
-                  })
-                  .filter((value, index, self) => self.indexOf(value) === index)
-                  .sort()
-                  .map((column) => (
-                    <SelectItem key={column} value={column}>
-                      {column}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={filterRuleType} onValueChange={setFilterRuleType}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="All rule types" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Rule Types</SelectItem>
-                {Array.from(new Set(rules.map((r) => r.ruleType)))
-                  .sort()
-                  .map((type) => (
-                    <SelectItem key={type} value={type}>
-                      {type.charAt(0).toUpperCase() + type.slice(1).replace(/-/g, " ")}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={filterRule} onValueChange={setFilterRule}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="All rules" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Rules</SelectItem>
-                {Array.from(new Set(initialResults.map((r) => r.ruleName)))
-                  .sort()
-                  .map((rule) => (
-                    <SelectItem key={rule} value={rule}>
-                      {rule.replace(/ \[ID: [a-zA-Z0-9-]+\]$/, "")}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={filterSeverity} onValueChange={setFilterSeverity}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="All severities" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Severities</SelectItem>
-                <SelectItem value="warning">Warnings Only</SelectItem>
-                <SelectItem value="failure">Failures Only</SelectItem>
-                <SelectItem value="success">Passing Only</SelectItem>
-              </SelectContent>
-            </Select>
+          <div className="flex items-center space-x-2 mt-4">
+            <Switch
+              id="show-passing"
+              checked={showPassingValidations}
+              onCheckedChange={handleTogglePassingValidations}
+            />
+            <Label htmlFor="show-passing" className="text-sm">
+              Show passing validations {showPassingValidations ? "(on)" : "(off)"} -{" "}
+              {initialResults.filter((r) => r.severity === "success").length} passing validations
+            </Label>
           </div>
-        </div>
-      </div>
 
-      <div className="flex items-center space-x-2">
-        <Switch id="show-passing" checked={showPassingValidations} onCheckedChange={handleTogglePassingValidations} />
-        <Label htmlFor="show-passing" className="text-sm">
-          Show passing validations {showPassingValidations ? "(on)" : "(off)"} -{" "}
-          {initialResults.filter((r) => r.severity === "success").length} passing validations
-        </Label>
-      </div>
+          <div className="rounded-md border mt-4">
+            <ScrollArea className="h-[600px] w-full">
+              <Table ref={tableRef}>
+                <TableHeader className="sticky top-0 bg-white z-10">
+                  <TableRow>
+                    {columns.map((column) => (
+                      <TableHead
+                        key={column.key}
+                        style={{
+                          width: `${columnWidths[column.key]}px`,
+                          minWidth: `${columnWidths[column.key]}px`,
+                        }}
+                        className="relative"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div
+                            className="flex items-center gap-1 cursor-pointer"
+                            onClick={() => handleSort(column.key)}
+                          >
+                            {column.label}
+                            {sortConfig?.key === column.key &&
+                              (sortConfig.direction === "asc" ? <ChevronUp size={16} /> : <ChevronDown size={16} />)}
+                          </div>
+                          <div className="flex items-center">
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      toggleFilter(column.key)
+                                    }}
+                                    className={`p-1 rounded-sm ${filters[column.key] ? "bg-blue-100 text-blue-700" : "hover:bg-gray-100"}`}
+                                  >
+                                    <Filter size={14} />
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>Filter {column.label}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </div>
+                        </div>
 
-      <div className="rounded-md border">
-        <ScrollArea className="h-[600px] w-full">
-          <Table ref={tableRef}>
-            <TableHeader className="sticky top-0 bg-white z-10">
-              <TableRow>
-                {columns.map((column) => (
-                  <TableHead
-                    key={column.key}
-                    style={{
-                      width: `${columnWidths[column.key]}px`,
-                      minWidth: `${columnWidths[column.key]}px`,
-                    }}
-                    className="relative"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1 cursor-pointer" onClick={() => handleSort(column.key)}>
-                        {column.label}
-                        {sortConfig?.key === column.key &&
-                          (sortConfig.direction === "asc" ? <ChevronUp size={16} /> : <ChevronDown size={16} />)}
-                      </div>
-                      <div className="flex items-center">
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
+                        {showFilters[column.key] && (
+                          <div className="absolute top-full left-0 right-0 bg-white p-2 shadow-md z-20 flex gap-1">
+                            <Input
+                              placeholder={`Filter ${column.label}...`}
+                              value={filters[column.key] || ""}
+                              onChange={(e) => handleFilterChange(column.key, e.target.value)}
+                              className="h-8 text-sm"
+                            />
+                            {filters[column.key] && (
                               <button
+                                onClick={() => clearFilter(column.key)}
+                                className="p-1 hover:bg-gray-100 rounded-sm"
+                              >
+                                <X size={16} />
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </TableHead>
+                    ))}
+                    <TableHead className="w-[100px]">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sortedResults.length > 0 ? (
+                    sortedResults.map((result, index) => {
+                      // Check if this is a date rule
+                      const dateRule = isDateRule(result, rules)
+
+                      return (
+                        <TableRow
+                          key={index}
+                          className={onRowClick ? "cursor-pointer hover:bg-gray-50" : ""}
+                          onClick={() => onRowClick && onRowClick(result)}
+                        >
+                          <TableCell>{result.table}</TableCell>
+                          <TableCell>{result.ruleName.replace(/ \[ID: [a-zA-Z0-9-]+\]$/, "")}</TableCell>
+                          <TableCell>{result.rowIndex}</TableCell>
+                          <TableCell>{result.column}</TableCell>
+                          <TableCell>{formatCellValue(result, initialDatasets, rules)}</TableCell>
+                          <TableCell>{dateRule ? formatDateInMessage(result.message) : result.message}</TableCell>
+                          <TableCell>
+                            {result.severity === "success" ? (
+                              <Badge className="bg-green-100 text-green-800 hover:bg-green-200 border-green-300">
+                                Passed
+                              </Badge>
+                            ) : result.severity === "warning" ? (
+                              <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-200 border-amber-300">
+                                Warning
+                              </Badge>
+                            ) : (
+                              <Badge variant="destructive">Failure</Badge>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  toggleFilter(column.key)
+                                  e.preventDefault()
+                                  handleViewRowData(result)
                                 }}
-                                className={`p-1 rounded-sm ${filters[column.key] ? "bg-blue-100 text-blue-700" : "hover:bg-gray-100"}`}
+                                className="h-8 w-8 p-0"
+                                title="View row data"
                               >
-                                <Filter size={14} />
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p>Filter {column.label}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      </div>
-                    </div>
+                                <Info className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  e.preventDefault()
+                                  const ruleId =
+                                    result.ruleId || result.ruleName.match(/\[ID: ([a-zA-Z0-9-]+)\]$/)?.[1] || ""
+                                  if (ruleId) {
+                                    // Find the rule
+                                    const rule = rules.find((r) => r.id === ruleId)
 
-                    {showFilters[column.key] && (
-                      <div className="absolute top-full left-0 right-0 bg-white p-2 shadow-md z-20 flex gap-1">
-                        <Input
-                          placeholder={`Filter ${column.label}...`}
-                          value={filters[column.key] || ""}
-                          onChange={(e) => handleFilterChange(column.key, e.target.value)}
-                          className="h-8 text-sm"
-                        />
-                        {filters[column.key] && (
-                          <button onClick={() => clearFilter(column.key)} className="p-1 hover:bg-gray-100 rounded-sm">
-                            <X size={16} />
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </TableHead>
-                ))}
-                <TableHead className="w-[100px]">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sortedResults.length > 0 ? (
-                sortedResults.map((result, index) => (
-                  <TableRow
-                    key={index}
-                    className={onRowClick ? "cursor-pointer hover:bg-gray-50" : ""}
-                    onClick={() => onRowClick && onRowClick(result)}
-                  >
-                    <TableCell>{result.table}</TableCell>
-                    <TableCell>{result.ruleName.replace(/ \[ID: [a-zA-Z0-9-]+\]$/, "")}</TableCell>
-                    <TableCell>{result.rowIndex}</TableCell>
-                    <TableCell>{result.column}</TableCell>
-                    <TableCell>{formatCellValue(result, initialDatasets)}</TableCell>
-                    <TableCell>{result.message}</TableCell>
-                    <TableCell>
-                      {result.severity === "success" ? (
-                        <Badge className="bg-green-100 text-green-800 hover:bg-green-200 border-green-300">
-                          Passed
-                        </Badge>
-                      ) : result.severity === "warning" ? (
-                        <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-200 border-amber-300">
-                          Warning
-                        </Badge>
-                      ) : (
-                        <Badge variant="destructive">Failure</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            e.preventDefault()
-                            handleViewRowData(result)
-                          }}
-                          className="h-8 w-8 p-0"
-                          title="View row data"
-                        >
-                          <Info className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            e.preventDefault()
-                            const ruleId = result.ruleId || result.ruleName.match(/\[ID: ([a-zA-Z0-9-]+)\]$/)?.[1] || ""
-                            if (ruleId) {
-                              // Find the rule
-                              const rule = rules.find((r) => r.id === ruleId)
+                                    if (rule) {
+                                      // Special handling for date rules
+                                      if (rule.ruleType?.startsWith("date-") && !rule.column) {
+                                        console.log("Date rule missing column:", rule)
 
-                              if (rule) {
-                                // Special handling for date rules
-                                if (rule.ruleType?.startsWith("date-") && !rule.column) {
-                                  console.log("Date rule missing column:", rule)
+                                        // Try to find a suitable column
+                                        if (rule.table && initialDatasets[rule.table]?.length > 0) {
+                                          const availableColumns = Object.keys(initialDatasets[rule.table][0])
 
-                                  // Try to find a suitable column
-                                  if (rule.table && initialDatasets[rule.table]?.length > 0) {
-                                    const availableColumns = Object.keys(initialDatasets[rule.table][0])
+                                          // Look for date-like columns
+                                          const dateColumns = availableColumns.filter(
+                                            (col) =>
+                                              col.toLowerCase().includes("date") ||
+                                              col.toLowerCase().includes("time") ||
+                                              col.toLowerCase().includes("day"),
+                                          )
 
-                                    // Look for date-like columns
-                                    const dateColumns = availableColumns.filter(
-                                      (col) =>
-                                        col.toLowerCase().includes("date") ||
-                                        col.toLowerCase().includes("time") ||
-                                        col.toLowerCase().includes("day"),
-                                    )
+                                          if (dateColumns.length > 0) {
+                                            // Use the first date-like column
+                                            rule.column = dateColumns[0]
+                                            console.log(`Auto-selected column for date rule: ${rule.column}`)
 
-                                    if (dateColumns.length > 0) {
-                                      // Use the first date-like column
-                                      rule.column = dateColumns[0]
-                                      console.log(`Auto-selected column for date rule: ${rule.column}`)
+                                            toast({
+                                              title: "Column Auto-Selected",
+                                              description: `Column "${rule.column}" was automatically selected for this date rule.`,
+                                              variant: "warning",
+                                            })
+                                          } else if (availableColumns.length > 0) {
+                                            // If no date-like columns, use the first available column
+                                            rule.column = availableColumns[0]
+                                            console.log(`Auto-selected first available column: ${rule.column}`)
 
+                                            toast({
+                                              title: "Column Auto-Selected",
+                                              description: `Column "${rule.column}" was automatically selected for this date rule.`,
+                                              variant: "warning",
+                                            })
+                                          }
+                                        }
+                                      }
+
+                                      // Make sure we're passing a complete rule object
+                                      console.log("Opening rule editor with rule:", rule)
+                                      setEditingRuleId(ruleId)
+                                      setEditRuleDialogOpen(true)
+
+                                      // Call onEditRule if provided
+                                      if (onEditRule) {
+                                        onEditRule(rule)
+                                      }
+                                    } else {
+                                      console.error("Rule not found:", ruleId)
                                       toast({
-                                        title: "Column Auto-Selected",
-                                        description: `Column "${rule.column}" was automatically selected for this date rule.`,
-                                        variant: "warning",
-                                      })
-                                    } else if (availableColumns.length > 0) {
-                                      // If no date-like columns, use the first available column
-                                      rule.column = availableColumns[0]
-                                      console.log(`Auto-selected first available column: ${rule.column}`)
-
-                                      toast({
-                                        title: "Column Auto-Selected",
-                                        description: `Column "${rule.column}" was automatically selected for this date rule.`,
-                                        variant: "warning",
+                                        title: "Error",
+                                        description: "Could not find the rule to edit",
+                                        variant: "destructive",
                                       })
                                     }
                                   }
-                                }
+                                }}
+                                className="h-8 w-8 p-0"
+                                title="Edit rule"
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={columns.length + 1} className="text-center py-4">
+                        {showPassingValidations ? (
+                          <div className="flex flex-col items-center py-6">
+                            <AlertCircle className="h-8 w-8 text-amber-500 mb-2" />
+                            <p className="text-gray-500">No validation results found with current filters</p>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-center py-6">
+                            <CheckCircle className="h-8 w-8 text-green-500 mb-2" />
+                            <p className="text-gray-500">No validation issues found</p>
+                            <p className="text-sm text-gray-400 mt-1">
+                              Toggle "Show passing validations" to see passing rules
+                            </p>
+                          </div>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+          </div>
+        </TabsContent>
 
-                                // Make sure we're passing a complete rule object
-                                console.log("Opening rule editor with rule:", rule)
-                                setEditingRuleId(ruleId)
-                                setEditRuleDialogOpen(true)
+        <TabsContent value="grouped" className="mt-4">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
+            <div className="flex items-center gap-2">
+              <Filter className="h-4 w-4" />
+              <span className="text-sm">Filter:</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={resetAllFilters}
+                className="text-muted-foreground hover:text-foreground"
+                title="Reset all filters"
+              >
+                <XCircle className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Select value={filterTable} onValueChange={handleTableFilterChange}>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="All tables" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Tables</SelectItem>
+                  {tables.map((table) => (
+                    <SelectItem key={table} value={table}>
+                      {table.charAt(0).toUpperCase() + table.slice(1)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
-                                // Call onEditRule if provided
-                                if (onEditRule) {
-                                  onEditRule(rule)
-                                }
-                              } else {
-                                console.error("Rule not found:", ruleId)
-                                toast({
-                                  title: "Error",
-                                  description: "Could not find the rule to edit",
-                                  variant: "destructive",
-                                })
-                              }
-                            }
-                          }}
-                          className="h-8 w-8 p-0"
-                          title="Edit rule"
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={columns.length + 1} className="text-center py-4">
-                    {showPassingValidations ? (
-                      <div className="flex flex-col items-center py-6">
-                        <AlertCircle className="h-8 w-8 text-amber-500 mb-2" />
-                        <p className="text-gray-500">No validation results found with current filters</p>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center py-6">
-                        <CheckCircle className="h-8 w-8 text-green-500 mb-2" />
-                        <p className="text-gray-500">No validation issues found</p>
-                        <p className="text-sm text-gray-400 mt-1">
-                          Toggle "Show passing validations" to see passing rules
-                        </p>
-                      </div>
-                    )}
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </ScrollArea>
-      </div>
+              <Select value={filterSeverity} onValueChange={setFilterSeverity}>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="All severities" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Severities</SelectItem>
+                  <SelectItem value="warning">Warnings Only</SelectItem>
+                  <SelectItem value="failure">Failures Only</SelectItem>
+                  <SelectItem value="success">Passing Only</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-2 mb-4">
+            <Switch
+              id="show-passing-grouped"
+              checked={showPassingValidations}
+              onCheckedChange={handleTogglePassingValidations}
+            />
+            <Label htmlFor="show-passing-grouped" className="text-sm">
+              Show passing validations {showPassingValidations ? "(on)" : "(off)"} -{" "}
+              {initialResults.filter((r) => r.severity === "success").length} passing validations
+            </Label>
+          </div>
+
+          <ValidationResultsGrouping
+            results={filteredResults}
+            onViewResult={(result) => {
+              handleViewRowData(result)
+            }}
+          />
+        </TabsContent>
+
+        <TabsContent value="dashboard" className="mt-4">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Filter className="h-4 w-4" />
+              <span className="text-sm">Filter:</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={resetAllFilters}
+                className="text-muted-foreground hover:text-foreground"
+                title="Reset all filters"
+              >
+                <XCircle className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Select value={filterTable} onValueChange={handleTableFilterChange}>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="All tables" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Tables</SelectItem>
+                  {tables.map((table) => (
+                    <SelectItem key={table} value={table}>
+                      {table.charAt(0).toUpperCase() + table.slice(1)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={filterSeverity} onValueChange={setFilterSeverity}>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="All severities" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Severities</SelectItem>
+                  <SelectItem value="warning">Warnings Only</SelectItem>
+                  <SelectItem value="failure">Failures Only</SelectItem>
+                  <SelectItem value="success">Passing Only</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <ValidationDashboard
+            results={initialResults}
+            rules={rules}
+            onExport={() => {
+              // Export functionality
+              const exportData = {
+                results: initialResults,
+                timestamp: new Date().toISOString(),
+                filters: {
+                  table: filterTable,
+                  column: filterColumn,
+                  rule: filterRule,
+                  severity: filterSeverity,
+                  ruleType: filterRuleType,
+                },
+              }
+
+              const dataStr = JSON.stringify(exportData, null, 2)
+              const dataUri = `data:application/json;charset=utf-8,${encodeURIComponent(dataStr)}`
+              const exportFileName = `validation-results-${new Date().toISOString().slice(0, 10)}.json`
+
+              const linkElement = document.createElement("a")
+              linkElement.setAttribute("href", dataUri)
+              linkElement.setAttribute("download", exportFileName)
+              linkElement.click()
+
+              toast({
+                title: "Success",
+                description: "Validation results exported successfully",
+              })
+            }}
+            onFilterChange={(newFilters) => {
+              // Update filters based on dashboard selections
+              if (newFilters.table) setFilterTable(newFilters.table)
+              if (newFilters.severity) setFilterSeverity(newFilters.severity)
+              if (newFilters.ruleType) setFilterRuleType(newFilters.ruleType)
+
+              // Switch to details tab to see filtered results
+              setActiveTab("details")
+            }}
+          />
+        </TabsContent>
+      </Tabs>
 
       {/* Row Data Dialog */}
       <Dialog open={rowDataDialogOpen} onOpenChange={setRowDataDialogOpen}>
@@ -1569,79 +1503,4 @@ export function ValidationResults({
       </Dialog>
     </div>
   )
-}
-
-function formatValue(value: any): string {
-  if (value === null || value === undefined) {
-    return "null"
-  }
-
-  if (typeof value === "boolean") {
-    return value ? "true" : "false"
-  }
-
-  if (value instanceof Date) {
-    return value.toLocaleDateString()
-  }
-
-  return String(value)
-}
-
-// Helper function to highlight potentially related rows
-function findRelatedRowMatch(mainRow: DataRecord | null, relatedRow: DataRecord): boolean {
-  if (!mainRow) return false
-
-  // Check for common ID patterns
-  if (mainRow.id && relatedRow.id && mainRow.id === relatedRow.id) return true
-  if (mainRow.userId && relatedRow.id && mainRow.userId === relatedRow.id) return true
-  if (mainRow.id && relatedRow.userId && mainRow.id === relatedRow.userId) return true
-
-  // Check for other common fields
-  for (const key in mainRow) {
-    if (key === "id") continue // Skip id as we already checked it
-
-    for (const relatedKey in relatedRow) {
-      if (relatedKey === "id") continue // Skip id as we already checked it
-
-      // If the keys are the same or one contains the other
-      if (key === relatedKey || key.includes(relatedKey) || relatedKey.includes(key)) {
-        // And the values match
-        if (mainRow[key] === relatedRow[relatedKey] && mainRow[key] !== null && mainRow[key] !== undefined) {
-          return true
-        }
-      }
-    }
-  }
-
-  return false
-}
-
-// Helper function to get and format the actual value being validated
-function formatCellValue(result: ValidationResult, datasets: DataTables): string {
-  try {
-    // Get the data from the dataset
-    const row = datasets[result.table]?.[result.rowIndex]
-    if (!row) return "N/A"
-
-    const value = row[result.column]
-
-    // Format the value based on its type
-    if (value === null || value === undefined) {
-      return "null"
-    } else if (typeof value === "object" && value instanceof Date) {
-      return value.toISOString()
-    } else if (typeof value === "object") {
-      return JSON.stringify(value)
-    } else if (typeof value === "boolean") {
-      return value ? "true" : "false"
-    } else if (typeof value === "string") {
-      // Truncate long strings
-      return value.length > 50 ? `${value.substring(0, 47)}...` : value
-    } else {
-      return String(value)
-    }
-  } catch (error) {
-    console.error("Error formatting cell value:", error)
-    return "Error"
-  }
 }
