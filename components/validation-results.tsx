@@ -114,7 +114,7 @@ const formatCellValue = (result: ValidationResult, datasets: DataTables, rules: 
 
 // Helper function to format date strings in messages for Date After/Before/Between rules
 const formatDateInMessage = (message: string): string => {
-  if (!message) return message
+  if (!message) return message || ""
 
   // First, check if this is a Date Before or Date After rule message
   if (message.includes("should be before") || message.includes("should be after")) {
@@ -168,10 +168,13 @@ const findRelatedRowMatch = (mainRow: DataRecord, relatedRow: DataRecord): boole
   return false // No match found
 }
 
+// Find the isDateRule function and update it to handle undefined values
+// Around line 150-165
+
 // Helper function to check if a rule is a date rule
 const isDateRule = (result: ValidationResult, rules: DataQualityRule[]): boolean => {
   // Check if the rule name contains "date"
-  if (result.ruleName.toLowerCase().includes("date")) return true
+  if (result.ruleName && result.ruleName.toLowerCase().includes("date")) return true
 
   // Check if the rule type includes "date"
   if (result.ruleId) {
@@ -247,11 +250,14 @@ export function ValidationResults({
   // Add a specific debug section for formula rules to help diagnose issues
   // Add this near the beginning of the component, after the state declarations
 
+  // Update the useEffect for formula rule debugging to handle undefined values
+  // Around line 250-290
+
   useEffect(() => {
     // Log formula-related validation results
     const formulaResults = initialResults.filter(
       (result) =>
-        result.ruleName.toLowerCase().includes("formula") ||
+        (result.ruleName && result.ruleName.toLowerCase().includes("formula")) ||
         rules.some((r) => r.id === result.ruleId && r.ruleType === "formula"),
     )
 
@@ -270,6 +276,9 @@ export function ValidationResults({
   }, [initialResults, rules])
 
   // Add this near the beginning of the component, after the state declarations
+  // Update the useEffect for cross-column validation results to handle undefined values
+  // Around line 350-380
+
   useEffect(() => {
     // Log cross-column validation results
     const crossColumnResults = initialResults.filter(
@@ -290,11 +299,16 @@ export function ValidationResults({
     }
   }, [initialResults, rules])
 
+  // Update the useEffect for logging validation results to handle undefined values
+  // Around line 290-330
+
   useEffect(() => {
     console.log("ValidationResults - Current validation results:", initialResults)
 
     // Log enum-related validation results
-    const enumResults = initialResults.filter((result) => result.ruleName.toLowerCase().includes("enum"))
+    const enumResults = initialResults.filter(
+      (result) => result.ruleName && result.ruleName.toLowerCase().includes("enum"),
+    )
     if (enumResults.length > 0) {
       console.log("Enum validation results:", enumResults)
     }
@@ -306,7 +320,7 @@ export function ValidationResults({
     // Log any date-related validation results
     const dateResults = initialResults.filter(
       (result) =>
-        result.ruleName.toLowerCase().includes("date") ||
+        (result.ruleName && result.ruleName.toLowerCase().includes("date")) ||
         (result.message && result.message.toLowerCase().includes("date")),
     )
     if (dateResults.length > 0) {
@@ -316,7 +330,7 @@ export function ValidationResults({
     // Formula rule validation result
     const jsFormulaResults = initialResults.filter(
       (result) =>
-        result.ruleName.toLowerCase().includes("javascript") ||
+        (result.ruleName && result.ruleName.toLowerCase().includes("javascript")) ||
         (result.message && result.message.toLowerCase().includes("javascript")),
     )
     if (jsFormulaResults.length > 0) {
@@ -327,7 +341,7 @@ export function ValidationResults({
     // Log Math Formula validation results
     const mathFormulaResults = initialResults.filter(
       (result) =>
-        result.ruleName.toLowerCase().includes("math formula") ||
+        (result.ruleName && result.ruleName.toLowerCase().includes("math formula")) ||
         (result.message && result.message.toLowerCase().includes("math formula")),
     )
     if (mathFormulaResults.length > 0) {
@@ -347,7 +361,7 @@ export function ValidationResults({
     // Log list validation results
     const listResults = initialResults.filter(
       (result) =>
-        result.ruleName.toLowerCase().includes("list") ||
+        (result.ruleName && result.ruleName.toLowerCase().includes("list")) ||
         rules.some((r) => r.id === result.ruleId && r.ruleType === "list"),
     )
     if (listResults.length > 0) {
@@ -366,6 +380,9 @@ export function ValidationResults({
     console.log("showPassingValidations state:", showPassingValidations)
   }, [showPassingValidations])
 
+  // Update the filteredResults useMemo to handle undefined values
+  // Around line 330-380
+
   // Filter results based on current filters and showPassingValidations
   const filteredResults = useMemo(() => {
     console.log(
@@ -376,7 +393,7 @@ export function ValidationResults({
       "Success results:",
       initialResults.filter((r) => r.severity === "success").length,
       "JavaScript formula results:",
-      initialResults.filter((r) => r.ruleName.toLowerCase().includes("javascript")).length,
+      initialResults.filter((r) => r.ruleName && r.ruleName.toLowerCase().includes("javascript")).length,
     )
 
     // First, apply the severity filter based on the showPassingValidations toggle
@@ -416,7 +433,10 @@ export function ValidationResults({
       // Apply rule type filter
       if (filterRuleType !== "all") {
         const ruleDefinition = rules.find(
-          (r) => r.id === result.ruleId || r.name === result.ruleName || result.ruleName.includes(`[ID: ${r.id}]`),
+          (r) =>
+            r.id === result.ruleId ||
+            (result.ruleName && r.name === result.ruleName) ||
+            (result.ruleName && result.ruleName.includes(`[ID: ${r.id}]`)),
         )
         if (!ruleDefinition || ruleDefinition.ruleType !== filterRuleType) {
           return false
@@ -444,7 +464,10 @@ export function ValidationResults({
     const crossColumnResults = initialResults.filter((result) => {
       // Find the rule definition
       const rule = rules.find(
-        (r) => r.id === result.ruleId || r.name === result.ruleName || result.ruleName.includes(`[ID: ${r.id}]`),
+        (r) =>
+          r.id === result.ruleId ||
+          (result.ruleName && r.name === result.ruleName) ||
+          (result.ruleName && result.ruleName.includes(`[ID: ${r.id}]`)),
       )
 
       return rule && rule.ruleType === "column-comparison"
@@ -461,7 +484,10 @@ export function ValidationResults({
       // Log the filtered results to see if any cross-column validations are being filtered out
       const filteredCrossColumn = filteredResults.filter((result) => {
         const rule = rules.find(
-          (r) => r.id === result.ruleId || r.name === result.ruleName || r.ruleName.includes(`[ID: ${r.id}]`),
+          (r) =>
+            r.id === result.ruleId ||
+            (result.ruleName && r.name === result.ruleName) ||
+            (result.ruleName && result.ruleName.includes(`[ID: ${r.id}]`)),
         )
 
         return rule && rule.ruleType === "column-comparison"
@@ -550,11 +576,18 @@ export function ValidationResults({
     setFilterRule("all")
   }, [activeTab])
 
+  // Update the useEffect for date rule debugging to handle undefined values
+  // Around line 300-320
+
   // Debug information for date rules
-  const dateRuleResults = initialResults.filter(
-    (r) => r.ruleName.toLowerCase().includes("date") || r.message.toLowerCase().includes("date"),
-  )
-  console.log("Date rule validation results:", dateRuleResults.length, dateRuleResults)
+  useEffect(() => {
+    const dateRuleResults = initialResults.filter(
+      (r) =>
+        (r.ruleName && r.ruleName.toLowerCase().includes("date")) ||
+        (r.message && r.message.toLowerCase().includes("date")),
+    )
+    console.log("Date rule validation results:", dateRuleResults.length, dateRuleResults)
+  }, [initialResults])
 
   // Handle filter changes
   const handleTableFilterChange = (value: string) => {
@@ -1075,7 +1108,11 @@ export function ValidationResults({
                           <TableCell>{result.rowIndex}</TableCell>
                           <TableCell>{result.column}</TableCell>
                           <TableCell>{formatCellValue(result, initialDatasets, rules)}</TableCell>
-                          <TableCell>{dateRule ? formatDateInMessage(result.message) : result.message}</TableCell>
+                          {/* Update the TableCell for message to handle undefined messages
+                          // Around line 700-750 in the render section */}
+                          <TableCell>
+                            {dateRule ? formatDateInMessage(result.message || "") : result.message || ""}
+                          </TableCell>
                           <TableCell>
                             {result.severity === "success" ? (
                               <Badge className="bg-green-100 text-green-800 hover:bg-green-200 border-green-300">

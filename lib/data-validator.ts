@@ -936,6 +936,11 @@ export function validateFormula(
             const groupColumns = aggregation.groupColumns || []
             result = calculateDistinctGroupSum(row, columnName, groupColumns, dataset)
             break
+          // ADD SUPPORT FOR DISTINCT-GROUP-COUNT
+          case "distinct-group-count":
+            const countGroupColumns = aggregation.groupColumns || []
+            result = calculateDistinctGroupCount(dataset, columnName, countGroupColumns)
+            break
           default:
             console.warn(`Unsupported aggregation function: ${aggregation.function}`)
             return {
@@ -1069,6 +1074,74 @@ export function validateFormula(
             ? `Formula "${formula}" ${comparisonOperator} ${numericValue} is true`
             : `Formula "${formula}" evaluated to ${numericResult}, which is not ${comparisonOperator} ${numericValue}`,
         }
+      }
+    }
+
+    // ADD SUPPORT FOR DISTINCT_GROUP_COUNT FUNCTION IN FORMULA
+    // Check if the formula is a DISTINCT_GROUP_COUNT function
+    const distinctGroupCountRegex = /DISTINCT_GROUP_COUNT\s*$$\s*"([^"]+)"\s*,\s*\[(.*?)\]\s*$$/i
+    const distinctGroupMatch = formula.match(distinctGroupCountRegex)
+
+    if (distinctGroupMatch) {
+      console.log("Detected DISTINCT_GROUP_COUNT formula")
+
+      const columnName = distinctGroupMatch[1]
+      const groupColumnsStr = distinctGroupMatch[2]
+
+      // Parse the group columns from the string
+      const groupColumns = groupColumnsStr
+        .split(",")
+        .map((col) => {
+          // Remove quotes and trim whitespace
+          return col.replace(/^["'\s]+|["'\s]+$/g, "")
+        })
+        .filter((col) => col.length > 0)
+
+      console.log("Parsed from formula - column:", columnName, "group columns:", groupColumns)
+
+      // Calculate the distinct group count
+      const result = calculateDistinctGroupCount(dataset || [], columnName, groupColumns)
+      console.log("Calculated distinct group count:", result)
+
+      // Compare with the expected value
+      const numericResult = Number(result)
+      const numericValue = Number(value || 0)
+
+      // Default to equality comparison if operator is not provided
+      const comparisonOperator = operator || "=="
+
+      let comparisonResult = false
+      switch (comparisonOperator) {
+        case "==":
+          comparisonResult = Math.abs(numericResult - numericValue) < 0.000001
+          break
+        case "!=":
+          comparisonResult = Math.abs(numericResult - numericValue) >= 0.000001
+          break
+        case ">":
+          comparisonResult = numericResult > numericValue
+          break
+        case ">=":
+          comparisonResult = numericResult >= numericValue
+          break
+        case "<":
+          comparisonResult = numericResult < numericValue
+          break
+        case "<=":
+          comparisonResult = numericResult <= numericValue
+          break
+        default:
+          return {
+            isValid: false,
+            message: `Unknown operator: ${comparisonOperator}`,
+          }
+      }
+
+      return {
+        isValid: comparisonResult,
+        message: comparisonResult
+          ? `Formula "${formula}" ${comparisonOperator} ${numericValue} is true`
+          : `Formula "${formula}" evaluated to ${numericResult}, which is not ${comparisonOperator} ${numericValue}`,
       }
     }
 
@@ -1695,6 +1768,106 @@ function calculateDistinctGroupSum(
     return sum
   } catch (error) {
     console.error("Error in calculateDistinctGroupSum:", error)
+    return 0
+  }
+}
+
+// ADD NEW FUNCTION: Helper function to calculate DISTINCT-GROUP-COUNT
+function calculateDistinctGroupCount(dataset: DataRecord[], columnName: string, groupColumns: string[]): number {
+  console.log("calculateDistinctGroupCount inputs:", {
+    columnName,
+    groupColumns,
+    datasetSize: dataset?.length || 0,
+  })
+
+  try {
+    if (!dataset || !Array.isArray(dataset) || dataset.length === 0) {
+      console.warn("Empty dataset for DISTINCT-GROUP-COUNT calculation")
+      return 0
+    }
+
+    // Verify that the column and group columns exist in the dataset
+    const sampleRecord = dataset[0]
+    console.log("Sample record from dataset:", JSON.stringify(sampleRecord))
+
+    // Clean the column name (remove quotes if present)
+    const cleanColumnName = columnName.replace(/^["']|["']$/g, "")
+    console.log("Clean column name:", cleanColumnName)
+
+    // Check if the column exists in the dataset
+    if (!(cleanColumnName in sampleRecord)) {
+      console.warn(`Column "${cleanColumnName}" not found in dataset`)
+      // Check if it exists with different casing
+      const lowerColumnName = cleanColumnName.toLowerCase()
+      const matchingColumn = Object.keys(sampleRecord).find((key) => key.toLowerCase() === lowerColumnName)
+      if (matchingColumn) {
+        console.log(`Found column with different casing: "${matchingColumn}"`)
+        // Use the correctly cased column name
+        columnName = matchingColumn
+      } else {
+        console.error(`Column "${cleanColumnName}" not found in dataset with any casing`)
+        return 0
+      }
+    }
+
+    // Clean and verify group columns
+    const cleanGroupColumns = groupColumns.map((col) => col.replace(/^["']|["']$/g, ""))
+    console.log("Clean group columns:", cleanGroupColumns)
+
+    // Check if group columns exist in the dataset
+    for (const groupCol of cleanGroupColumns) {
+      if (!(groupCol in sampleRecord)) {
+        console.warn(`Group column "${groupCol}" not found in dataset`)
+        // Check if it exists with different casing
+        const lowerGroupCol = groupCol.toLowerCase()
+        const matchingColumn = Object.keys(sampleRecord).find((key) => key.toLowerCase() === lowerGroupCol)
+        if (matchingColumn) {
+          console.log(`Found group column with different casing: "${matchingColumn}"`)
+          // Replace the group column with the correctly cased one
+          const index = cleanGroupColumns.indexOf(groupCol)
+          if (index !== -1) {
+            cleanGroupColumns[index] = matchingColumn
+          }
+        } else {
+          console.error(`Group column "${groupCol}" not found in dataset with any casing`)
+          return 0
+        }
+      }
+    }
+
+    // Create a Set to track unique combinations
+    const uniqueCombinations = new Set<string>()
+
+    // Process each record in the dataset
+    for (const record of dataset) {
+      // Get the value of the main column
+      const mainValue = record[cleanColumnName]
+
+      // Skip records with undefined or null values in the main column
+      if (mainValue === undefined || mainValue === null) {
+        continue
+      }
+
+      // Create a composite key from the group columns
+      const groupValues = cleanGroupColumns.map((col) => {
+        const value = record[col]
+        return value === undefined || value === null ? "NULL" : String(value)
+      })
+
+      // Create a unique key by combining the main column value with the group values
+      const combinationKey = `${String(mainValue)}|${groupValues.join("|")}`
+
+      // Add to the set of unique combinations
+      uniqueCombinations.add(combinationKey)
+    }
+
+    // The count of distinct combinations is the size of the Set
+    const distinctCount = uniqueCombinations.size
+    console.log("Distinct combination count:", distinctCount)
+
+    return distinctCount
+  } catch (error) {
+    console.error("Error in calculateDistinctGroupCount:", error)
     return 0
   }
 }
